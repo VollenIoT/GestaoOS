@@ -1,0 +1,9 @@
+D:\SistemaOS\apps\desktop\src-tauri\target\release\deps\zmij-beea1cebe9ac212b.d: C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\lib.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\stdarch_x86.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\traits.rs
+
+D:\SistemaOS\apps\desktop\src-tauri\target\release\deps\libzmij-beea1cebe9ac212b.rlib: C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\lib.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\stdarch_x86.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\traits.rs
+
+D:\SistemaOS\apps\desktop\src-tauri\target\release\deps\libzmij-beea1cebe9ac212b.rmeta: C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\lib.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\stdarch_x86.rs C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\traits.rs
+
+C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\lib.rs:
+C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\stdarch_x86.rs:
+C:\Users\sr-co\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\zmij-1.0.23\src\traits.rs:

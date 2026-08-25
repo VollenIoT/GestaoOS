@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Regra CAPS LOCK: Transforma toda a digitação e exibição de texto nas tabelas/listas em maiúsculas (caixa alta) */
+.caps-active input[type="text"],
+.caps-active input[type="search"],
+.caps-active input:not([type="password"]):not([type="email"]):not([type="date"]),
+.caps-active textarea,
+.caps-active table,
+.caps-active td,
+.caps-active th,
+.caps-active .uppercase-caps,
+body.app-caps-active input[type="text"],
+body.app-caps-active input[type="search"],
+body.app-caps-active input:not([type="password"]):not([type="email"]):not([type="date"]),
+body.app-caps-active textarea,
+body.app-caps-active table,
+body.app-caps-active td,
+body.app-caps-active th,
+body.app-caps-active .uppercase-caps {
+  text-transform: uppercase;
+}
+
+/* Regras de Impressão: Cada OS ocupa exatamente 1 página/folha A4 separada */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 10mm 10mm 10mm;
+  }
+  
+  .print-page-break {
+    page-break-before: always !important;
+    break-before: page !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .print-single-sheet {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    height: 100%;
+    min-height: 270mm;
+    max-height: 277mm;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  body, table, td, th, div, span, p, h1, h2, h3, strong {
+    text-transform: uppercase !important;
+  }
+}
+

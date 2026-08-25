@@ -1,0 +1,116 @@
+<svg viewBox="0 0 512 512" width="512" height="512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradiente Vibrante de Fundo (Azul Tecnológico / Ciano Moderno) -->
+    <linearGradient id="appBgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#0284c7" />
+      <stop offset="50%" stopColor="#0369a1" />
+      <stop offset="100%" stopColor="#0f172a" />
+    </linearGradient>
+
+    <!-- Borda Brilhante com Contraste -->
+    <linearGradient id="appBorderGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#38bdf8" />
+      <stop offset="50%" stopColor="#818cf8" />
+      <stop offset="100%" stopColor="#34d399" />
+    </linearGradient>
+
+    <!-- Asa Esquerda - Branco Puro e Ciano com Alto Contraste -->
+    <linearGradient id="vLeftGrad" x1="100" y1="100" x2="256" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#ffffff" />
+      <stop offset="60%" stopColor="#e0f2fe" />
+      <stop offset="100%" stopColor="#38bdf8" />
+    </linearGradient>
+
+    <!-- Asa Direita - Verde Esmeralda Vibrante e Luminoso -->
+    <linearGradient id="vRightGrad" x1="412" y1="100" x2="256" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#6ee7b7" />
+      <stop offset="60%" stopColor="#10b981" />
+      <stop offset="100%" stopColor="#059669" />
+    </linearGradient>
+
+    <!-- Diamante Superior de Precisão -->
+    <linearGradient id="coreGlow" x1="200" y1="120" x2="312" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stopColor="#38bdf8" />
+      <stop offset="100%" stopColor="#34d399" />
+    </linearGradient>
+
+    <!-- Sombra Projetada Suave -->
+    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.4" />
+    </filter>
+  </defs>
+
+  <!-- Base Sólida com Cantos Arredondados (Visível tanto no tema claro quanto no escuro) -->
+  <rect
+    x="32"
+    y="32"
+    width="448"
+    height="448"
+    rx="110"
+    fill="url(#appBgGrad)"
+    stroke="url(#appBorderGrad)"
+    strokeWidth="16"
+    filter="url(#dropShadow)"
+  />
+
+  <!-- Círculo Central Guia Técnico -->
+  <circle
+    cx="256"
+    cy="256"
+    r="165"
+    stroke="#ffffff"
+    strokeWidth="4"
+    strokeDasharray="12 12"
+    opacity="0.25"
+  />
+
+  <!-- Asa Esquerda do "V" em Alto Contraste (Branco Luminoso) -->
+  <path
+    d="M 130 145 
+       L 195 145 
+       L 256 360 
+       L 214 360 
+       Z"
+    fill="url(#vLeftGrad)"
+    filter="url(#dropShadow)"
+  />
+
+  <!-- Asa Direita do "V" em Alto Contraste (Verde Esmeralda Brilhante) -->
+  <path
+    d="M 382 145 
+       L 317 145 
+       L 256 360 
+       L 298 360 
+       Z"
+    fill="url(#vRightGrad)"
+    filter="url(#dropShadow)"
+  />
+
+  <!-- Conector Superior / Ferramenta de Precisão -->
+  <path
+    d="M 256 120
+       L 292 156
+       L 256 192
+       L 220 156
+       Z"
+    fill="url(#coreGlow)"
+    stroke="#ffffff"
+    strokeWidth="4"
+  />
+
+  <!-- Vértice Inferior Iluminado -->
+  <circle
+    cx="256"
+    cy="380"
+    r="18"
+    fill="#38bdf8"
+    stroke="#ffffff"
+    strokeWidth="6"
+  />
+
+  <!-- Marcadores Técnicos de Hardware / Engrenagem nos Quatro Lados -->
+  <rect x="246" y="58" width="20" height="24" rx="6" fill="#38bdf8" />
+  <rect x="246" y="430" width="20" height="24" rx="6" fill="#10b981" />
+  <rect x="58" y="246" width="24" height="20" rx="6" fill="#38bdf8" />
+  <rect x="430" y="246" width="24" height="20" rx="6" fill="#10b981" />
+</svg>

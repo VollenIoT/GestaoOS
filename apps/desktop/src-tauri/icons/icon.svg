@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Fundo Sólido com Cantos Arredondados e Borda Tecnológica -->
+  <rect x="12" y="12" width="232" height="232" rx="60" fill="#0f172a" stroke="#0284c7" stroke-width="8" />
+  
+  <!-- Círculo Técnico Interno -->
+  <circle cx="128" cy="128" r="82" fill="none" stroke="#38bdf8" stroke-width="2" stroke-dasharray="6 6" opacity="0.4" />
+  
+  <!-- Asa Esquerda do V (Azul Ciano Vibrante) -->
+  <polygon points="68,72 100,72 128,180 110,180" fill="#38bdf8" />
+  
+  <!-- Asa Direita do V (Verde Esmeralda Vibrante) -->
+  <polygon points="188,72 156,72 128,180 146,180" fill="#10b981" />
+  
+  <!-- Conector / Diamante Superior Central -->
+  <polygon points="128,58 146,76 128,94 110,76" fill="#f8fafc" stroke="#38bdf8" stroke-width="2" />
+  
+  <!-- Ponto Inferior Iluminado -->
+  <circle cx="128" cy="192" r="9" fill="#38bdf8" stroke="#ffffff" stroke-width="3" />
+  
+  <!-- Marcadores de Hardware nos 4 Pontos Cardeais -->
+  <rect x="123" y="24" width="10" height="12" rx="3" fill="#38bdf8" />
+  <rect x="123" y="220" width="10" height="12" rx="3" fill="#10b981" />
+  <rect x="24" y="123" width="12" height="10" rx="3" fill="#38bdf8" />
+  <rect x="220" y="123" width="12" height="10" rx="3" fill="#10b981" />
+</svg>
