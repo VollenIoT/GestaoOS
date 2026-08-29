@@ -6,23 +6,9 @@ body {
   font-family: 'Inter', sans-serif;
 }
 
-/* Regra CAPS LOCK: Transforma toda a digitação e exibição de texto nas tabelas/listas em maiúsculas (caixa alta) */
-.caps-active input[type="text"],
-.caps-active input[type="search"],
-.caps-active input:not([type="password"]):not([type="email"]):not([type="date"]),
-.caps-active textarea,
-.caps-active table,
-.caps-active td,
-.caps-active th,
-.caps-active .uppercase-caps,
-body.app-caps-active input[type="text"],
-body.app-caps-active input[type="search"],
-body.app-caps-active input:not([type="password"]):not([type="email"]):not([type="date"]),
-body.app-caps-active textarea,
-body.app-caps-active table,
-body.app-caps-active td,
-body.app-caps-active th,
-body.app-caps-active .uppercase-caps {
+/* Regra CAPS LOCK: Força visualização e digitação em maiúsculas dentro dos campos de texto do sistema */
+body.app-caps-active input:not([type="password"]):not([type="email"]):not([type="color"]):not([type="date"]):not([type="time"]):not([type="number"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]),
+body.app-caps-active textarea {
   text-transform: uppercase;
 }
 
@@ -30,30 +16,74 @@ body.app-caps-active .uppercase-caps {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm 10mm 10mm 10mm;
+    margin: 8mm;
   }
-  
+
+  /* Garante que o container de impressão fique visível */
+  .os-print-root,
+  .os-print-root * {
+    visibility: visible !important;
+  }
+
+  .os-print-root {
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    background: white !important;
+    z-index: 99999 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
   .print-page-break {
     page-break-before: always !important;
     break-before: page !important;
-    page-break-after: always !important;
-    break-after: page !important;
   }
 
+  /* Cada comprovante se encaixa na folha A4 */
   .print-single-sheet {
+    width: 100% !important;
+    max-width: 194mm !important;
+    height: 281mm !important;
+    max-height: 281mm !important;
+    box-sizing: border-box !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    height: 100%;
-    min-height: 270mm;
-    max-height: 277mm;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    margin: 0 auto !important;
+  }
+
+  .entry-receipt-container {
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+  }
+
+  .entry-receipt-via {
+    height: 133mm !important;
+    max-height: 133mm !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .entry-receipt-cutline {
+    height: 6mm !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
   }
 
   body, table, td, th, div, span, p, h1, h2, h3, strong {
     text-transform: uppercase !important;
   }
 }
+
 

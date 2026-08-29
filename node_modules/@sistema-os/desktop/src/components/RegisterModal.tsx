@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Edit3, User, Phone, Package, Wrench, Cpu, FileCheck, MessageSquare, FileText, ChevronRight } from 'lucide-react';
+import { X, Save, Edit3, User, Phone, Package, Wrench, Cpu, FileCheck, MessageSquare, FileText, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { fetchAddressByCep } from '../services/api';
+import { ClientOrdersHistoryModal } from './ClientOrdersHistoryModal';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -43,6 +44,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   onOpenSelectedOSFromClient,
   onOpenClientOrdersHistoryModal,
 }) => {
+  const [isLocalHistoryOpen, setIsLocalHistoryOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     'CLIENT' | 'PART' | 'TECHNICIAN' | 'EQUIPMENT' | 'SERVICE'
   >(initialType);
@@ -87,11 +89,31 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     minStock: '2',
   });
 
-  const [clientData, setClientData] = useState({
+  const [clientData, setClientData] = useState<{
+    id: string;
+    name: string;
+    phone: string;
+    whatsapp: string;
+    contactName: string;
+    contactPhone: string;
+    additionalContacts: Array<{ id: string; name: string; phone: string }>;
+    cep: string;
+    address: string;
+    number: string;
+    complement: string;
+    neighborhood: string;
+    city: string;
+    state: string;
+    reference: string;
+    email: string;
+  }>({
     id: '',
     name: '',
     phone: '',
     whatsapp: '',
+    contactName: '',
+    contactPhone: '',
+    additionalContacts: [],
     cep: '',
     address: '',
     number: '',
@@ -106,6 +128,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const nameRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const whatsappRef = useRef<HTMLInputElement>(null);
+  const contactNameRef = useRef<HTMLInputElement>(null);
+  const contactPhoneRef = useRef<HTMLInputElement>(null);
   const cepRef = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
   const numberRef = useRef<HTMLInputElement>(null);
@@ -116,8 +140,35 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const referenceRef = useRef<HTMLInputElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const submitBtnRef = useRef<HTMLButtonElement>(null);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Manipulador para fechar cadastro com confirmação de alterações
+  const handleRequestClose = () => {
+    if (isDirty) {
+      if (confirm('Você alterou informações deste formulário que ainda não foram salvas. Deseja realmente sair sem salvar?')) {
+        setIsDirty(false);
+        onClose();
+      }
+    } else {
+      onClose();
+    }
+  };
+
+  // Suporte à tecla ESC
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleRequestClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isDirty]);
 
   useEffect(() => {
+    setIsDirty(false);
     setActiveTab(initialType);
     setSuccessMessage(null);
 
@@ -209,6 +260,11 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         name: clientDataToView.name || '',
         phone: clientDataToView.phone || '',
         whatsapp: clientDataToView.whatsapp || '',
+        contactName: clientDataToView.contactName || clientDataToView.contact1 || '',
+        contactPhone: clientDataToView.contactPhone || clientDataToView.contact1Phone || '',
+        additionalContacts: Array.isArray(clientDataToView.additionalContacts)
+          ? clientDataToView.additionalContacts
+          : [],
         cep: clientDataToView.cep || '',
         address: clientDataToView.address || '',
         number: clientDataToView.number || '',
@@ -226,6 +282,9 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         name: '',
         phone: '',
         whatsapp: '',
+        contactName: '',
+        contactPhone: '',
+        additionalContacts: [],
         cep: '',
         address: '',
         number: '',
@@ -244,13 +303,22 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
   const filteredClientOrders = (clientOrders || []).filter((os) => {
     if (!os) return false;
-    if (!clientDataToView && !clientData.id) return false;
-    const targetId = clientDataToView?.id || clientData.id;
-    const targetName = (clientDataToView?.name || clientData.name || '').toLowerCase();
-    return (
-      (targetId && os.clientId === targetId) ||
-      (targetName && os.client?.name && os.client.name.toLowerCase() === targetName)
-    );
+    const targetId = String(clientDataToView?.id || clientData.id || '').trim();
+    const targetName = (clientDataToView?.name || clientData.name || '').trim().toLowerCase();
+    const targetPhone = (clientDataToView?.phone || clientData.phone || '').replace(/\D/g, '');
+    const targetWhatsapp = (clientDataToView?.whatsapp || clientData.whatsapp || '').replace(/\D/g, '');
+
+    const osClientId = String(os.clientId || os.client?.id || '').trim();
+    const osClientName = (os.client?.name || os.clientName || '').trim().toLowerCase();
+    const osClientPhone = (os.client?.phone || '').replace(/\D/g, '');
+    const osClientWhatsapp = (os.client?.whatsapp || '').replace(/\D/g, '');
+
+    if (targetId && osClientId && targetId === osClientId) return true;
+    if (targetName && osClientName && targetName === osClientName) return true;
+    if (targetPhone && osClientPhone && targetPhone === osClientPhone) return true;
+    if (targetWhatsapp && osClientWhatsapp && targetWhatsapp === osClientWhatsapp) return true;
+
+    return false;
   });
 
   const formatCep = (value: string) => {
@@ -330,6 +398,11 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       name: clientData.name.trim(),
       phone: clientData.phone.trim(),
       whatsapp: clientData.whatsapp.trim(),
+      contactName: clientData.contactName.trim(),
+      contactPhone: clientData.contactPhone.trim(),
+      additionalContacts: (clientData.additionalContacts || []).filter(
+        (c) => c.name.trim() !== '' || c.phone.trim() !== ''
+      ),
       cep: clientData.cep.trim(),
       address: clientData.address.trim(),
       number: clientData.number.trim(),
@@ -351,7 +424,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   };
 
   const handleCancelRegistration = () => {
-    onClose();
+    handleRequestClose();
   };
 
   // Cada opção aberta no menu de cadastros abre exclusivamente o seu modal limpo sem abas
@@ -392,7 +465,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden font-sans">
         {/* Header do Modal Exclusivo */}
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
@@ -466,7 +539,14 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           )}
 
           {activeTab === 'CLIENT' && (
-            <form onSubmit={handleSubmitClient} className="flex-1 flex flex-col justify-between">
+            <form
+              onSubmit={(e) => {
+                setIsDirty(false);
+                handleSubmitClient(e);
+              }}
+              onChange={() => setIsDirty(true)}
+              className="flex-1 flex flex-col justify-between"
+            >
               <div className="flex items-center justify-between pb-2 border-b border-slate-200 gap-2 shrink-0">
                 <span className="font-bold text-slate-700 flex items-center gap-2">
                   {clientDataToView ? (
@@ -490,7 +570,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                   {(clientDataToView || clientData.name) && (
                     <button
                       type="button"
-                      onClick={onOpenClientOrdersHistoryModal}
+                      onClick={() => setIsLocalHistoryOpen(true)}
                       className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-xl font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer text-xs"
                     >
                       <FileText className="w-3.5 h-3.5" />
@@ -558,11 +638,133 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     onChange={(e) =>
                       setClientData({ ...clientData, whatsapp: formatPhone(e.target.value) })
                     }
+                    onKeyDown={(e) => handleKeyDownNext(e, contactNameRef)}
+                    placeholder="(00) 00000-0000"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                  />
+                </div>
+
+                {/* CONTATO PRINCIPAL */}
+                <div className="col-span-2">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="block font-semibold text-slate-700 text-[11px] text-sky-800">
+                      Contato (Nome da Pessoa / Responsável na Empresa)
+                    </label>
+                  </div>
+                  <input
+                    ref={contactNameRef}
+                    type="text"
+                    disabled={!isEditing}
+                    value={clientData.contactName}
+                    onChange={(e) =>
+                      setClientData({ ...clientData, contactName: e.target.value })
+                    }
+                    onKeyDown={(e) => handleKeyDownNext(e, contactPhoneRef)}
+                    placeholder="Ex: Fulano (Gerente), Ciclano (Financeiro)..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] text-sky-800">
+                    Telefone do Contato
+                  </label>
+                  <input
+                    ref={contactPhoneRef}
+                    type="text"
+                    disabled={!isEditing}
+                    value={clientData.contactPhone}
+                    onChange={(e) =>
+                      setClientData({ ...clientData, contactPhone: formatPhone(e.target.value) })
+                    }
                     onKeyDown={(e) => handleKeyDownNext(e, cepRef)}
                     placeholder="(00) 00000-0000"
                     className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
                   />
                 </div>
+
+                {/* BOTÃO PARA ADICIONAR MAIS CONTATOS */}
+                <div className="col-span-3 flex justify-end -mt-1">
+                  {isEditing && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newContact = { id: String(Date.now()), name: '', phone: '' };
+                        setClientData((prev) => ({
+                          ...prev,
+                          additionalContacts: [...(prev.additionalContacts || []), newContact],
+                        }));
+                      }}
+                      className="text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Adicionar Mais Contatos
+                    </button>
+                  )}
+                </div>
+
+                {/* CONTATOS ADICIONAIS DINÂMICOS */}
+                {(clientData.additionalContacts || []).map((cont, idx) => (
+                  <React.Fragment key={cont.id || idx}>
+                    <div className="col-span-2 bg-sky-50/40 p-2 rounded-lg border border-sky-200/80 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="block font-semibold text-sky-900 text-[10.5px]">
+                          Contato Adicional {idx + 2} (Nome / Cargo)
+                        </label>
+                        {isEditing && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setClientData((prev) => ({
+                                ...prev,
+                                additionalContacts: prev.additionalContacts.filter((_, i) => i !== idx),
+                              }));
+                            }}
+                            className="text-red-500 hover:text-red-700 text-[10px] font-bold flex items-center gap-0.5"
+                          >
+                            <Trash2 className="w-3 h-3" /> Remover
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        disabled={!isEditing}
+                        value={cont.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setClientData((prev) => ({
+                            ...prev,
+                            additionalContacts: prev.additionalContacts.map((c, i) =>
+                              i === idx ? { ...c, name: val } : c
+                            ),
+                          }));
+                        }}
+                        placeholder="Ex: Beltrano (Técnico), Suporte..."
+                        className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
+                    <div className="bg-sky-50/40 p-2 rounded-lg border border-sky-200/80 flex flex-col justify-end">
+                      <label className="block font-semibold text-sky-900 mb-1 text-[10.5px]">
+                        Telefone do Contato Adicional {idx + 2}
+                      </label>
+                      <input
+                        type="text"
+                        disabled={!isEditing}
+                        value={cont.phone}
+                        onChange={(e) => {
+                          const formatted = formatPhone(e.target.value);
+                          setClientData((prev) => ({
+                            ...prev,
+                            additionalContacts: prev.additionalContacts.map((c, i) =>
+                              i === idx ? { ...c, phone: formatted } : c
+                            ),
+                          }));
+                        }}
+                        placeholder="(00) 00000-0000"
+                        className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
+                  </React.Fragment>
+                ))}
 
                 <div>
                   <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">CEP (Busca Automática)</label>
@@ -713,11 +915,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setIsDirty(false);
                 if (onSavePart) {
                   onSavePart(partData);
                 }
                 onClose();
               }}
+              onChange={() => setIsDirty(true)}
               className="flex-1 flex flex-col justify-between bg-white p-4 rounded-xl border border-slate-200"
             >
               <div className="space-y-2.5">
@@ -984,7 +1188,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-200 mt-2 shrink-0">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleRequestClose}
                   className="h-8 px-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Cancelar
@@ -1005,11 +1209,28 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                const typeFormatted = (equipmentForm.type || '').trim();
+                if (!typeFormatted) return;
+
+                const normalizedNew = typeFormatted.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                const duplicate = availableEquipments.find((eq: any) => {
+                  if (equipmentForm.id && eq.id === equipmentForm.id) return false;
+                  const existingName = (eq.type || eq.name || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+                  return existingName === normalizedNew;
+                });
+
+                if (duplicate) {
+                  alert(`Já existe um equipamento cadastrado com o nome "${duplicate.type || duplicate.name}" (Código: ${duplicate.code || 'N/D'}). Não é permitido duplicados.`);
+                  return;
+                }
+
+                setIsDirty(false);
                 if (onSaveEquipment) {
                   onSaveEquipment(equipmentForm);
                 }
                 onClose();
               }}
+              onChange={() => setIsDirty(true)}
               className="space-y-4 bg-white p-5 rounded-xl border border-slate-200 font-sans text-xs"
             >
               <h3 className="font-bold text-sm text-slate-800 border-b border-slate-200 pb-2 flex items-center gap-2">
@@ -1035,7 +1256,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleRequestClose}
                   className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
                 >
                   Cancelar
@@ -1056,6 +1277,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setIsDirty(false);
                 if (activeTab === 'SERVICE' && onSaveService) {
                   onSaveService(serviceForm);
                 } else {
@@ -1063,46 +1285,39 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                 }
                 onClose();
               }}
+              onChange={() => setIsDirty(true)}
               className="space-y-4 bg-white p-5 rounded-xl border border-slate-200"
             >
               <h3 className="font-bold text-sm text-slate-800 border-b border-slate-200 pb-2">
                 {serviceDataToView ? 'Editar Serviço' : `Cadastrar ${activeTab === 'TECHNICIAN' ? 'Novo Técnico' : 'Novo Serviço'}`}
               </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">
+              <div className="space-y-4">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1.5 text-xs">
                     Descrição / Nome do Serviço <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
+                    autoFocus
                     value={serviceForm.name}
                     onChange={(e) => setServiceForm({ ...serviceForm, name: e.target.value })}
-                    placeholder="Digite a descrição do serviço..."
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    placeholder="Ex: Troca de Placa, Higienização, Troca de Rolamento..."
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 font-bold focus:outline-none focus:border-sky-600 text-xs shadow-xs"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Código / Referência</label>
-                  <input
-                    type="text"
-                    value={serviceForm.code}
-                    onChange={(e) => setServiceForm({ ...serviceForm, code: e.target.value })}
-                    placeholder="Ex: REF-1020"
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Valor / Preço Padronizado (R$)</label>
+                  <label className="block font-bold text-slate-800 mb-1.5 text-xs">
+                    Valor / Preço Padronizado (R$)
+                  </label>
                   <input
                     type="text"
                     value={serviceForm.price}
                     onChange={(e) => setServiceForm({ ...serviceForm, price: e.target.value })}
                     placeholder="R$ 0,00"
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 font-bold focus:outline-none focus:border-sky-600 text-xs shadow-xs"
                   />
                 </div>
               </div>
@@ -1110,7 +1325,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleRequestClose}
                   className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer"
                 >
                   Cancelar
@@ -1127,6 +1342,20 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Histórico de OS Exclusivo do Cliente */}
+      <ClientOrdersHistoryModal
+        isOpen={isLocalHistoryOpen}
+        clientName={clientDataToView?.name || clientData.name || 'Cliente'}
+        orders={filteredClientOrders}
+        onClose={() => setIsLocalHistoryOpen(false)}
+        onSelectOrder={(order) => {
+          setIsLocalHistoryOpen(false);
+          if (onOpenSelectedOSFromClient) {
+            onOpenSelectedOSFromClient(order);
+          }
+        }}
+      />
     </div>
   );
 };

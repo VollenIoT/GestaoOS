@@ -13,8 +13,19 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
   const [currentTaskText, setCurrentTaskText] = useState('');
   const [isBackupDone, setIsBackupDone] = useState(false);
   const [backupFileName, setBackupFileName] = useState('');
-
   const directoryInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isBackingUp) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isBackingUp, onClose]);
 
   if (!isOpen) return null;
 

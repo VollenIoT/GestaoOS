@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Search,
@@ -81,7 +81,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
       { id: 'code', label: 'Código OS', width: 110, visible: true, fixed: true },
       { id: 'type', label: 'Tipo OS', width: 120, visible: true },
       { id: 'client', label: 'Cliente', width: 180, visible: true, fixed: true },
-      { id: 'phone', label: 'Telefone', width: 130, visible: true, fixed: true },
+      { id: 'phone', label: 'Telefone', width: 130, visible: true },
       { id: 'whatsapp', label: 'WhatsApp', width: 130, visible: false },
       { id: 'equipment', label: 'Equipamento', width: 170, visible: true },
       { id: 'address', label: 'Endereço', width: 220, visible: true },
@@ -104,6 +104,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [phoneSearch, setPhoneSearch] = useState('');
   const [addressSearch, setAddressSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [showCanceled, setShowCanceled] = useState<boolean>(false);
 
   const [startDate, setStartDate] = useState(() => {
@@ -113,7 +114,103 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm('');
+      setPhoneSearch('');
+      setAddressSearch('');
+      setStatusFilter('ALL');
+      setShowCanceled(false);
+      setSelectedOrderId(null);
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
+      setEndDate(new Date().toISOString().split('T')[0]);
+    } else {
+      setSearchTerm('');
+      setPhoneSearch('');
+      setAddressSearch('');
+      setSelectedOrderId(null);
+    }
+  }, [isOpen]);
+
+  // Estado para arraste direto via Mouse
+  const [draggingColId, setDraggingColId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+  const isDraggingRef = useRef(false);
+
+  // Limpa estados ao fechar ou desmontar
+  useEffect(() => {
+    return () => {
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
+    if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
+      return;
+    }
+    if (e.button !== 0) return;
+
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setDraggingColId(colId);
+
+    const onGlobalMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const elem = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      if (th) {
+        const targetId = th.getAttribute('data-col-id');
+        if (targetId && targetId !== colId) {
+          setDragOverColId(targetId);
+        } else {
+          setDragOverColId(null);
+        }
+      } else {
+        setDragOverColId(null);
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onGlobalMouseMove);
+      window.removeEventListener('mouseup', onGlobalMouseUp);
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+
+    const onGlobalMouseUp = (upEvent: MouseEvent) => {
+      const wasDragging = isDraggingRef.current;
+      cleanup();
+
+      if (!wasDragging) return;
+
+      const elem = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      const targetId = th?.getAttribute('data-col-id');
+
+      if (targetId && targetId !== colId) {
+        setColumns((prev) => {
+          const srcIdx = prev.findIndex((c) => c.id === colId);
+          const destIdx = prev.findIndex((c) => c.id === targetId);
+          if (srcIdx === -1 || destIdx === -1) return prev;
+          const newCols = [...prev];
+          const [moved] = newCols.splice(srcIdx, 1);
+          newCols.splice(destIdx, 0, moved);
+          saveColumnsToStorage(newCols);
+          return newCols;
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
+  };
 
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation();
@@ -140,28 +237,18 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleDragStart = (e: React.DragEvent, colId: string) => {
-    setDraggedColumnId(colId);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent, targetColId: string) => {
-    e.preventDefault();
-    if (!draggedColumnId || draggedColumnId === targetColId) return;
+  // Move coluna para a esquerda ou direita
+  const handleMoveColumn = (columnId: string, direction: 'left' | 'right') => {
+    const idx = columns.findIndex((c) => c.id === columnId);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= columns.length) return;
 
     const newCols = [...columns];
-    const sourceIdx = newCols.findIndex((c) => c.id === draggedColumnId);
-    const targetIdx = newCols.findIndex((c) => c.id === targetColId);
-
-    const [removed] = newCols.splice(sourceIdx, 1);
-    newCols.splice(targetIdx, 0, removed);
-
+    const [moved] = newCols.splice(idx, 1);
+    newCols.splice(targetIdx, 0, moved);
     setColumns(newCols);
     saveColumnsToStorage(newCols);
-    setDraggedColumnId(null);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -180,16 +267,31 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     });
   };
 
+  const seenIds = new Set<string>();
+  const seenCodes = new Set<string>();
   const openOrders = orders.filter((os) => {
-    const isFinished = os.status === 'FINALIZADA' || os.status === 'CONCLUIDA';
+    if (!os || !os.id) return false;
+    if (seenIds.has(os.id)) return false;
+    if (os.code && seenCodes.has(os.code)) return false;
+    seenIds.add(os.id);
+    if (os.code) seenCodes.add(os.code);
+
+    const isFinished = os.status === 'FINALIZADA' || os.status === 'CONCLUIDA' || os.status === 'GARANTIA_FINALIZADA' || os.status === 'GARANTIA/FINALIZADA';
     if (isFinished) return false;
     if (!showCanceled && os.status === 'CANCELADA') return false;
+
+    // Filtro por Status
+    if (statusFilter !== 'ALL') {
+      if (os.status !== statusFilter) return false;
+    }
 
     const clientName = os.client?.name || '';
     const matchesName = matchesSearchTerm(clientName, searchTerm);
 
-    const clientPhone = os.client?.phone || '';
-    const matchesPhone = !phoneSearch || clientPhone.includes(phoneSearch);
+    const matchesPhone =
+      !phoneSearch ||
+      matchesSearchTerm(os.client?.phone, phoneSearch) ||
+      matchesSearchTerm(os.client?.whatsapp, phoneSearch);
 
     const clientAddress = `${os.client?.address || ''} ${os.client?.neighborhood || ''} ${os.client?.city || ''}`;
     const matchesAddress = matchesSearchTerm(clientAddress, addressSearch);
@@ -325,7 +427,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
           </button>
         </div>
 
-        <div className="p-4 bg-slate-100 border-b border-slate-300 grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+        <div className="p-4 bg-slate-100 border-b border-slate-300 grid grid-cols-1 md:grid-cols-6 gap-3 text-xs">
           <div>
             <label className="block font-bold text-slate-700 mb-1">Pesquisar por Nome</label>
             <div className="relative">
@@ -335,7 +437,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Ex: Maria, Carlos..."
-                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600"
+                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600 font-medium"
               />
             </div>
           </div>
@@ -349,7 +451,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                 value={phoneSearch}
                 onChange={(e) => setPhoneSearch(e.target.value)}
                 placeholder="Ex: 99999..."
-                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600"
+                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600 font-medium"
               />
             </div>
           </div>
@@ -363,9 +465,29 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                 value={addressSearch}
                 onChange={(e) => setAddressSearch(e.target.value)}
                 placeholder="Ex: Centro, Rua..."
-                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600"
+                className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-sky-600 font-medium"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Status da OS</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-sky-600 cursor-pointer shadow-xs"
+            >
+              <option value="ALL">Todos os Status</option>
+              <option value="ABERTA">Aberta</option>
+              <option value="ORCAMENTO_APROVADO">Orçamento Aprovado</option>
+              <option value="VISITA_TECNICA">Visita Técnica</option>
+              <option value="EM_ATENDIMENTO">Em Atendimento</option>
+              <option value="APROVADO">Aprovado</option>
+              <option value="AGUARDANDO_PECA">Aguardando Peça</option>
+              <option value="APARELHO_LIBERADO">Aparelho Liberado / Pronto</option>
+              <option value="RETORNO_GARANTIA">Retorno em Garantia</option>
+              <option value="CANCELADA">Cancelada</option>
+            </select>
           </div>
 
           <div>
@@ -391,7 +513,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
 
         {/* Tabela em Modo Unset com Largura Explícita em Pixels (Nenhum campo à esquerda é afetado mesmo sem scroll) */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
+          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50"
           onContextMenu={handleContextMenu}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('tr[data-row]') === null) {
@@ -402,7 +524,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
           <div style={{ width: `${totalPixels}px`, minWidth: '100%' }}>
             <table
               style={{ tableLayout: 'fixed', width: `${totalPixels}px` }}
-              className="text-left text-[11px] text-slate-800 border-collapse"
+              className="text-left text-[11px] text-slate-800 border-collapse select-none"
             >
               <colgroup>
                 {columns
@@ -415,34 +537,36 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                 <tr>
                   {columns
                     .filter((col) => col.visible)
-                    .map((col) => (
-                      <th
-                        key={col.id}
-                        draggable={!col.fixed}
-                        onDragStart={(e) => handleDragStart(e, col.id)}
-                        onDragOver={handleDragOver}
-                        onDrop={() => {
-                          if (!draggedColumnId || draggedColumnId === col.id) return;
-                          const srcIdx = columns.findIndex((c) => c.id === draggedColumnId);
-                          const destIdx = columns.findIndex((c) => c.id === col.id);
-                          if (columns[srcIdx].fixed || columns[destIdx].fixed) return;
-                          const newCols = [...columns];
-                          const [moved] = newCols.splice(srcIdx, 1);
-                          newCols.splice(destIdx, 0, moved);
-                          setColumns(newCols);
-                          setDraggedColumnId(null);
-                        }}
-                        style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className={`p-1.5 border-b border-r border-slate-300 relative group transition-colors ${col.fixed ? 'cursor-default' : 'cursor-grab active:cursor-grabbing hover:bg-slate-300/80'
+                    .map((col) => {
+                      const isDraggingThis = draggingColId === col.id;
+                      const isOverThis = dragOverColId === col.id;
+
+                      return (
+                        <th
+                          key={col.id}
+                          data-col-id={col.id}
+                          onMouseDown={(e) => handleMouseDownHeader(e, col.id)}
+                          style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px`, userSelect: 'none' }}
+                          className={`p-1.5 border-b border-r border-slate-300 relative group select-none transition-all cursor-grab active:cursor-grabbing hover:bg-slate-300/90 ${
+                            isDraggingThis
+                              ? 'opacity-40 bg-sky-300 border-sky-500 scale-[0.98]'
+                              : isOverThis
+                              ? 'bg-sky-200 border-l-4 border-l-sky-600'
+                              : ''
                           }`}
-                      >
-                        <div className="truncate pr-2">{col.label}</div>
-                        <div
-                          onMouseDown={(e) => handleMouseDownResize(e, col.id)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-sky-500/60 z-30 opacity-0 group-hover:opacity-100"
-                        />
-                      </th>
-                    ))}
+                        >
+                          <div className="flex items-center justify-between pointer-events-none select-none">
+                            <span className="truncate pr-1 font-bold">{col.label}</span>
+                            <span className="text-[10px] text-slate-400 opacity-60 group-hover:opacity-100">⠿</span>
+                          </div>
+                          <div
+                            data-resize="true"
+                            onMouseDown={(e) => handleMouseDownResize(e, col.id)}
+                            className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-sky-500/60 z-30 opacity-0 group-hover:opacity-100"
+                          />
+                        </th>
+                      );
+                    })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
@@ -500,26 +624,50 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
         {contextMenu && (
           <div
             style={{ top: contextMenu.y, left: contextMenu.x }}
-            className="fixed z-50 bg-white border border-slate-300 rounded-xl shadow-2xl p-2 text-xs w-48 space-y-1 font-sans"
+            className="fixed z-50 bg-white border border-slate-300 rounded-xl shadow-2xl p-2 text-xs w-64 space-y-1 font-sans"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="font-bold text-slate-700 px-2 py-1 border-b border-slate-200">
-              Exibir / Ocultar Colunas
+            <div className="font-bold text-slate-700 px-2 py-1 border-b border-slate-200 flex justify-between items-center">
+              <span>Organizar Colunas</span>
+              <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
-            {columns.map((col) => (
-              <button
-                key={col.id}
-                disabled={col.fixed}
-                onClick={() => toggleColumnVisibility(col.id)}
-                className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between transition-colors ${col.fixed
-                  ? 'opacity-50 cursor-not-allowed text-slate-400'
-                  : 'hover:bg-slate-100 text-slate-700 cursor-pointer'
-                  }`}
-              >
-                <span>{col.label}</span>
-                {col.visible && <Check className="w-3.5 h-3.5 text-sky-600" />}
-              </button>
-            ))}
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {columns.map((col, cIdx) => (
+                <div
+                  key={col.id}
+                  className="flex items-center justify-between px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-700 transition-colors"
+                >
+                  <button
+                    disabled={col.fixed}
+                    onClick={() => toggleColumnVisibility(col.id)}
+                    className={`flex-1 text-left flex items-center justify-between mr-2 ${
+                      col.fixed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                  >
+                    <span className="truncate">{col.label}</span>
+                    {col.visible && <Check className="w-3.5 h-3.5 text-sky-600 shrink-0 ml-1" />}
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      title="Mover para esquerda"
+                      disabled={cIdx === 0}
+                      onClick={() => handleMoveColumn(col.id, 'left')}
+                      className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      ◀
+                    </button>
+                    <button
+                      title="Mover para direita"
+                      disabled={cIdx === columns.length - 1}
+                      onClick={() => handleMoveColumn(col.id, 'right')}
+                      className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -567,50 +715,83 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
               Abrir OS
             </button>
 
-            <button
-              onClick={() => {
-                if (!selectedOrder) return;
-                setConfirmDialog({
-                  isOpen: true,
-                  title: 'Cancelar Ordem de Serviço',
-                  message: `Deseja realmente CANCELAR a ${selectedOrder.code}?`,
-                  confirmText: 'Sim, Cancelar OS',
-                  variant: 'warning',
-                  onConfirm: () => {
-                    onUpdateOrderStatus(selectedOrder.id, 'CANCELADA');
-                    setSelectedOrderId(null);
-                    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
-                  },
-                });
-              }}
-              disabled={!selectedOrderId}
-              className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
-            >
-              <Ban className="w-4 h-4" />
-              Cancelar OS
-            </button>
+            {selectedOrder && (selectedOrder.status === 'CANCELADA' || selectedOrder.status === 'CANCELADO') ? (
+              <span className="text-[11px] font-bold text-red-700 bg-red-100 border border-red-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                <Ban className="w-3.5 h-3.5" />
+                OS Cancelada (Somente Consulta / Reabertura)
+              </span>
+            ) : selectedOrder && (selectedOrder.status === 'FINALIZADA' || selectedOrder.status === 'CONCLUIDA') ? (
+              <span className="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                OS Finalizada
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    if (!selectedOrder) return;
+                    setConfirmDialog({
+                      isOpen: true,
+                      title: 'Cancelar Ordem de Serviço',
+                      message: `Deseja realmente CANCELAR a ${selectedOrder.code}?`,
+                      confirmText: 'Sim, Cancelar OS',
+                      variant: 'warning',
+                      onConfirm: () => {
+                        onUpdateOrderStatus(selectedOrder.id, 'CANCELADA');
+                        setSelectedOrderId(null);
+                        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+                      },
+                    });
+                  }}
+                  disabled={!selectedOrderId}
+                  className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                >
+                  <Ban className="w-4 h-4" />
+                  Cancelar OS
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!selectedOrder) return;
+
+                    const tech = (selectedOrder.technician || selectedOrder.technicianName || '').trim();
+                    const attendant = (selectedOrder.attendant || selectedOrder.attendantName || '').trim();
+
+                    if (!tech) {
+                      return alert('⚠️ É necessário primeiro definir o Técnico Responsável para finalizar a Ordem de Serviço.\n\nPor favor, abra a OS e selecione o Técnico.');
+                    }
+                    if (!attendant) {
+                      return alert('⚠️ É necessário primeiro definir o Atendente para finalizar a Ordem de Serviço.\n\nPor favor, abra a OS e selecione o Atendente.');
+                    }
+
+                    setConfirmDialog({
+                      isOpen: true,
+                      title: 'Finalizar Ordem de Serviço',
+                      message: `Deseja alterar o status da ${selectedOrder.code} para FINALIZADA?`,
+                      confirmText: 'Sim, Finalizar OS',
+                      variant: 'info',
+                      onConfirm: () => {
+                        onUpdateOrderStatus(selectedOrder.id, 'FINALIZADA');
+                        setSelectedOrderId(null);
+                        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+                      },
+                    });
+                  }}
+                  disabled={!selectedOrderId}
+                  className="h-8 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Finalizar
+                </button>
+              </>
+            )}
 
             <button
-              onClick={() => {
-                if (!selectedOrder) return;
-                setConfirmDialog({
-                  isOpen: true,
-                  title: 'Finalizar Ordem de Serviço',
-                  message: `Deseja alterar o status da ${selectedOrder.code} para FINALIZADA?`,
-                  confirmText: 'Sim, Finalizar OS',
-                  variant: 'info',
-                  onConfirm: () => {
-                    onUpdateOrderStatus(selectedOrder.id, 'FINALIZADA');
-                    setSelectedOrderId(null);
-                    setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
-                  },
-                });
-              }}
-              disabled={!selectedOrderId}
-              className="h-8 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              onClick={onClose}
+              className="h-8 bg-slate-700 hover:bg-slate-800 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              Finalizar
+              <X className="w-4 h-4" />
+              Fechar
             </button>
           </div>
         </div>

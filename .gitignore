@@ -1,0 +1,11 @@
+node_modules
+dist
+.expo
+.vscode
+target
+apps/desktop/dist
+apps/desktop/src-tauri/target
+apps/mobile/.expo
+apps/mobile/android/.gradle
+apps/mobile/android/app/build
+apps/mobile/android/build

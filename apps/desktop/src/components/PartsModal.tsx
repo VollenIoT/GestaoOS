@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Search, PlusCircle, FolderOpen, Edit3, Trash2, LogOut, Package, Check } from 'lucide-react';
 import { PartViewModal } from './PartViewModal';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
 
 export interface Part {
   id: string;
@@ -60,24 +61,24 @@ export const PartsModal: React.FC<PartsModalProps> = ({
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     const defaultCols: ColumnConfig[] = [
       { id: 'code', label: 'Código', width: 90, visible: true, fixed: true },
-      { id: 'name', label: 'Nome da Peça', width: 200, visible: true, fixed: true },
-      { id: 'brand', label: 'Marca / Fabricante', width: 140, visible: true },
-      { id: 'group', label: 'Grupo (Tipo Equip.)', width: 160, visible: true },
-      { id: 'location', label: 'Localização', width: 120, visible: true },
       { id: 'manufacturerCode', label: 'Cód. Fabricante', width: 130, visible: true },
+      { id: 'name', label: 'Nome da Peça', width: 220, visible: true, fixed: true },
       { id: 'stockQuantity', label: 'Em Estoque', width: 95, visible: true, fixed: true },
-      { id: 'minStock', label: 'Estoque Mín.', width: 95, visible: true },
-      { id: 'costPrice', label: 'Valor Custo', width: 105, visible: true },
-      { id: 'profitMarginPercent', label: 'Margem (%)', width: 95, visible: false },
       { id: 'techPrice', label: 'Valor Técnico', width: 105, visible: true },
       { id: 'finalPrice', label: 'Consumidor Final', width: 125, visible: true, fixed: true },
       { id: 'application', label: 'Referência / Aplicação', width: 180, visible: true },
+      { id: 'group', label: 'Grupo (Tipo Equip.)', width: 160, visible: true },
+      { id: 'location', label: 'Localização', width: 120, visible: true },
+      { id: 'brand', label: 'Marca / Fabricante', width: 140, visible: false },
+      { id: 'minStock', label: 'Estoque Mín.', width: 95, visible: false },
+      { id: 'costPrice', label: 'Valor Custo', width: 105, visible: false },
+      { id: 'profitMarginPercent', label: 'Margem (%)', width: 95, visible: false },
     ];
     try {
-      const saved = localStorage.getItem('parts_modal_columns_v5');
+      const saved = localStorage.getItem('parts_modal_columns_v6');
       if (saved) {
         const parsed: ColumnConfig[] = JSON.parse(saved);
-        if (parsed.some((c) => c.id === 'group')) return parsed;
+        if (parsed.some((c) => c.id === 'manufacturerCode')) return parsed;
       }
     } catch (err) { }
     return defaultCols;
@@ -85,7 +86,7 @@ export const PartsModal: React.FC<PartsModalProps> = ({
 
   const saveColumnsToStorage = (newCols: ColumnConfig[]) => {
     try {
-      localStorage.setItem('parts_modal_columns_v5', JSON.stringify(newCols));
+      localStorage.setItem('parts_modal_columns_v6', JSON.stringify(newCols));
     } catch (err) { }
   };
 
@@ -96,11 +97,18 @@ export const PartsModal: React.FC<PartsModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setSearchTerm('');
+      setSelectedGroup('');
+      setSelectedEquipmentModel('');
       setSelectedPartId(null);
       setTimeout(() => {
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
       }, 50);
+    } else {
+      setSearchTerm('');
+      setSelectedGroup('');
+      setSelectedEquipmentModel('');
+      setSelectedPartId(null);
     }
   }, [isOpen]);
 
@@ -120,9 +128,77 @@ export const PartsModal: React.FC<PartsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
+  // Estado para arraste direto via Mouse
+  const [draggingColId, setDraggingColId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+  const isDraggingRef = useRef(false);
+
+  // Limpa estados ao fechar ou desmontar
+  useEffect(() => {
+    return () => {
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  // Redimensionamento isolado de coluna à direita
+  const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
+    if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
+      return;
+    }
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setDraggingColId(colId);
+
+    const onGlobalMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const elem = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      if (th) {
+        const targetId = th.getAttribute('data-col-id');
+        if (targetId && targetId !== colId) {
+          setDragOverColId(targetId);
+        } else {
+          setDragOverColId(null);
+        }
+      } else {
+        setDragOverColId(null);
+      }
+    };
+
+    const onGlobalMouseUp = (upEvent: MouseEvent) => {
+      window.removeEventListener('mousemove', onGlobalMouseMove);
+      window.removeEventListener('mouseup', onGlobalMouseUp);
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+
+      const elem = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      const targetId = th?.getAttribute('data-col-id');
+
+      if (targetId && targetId !== colId) {
+        setColumns((prev) => {
+          const srcIdx = prev.findIndex((c) => c.id === colId);
+          const destIdx = prev.findIndex((c) => c.id === targetId);
+          if (srcIdx === -1 || destIdx === -1) return prev;
+          const newCols = [...prev];
+          const [moved] = newCols.splice(srcIdx, 1);
+          newCols.splice(destIdx, 0, moved);
+          saveColumnsToStorage(newCols);
+          return newCols;
+        });
+      }
+
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
+  };
+
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation();
     e.preventDefault();
@@ -148,28 +224,18 @@ export const PartsModal: React.FC<PartsModalProps> = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleDragStart = (e: React.DragEvent, colId: string) => {
-    setDraggedColumnId(colId);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent, targetColId: string) => {
-    e.preventDefault();
-    if (!draggedColumnId || draggedColumnId === targetColId) return;
+  // Move coluna para a esquerda ou direita
+  const handleMoveColumn = (columnId: string, direction: 'left' | 'right') => {
+    const idx = columns.findIndex((c) => c.id === columnId);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= columns.length) return;
 
     const newCols = [...columns];
-    const sourceIdx = newCols.findIndex((c) => c.id === draggedColumnId);
-    const targetIdx = newCols.findIndex((c) => c.id === targetColId);
-
-    const [removed] = newCols.splice(sourceIdx, 1);
-    newCols.splice(targetIdx, 0, removed);
-
+    const [moved] = newCols.splice(idx, 1);
+    newCols.splice(targetIdx, 0, moved);
     setColumns(newCols);
     saveColumnsToStorage(newCols);
-    setDraggedColumnId(null);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -236,31 +302,28 @@ export const PartsModal: React.FC<PartsModalProps> = ({
 
   const selectedPart = parts.find((p) => p.id === selectedPartId);
 
-  const handleEditPart = () => {
-    if (!selectedPart) return alert('Por favor, selecione uma peça na tabela.');
-    if (onOpenEditPart) {
-      onOpenEditPart(selectedPart);
-    }
+  const { alert, confirm } = useDialog();
+
+  const handleEditPart = async () => {
+    if (!selectedPart) { await alert({ title: 'Selecione uma Peça', message: 'Por favor, selecione uma peça na tabela.', variant: 'info' }); return; }
+    if (onOpenEditPart) onOpenEditPart(selectedPart);
   };
 
   const handleDoubleClickRow = (p: Part) => {
     if (onSelectPart) {
-      // 2 cliques na busca de OS: seleciona e fecha
       onSelectPart(p);
       onClose();
     } else {
-      // Central de Peças avulsa: abre modal de visualização
       setSelectedPartId(p.id);
       setViewingPart(p);
     }
   };
 
-  const handleDeletePart = () => {
-    if (!selectedPart) return alert('Por favor, selecione uma peça na tabela.');
-    if (confirm(`Deseja realmente EXCLUIR a peça "${selectedPart.name}"?`)) {
-      if (onDeletePart) {
-        onDeletePart(selectedPart.id);
-      }
+  const handleDeletePart = async () => {
+    if (!selectedPart) { await alert({ title: 'Selecione uma Peça', message: 'Por favor, selecione uma peça na tabela.', variant: 'info' }); return; }
+    const ok = await confirm({ title: 'Excluir Peça', message: `Deseja realmente EXCLUIR a peça "${selectedPart.name}"?`, variant: 'danger', confirmText: 'Excluir' });
+    if (ok) {
+      if (onDeletePart) onDeletePart(selectedPart.id);
       setSelectedPartId(null);
     }
   };
@@ -292,23 +355,29 @@ export const PartsModal: React.FC<PartsModalProps> = ({
       case 'location':
         return <span className="font-mono font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">{p.location || '-'}</span>;
       case 'stockQuantity':
-        const unitLabel = p.unit ? p.unit.toLowerCase() : 'un';
+        const unitLabel = (p.unit || 'un').toLowerCase();
         return (
-          <span className={`font-mono font-extrabold px-2 py-0.5 rounded ${isLowStock ? 'bg-red-200 text-red-950 border border-red-400' : 'bg-slate-100 text-slate-900'}`}>
-            {qty} {unitLabel}
-          </span>
+          <div className={`flex items-center w-full px-2 py-0.5 rounded font-mono ${isLowStock ? 'bg-red-200 text-red-950 border border-red-400' : 'bg-slate-100 text-slate-900'}`}>
+            <span className="flex-1 text-center font-extrabold">{qty}</span>
+            <span className="text-[10px] font-bold opacity-75 ml-1">{unitLabel}</span>
+          </div>
         );
       case 'minStock':
-        const minUnitLabel = p.unit ? p.unit.toLowerCase() : 'un';
-        return <span className="font-mono font-bold text-slate-700">{minQty} {minUnitLabel}</span>;
+        const minUnitLabel = (p.unit || 'un').toLowerCase();
+        return (
+          <div className="flex items-center w-full px-2 py-0.5 rounded font-mono text-slate-700 bg-slate-50">
+            <span className="flex-1 text-center font-bold">{minQty}</span>
+            <span className="text-[10px] font-semibold opacity-70 ml-1">{minUnitLabel}</span>
+          </div>
+        );
       case 'costPrice':
-        return <span>{p.costPrice ? `R$ ${p.costPrice}` : '-'}</span>;
+        return <span className="block text-right pr-1">{p.costPrice ? `R$ ${p.costPrice}` : '-'}</span>;
       case 'profitMarginPercent':
-        return <span className="font-mono text-indigo-700">{p.profitMarginPercent ? `${p.profitMarginPercent}%` : '-'}</span>;
+        return <span className="font-mono text-indigo-700 block text-right pr-1">{p.profitMarginPercent ? `${p.profitMarginPercent}%` : '-'}</span>;
       case 'techPrice':
-        return <span>{p.techPrice ? `R$ ${p.techPrice}` : '-'}</span>;
+        return <span className="block text-right font-semibold text-slate-800 pr-1">{p.techPrice ? `R$ ${p.techPrice}` : '-'}</span>;
       case 'finalPrice':
-        return <span className="font-bold text-emerald-700">R$ {p.finalPrice}</span>;
+        return <span className="block text-right font-bold text-emerald-700 pr-1">R$ {p.finalPrice}</span>;
       case 'application':
         return <span className="truncate">{p.application || '-'}</span>;
       default:
@@ -419,23 +488,36 @@ export const PartsModal: React.FC<PartsModalProps> = ({
                 <tr>
                   {columns
                     .filter((col) => col.visible)
-                    .map((col) => (
-                      <th
-                        key={col.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, col.id)}
-                        onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, col.id)}
-                        style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
-                      >
-                        <div className="truncate pr-2">{col.label}</div>
-                        <div
-                          onMouseDown={(e) => handleMouseDownResize(e, col.id)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-amber-500/60 z-30 opacity-0 group-hover:opacity-100"
-                        />
-                      </th>
-                    ))}
+                    .map((col) => {
+                      const isDraggingThis = draggingColId === col.id;
+                      const isOverThis = dragOverColId === col.id;
+
+                      return (
+                        <th
+                          key={col.id}
+                          data-col-id={col.id}
+                          onMouseDown={(e) => handleMouseDownHeader(e, col.id)}
+                          style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px`, userSelect: 'none' }}
+                          className={`p-1.5 border-b border-r border-slate-300 relative group select-none transition-all cursor-grab active:cursor-grabbing hover:bg-slate-300/90 ${
+                            isDraggingThis
+                              ? 'opacity-40 bg-amber-300 border-amber-500 scale-[0.98]'
+                              : isOverThis
+                              ? 'bg-amber-200 border-l-4 border-l-amber-600'
+                              : ''
+                          }`}
+                        >
+                          <div className={`flex items-center justify-between pointer-events-none select-none ${['techPrice', 'finalPrice', 'costPrice', 'profitMarginPercent'].includes(col.id) ? 'text-right' : col.id === 'stockQuantity' ? 'text-center' : ''}`}>
+                            <span className="truncate pr-1 font-bold">{col.label}</span>
+                            <span className="text-[10px] text-slate-400 opacity-60 group-hover:opacity-100">⠿</span>
+                          </div>
+                          <div
+                            data-resize="true"
+                            onMouseDown={(e) => handleMouseDownResize(e, col.id)}
+                            className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-amber-500/60 z-30 opacity-0 group-hover:opacity-100"
+                          />
+                        </th>
+                      );
+                    })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">

@@ -157,6 +157,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   const [travelCost, setTravelCost] = useState('0,00');
   const [discountCost, setDiscountCost] = useState('0,00');
 
+  // Helper para formatar moeda brasileira ao perder o foco (blur ou enter)
+  const formatCurrencyOnBlur = (val: string): string => {
+    if (!val || val.trim() === '') return '0,00';
+    let clean = val.trim().replace(/\s/g, '').replace('R$', '');
+    if (clean.endsWith(',') || clean.endsWith('.')) clean = clean.slice(0, -1);
+    if (clean.includes(',')) clean = clean.replace(/\./g, '').replace(',', '.');
+    const num = parseFloat(clean);
+    if (isNaN(num)) return '0,00';
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   const [isClientEquipmentsOpen, setIsClientEquipmentsOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
@@ -890,7 +901,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     type="text"
                     value={clientData.phone}
                     onChange={(e) => {
-                      setClientData({ ...clientData, phone: e.target.value });
+                      const nums = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      let formatted = nums;
+                      if (nums.length > 6) {
+                        formatted = nums.length === 11
+                          ? `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`
+                          : `(${nums.slice(0, 2)}) ${nums.slice(2, 6)}-${nums.slice(6)}`;
+                      } else if (nums.length > 2) {
+                        formatted = `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
+                      }
+                      setClientData({ ...clientData, phone: formatted });
                       setIsDirty(true);
                     }}
                     placeholder="(00) 0000-0000"
@@ -904,7 +924,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     type="text"
                     value={clientData.whatsapp}
                     onChange={(e) => {
-                      setClientData({ ...clientData, whatsapp: e.target.value });
+                      const nums = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      let formatted = nums;
+                      if (nums.length > 6) {
+                        formatted = nums.length === 11
+                          ? `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`
+                          : `(${nums.slice(0, 2)}) ${nums.slice(2, 6)}-${nums.slice(6)}`;
+                      } else if (nums.length > 2) {
+                        formatted = `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
+                      }
+                      setClientData({ ...clientData, whatsapp: formatted });
                       setIsDirty(true);
                     }}
                     placeholder="(00) 00000-0000"
@@ -1050,9 +1079,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     type="text"
                     value={newServicePrice}
                     onChange={(e) => setNewServicePrice(e.target.value)}
+                    onBlur={(e) => {
+                      if (e.target.value) {
+                        setNewServicePrice(formatCurrencyOnBlur(e.target.value));
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        if (newServicePrice) {
+                          setNewServicePrice(formatCurrencyOnBlur(newServicePrice));
+                        }
                         handleAddService();
                       }
                     }}
@@ -1183,9 +1220,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     type="text"
                     value={newPartPrice}
                     onChange={(e) => setNewPartPrice(e.target.value)}
+                    onBlur={(e) => {
+                      if (e.target.value) {
+                        setNewPartPrice(formatCurrencyOnBlur(e.target.value));
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
+                        if (newPartPrice) {
+                          setNewPartPrice(formatCurrencyOnBlur(newPartPrice));
+                        }
                         handleAddPart();
                       }
                     }}

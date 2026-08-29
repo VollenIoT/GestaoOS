@@ -10,10 +10,29 @@
     "dev:desktop": "npm --prefix apps/desktop run dev",
     "build:desktop": "npm --prefix apps/desktop run build:exe",
     "build": "turbo run build",
-    "dev": "turbo run dev"
+    "dev": "turbo run dev",
+    "android": "npm --prefix apps/mobile run android",
+    "ios": "npm --prefix apps/mobile run ios"
   },
   "devDependencies": {
+    "hermes-engine": "^0.11.0",
     "turbo": "^1.13.0",
     "typescript": "^5.4.0"
+  },
+  "version": "1.0.0",
+  "dependencies": {
+    "@firebase/app": "^0.16.1",
+    "@firebase/component": "^0.7.5",
+    "@firebase/firestore": "^4.17.1",
+    "@firebase/util": "^1.15.3",
+    "@react-native-community/cli-server-api": "^20.2.0",
+    "@react-native/assets-registry": "^0.87.0",
+    "@react-native/js-polyfills": "^0.87.0",
+    "expo": "~51.0.28",
+    "react": "18.2.0",
+    "react-native": "0.74.5"
+  },
+  "overrides": {
+    "react-native": "0.74.5"
   }
 }

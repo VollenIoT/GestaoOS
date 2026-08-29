@@ -26,14 +26,21 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   })();
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.getModifierState) {
+    const handleModifiers = (e: KeyboardEvent | MouseEvent) => {
+      if ('getModifierState' in e && typeof e.getModifierState === 'function') {
         setIsNumLock(e.getModifierState('NumLock'));
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleModifiers);
+    window.addEventListener('keyup', handleModifiers);
+    window.addEventListener('click', handleModifiers);
+
+    return () => {
+      window.removeEventListener('keydown', handleModifiers);
+      window.removeEventListener('keyup', handleModifiers);
+      window.removeEventListener('click', handleModifiers);
+    };
   }, []);
 
   return (

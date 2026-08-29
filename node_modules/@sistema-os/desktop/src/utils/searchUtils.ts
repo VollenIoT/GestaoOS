@@ -11,11 +11,24 @@ export function normalizeSearchText(text: string | null | undefined): string {
     .trim();
 }
 
-/**
- * Verifica se o texto alvo contém o termo de busca, ignorando maiúsculas/minúsculas e acentos.
- */
 export function matchesSearchTerm(target: string | null | undefined, search: string | null | undefined): boolean {
   if (!search || !search.trim()) return true;
   if (!target) return false;
-  return normalizeSearchText(target).includes(normalizeSearchText(search));
+
+  // 1. Comparação normal textual com remoção de acentos e case-insensitive
+  const normTarget = normalizeSearchText(target);
+  const normSearch = normalizeSearchText(search);
+  if (normTarget.includes(normSearch)) return true;
+
+  // 2. Comparação de números: ignora parênteses, traços, pontos, espaços e outros símbolos
+  // Qualquer parte da sequência do número pesquisado deve casar com o número registrado
+  const digitsSearch = String(search).replace(/\D/g, '');
+  const digitsTarget = String(target).replace(/\D/g, '');
+  
+  if (digitsSearch.length >= 1 && digitsTarget.includes(digitsSearch)) {
+    return true;
+  }
+
+  return false;
 }
+

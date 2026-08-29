@@ -16,6 +16,8 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { requestFactoryReset } from '../services/api';
+import { db } from '../services/firebase';
+import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 interface FactoryResetModalProps {
   isOpen: boolean;
@@ -76,6 +78,22 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
       setStep('SELECT');
     }
   }, [isOpen, currentUser]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !loading) {
+        e.preventDefault();
+        if (step === 'CONFIRM_DOUBLE') {
+          setStep('SELECT');
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, loading, step, onClose]);
 
   if (!isOpen) return null;
 
@@ -138,7 +156,7 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
     setErrorMsg(null);
 
     try {
-      // 1. Executa limpeza no Backend (Banco SQLite) para Clientes e OS caso o servidor esteja conectado
+      // 1. Limpeza no Backend SQLite local (caso servidor esteja online)
       if (selectedItems.clients || selectedItems.orders) {
         try {
           await requestFactoryReset({
@@ -148,25 +166,101 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
             resetOrders: selectedItems.orders,
           });
         } catch (serverErr) {
-          console.warn('Servidor backend offline ou falhou durante reset, prosseguindo com limpeza local:', serverErr);
+          console.warn('Servidor backend offline ou dispensado, limpando Firestore e armazenamento local:', serverErr);
         }
       }
 
-      // 2. Limpeza local de Clientes
-      if (selectedItems.clients) {
-        localStorage.removeItem('vollen_clients');
-        localStorage.removeItem('selected_client');
-      }
-
-      // 3. Limpeza local de Ordens de Serviço
+      // 2. Limpeza profunda de ORDENS DE SERVIÇO, HISTÓRICOS e VISITAS (Firestore + LocalStorage)
       if (selectedItems.orders) {
         localStorage.removeItem('vollen_orders');
         localStorage.removeItem('vollen_visits');
         localStorage.removeItem('vollen_custom_next_os_number');
         localStorage.removeItem('vollen_estimates');
+
+        // Limpa todas as chaves de auditoria e histórico de OS locais (os_audit_*, audit_*, etc)
+        try {
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('os_audit_') || k.startsWith('audit_') || k.startsWith('os_') || k.includes('audit'))) {
+              keysToRemove.push(k);
+            }
+          }
+          keysToRemove.forEach((k) => localStorage.removeItem(k));
+        } catch (e) { }
+
+        try {
+          const [ordersSnap, visitsSnap, estSnap] = await Promise.all([
+            getDocs(collection(db, 'orders')).catch(() => null),
+            getDocs(collection(db, 'visits')).catch(() => null),
+            getDocs(collection(db, 'estimates')).catch(() => null),
+          ]);
+
+          if (ordersSnap && !ordersSnap.empty) {
+            await Promise.all(ordersSnap.docs.map((d) => deleteDoc(doc(db, 'orders', d.id)).catch(() => {})));
+          }
+          if (visitsSnap && !visitsSnap.empty) {
+            await Promise.all(visitsSnap.docs.map((d) => deleteDoc(doc(db, 'visits', d.id)).catch(() => {})));
+          }
+          if (estSnap && !estSnap.empty) {
+            await Promise.all(estSnap.docs.map((d) => deleteDoc(doc(db, 'estimates', d.id)).catch(() => {})));
+          }
+          // Reseta contador atômico de numeração de OS — document correto: 'order_counter'
+          await Promise.all([
+            setDoc(doc(db, 'system_config', 'order_counter'), { lastOrderNumber: 0 }, { merge: true }).catch(() => {}),
+            deleteDoc(doc(db, 'system_config', 'counters')).catch(() => {}), // Remove o doc errado se existir
+          ]);
+        } catch (err) {
+          console.warn('Erro ao limpar ordens no Firestore:', err);
+        }
       }
 
-      // 4. Executa limpeza das Configurações do Sistema no localStorage
+      // 3. Limpeza profunda de CLIENTES (Firestore + LocalStorage)
+      if (selectedItems.clients) {
+        localStorage.removeItem('vollen_clients');
+        localStorage.removeItem('selected_client');
+
+        try {
+          const clientsSnap = await getDocs(collection(db, 'clients')).catch(() => null);
+          if (clientsSnap && !clientsSnap.empty) {
+            await Promise.all(clientsSnap.docs.map((d) => deleteDoc(doc(db, 'clients', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar clientes no Firestore:', err);
+        }
+      }
+
+      // 4. Limpeza profunda de PEÇAS (Firestore + LocalStorage)
+      if (selectedItems.parts) {
+        localStorage.removeItem('vollen_parts');
+        localStorage.removeItem('vollen_parts_stock');
+
+        try {
+          const partsSnap = await getDocs(collection(db, 'parts')).catch(() => null);
+          if (partsSnap && !partsSnap.empty) {
+            await Promise.all(partsSnap.docs.map((d) => deleteDoc(doc(db, 'parts', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar peças no Firestore:', err);
+        }
+      }
+
+      // 5. Limpeza profunda de EQUIPAMENTOS (Firestore + LocalStorage)
+      if (selectedItems.equipments) {
+        localStorage.removeItem('system_equipments');
+        localStorage.removeItem('vollen_equipments');
+
+        try {
+          const eqSnap = await getDocs(collection(db, 'equipments')).catch(() => null);
+          if (eqSnap && !eqSnap.empty) {
+            await Promise.all(eqSnap.docs.map((d) => deleteDoc(doc(db, 'equipments', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar equipamentos no Firestore:', err);
+        }
+      }
+
+      // 6. Limpeza profunda de CONFIGURAÇÕES DO SISTEMA (Firestore + LocalStorage)
       if (selectedItems.config) {
         localStorage.removeItem('system_wallpaper_url');
         localStorage.removeItem('system_wallpaper_opacity');
@@ -176,17 +270,51 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
         localStorage.removeItem('vollen_company_data');
         localStorage.removeItem('vollen_os_preferences');
         localStorage.removeItem('active_tab');
+        localStorage.removeItem('vollen_services');
+
+        // Recria APENAS o usuário Administrador padrão do sistema (sem técnicos de exemplo)
+        const defaultUsers = [
+          {
+            id: '1',
+            username: 'admin',
+            name: 'Administrador',
+            role: 'Admin',
+            isAdmin: true,
+            isTechnician: true,
+            isAttendant: true,
+            password: '1234',
+          },
+        ];
+
+        localStorage.setItem('vollen_users', JSON.stringify(defaultUsers));
         localStorage.removeItem('vollen_technicians');
-      }
 
-      // 5. Executa limpeza de Peças do Estoque no localStorage
-      if (selectedItems.parts) {
-        localStorage.removeItem('vollen_parts');
-      }
+        try {
+          const srvSnap = await getDocs(collection(db, 'services')).catch(() => null);
+          if (srvSnap && !srvSnap.empty) {
+            await Promise.all(srvSnap.docs.map((d) => deleteDoc(doc(db, 'services', d.id)).catch(() => {})));
+          }
 
-      // 6. Executa limpeza de Equipamentos personalizados no localStorage
-      if (selectedItems.equipments) {
-        localStorage.removeItem('system_equipments');
+          // Limpa técnicos antigos no Firestore
+          const techSnap = await getDocs(collection(db, 'technicians')).catch(() => null);
+          if (techSnap && !techSnap.empty) {
+            await Promise.all(techSnap.docs.map((d) => deleteDoc(doc(db, 'technicians', d.id)).catch(() => {})));
+          }
+
+          // Limpa usuários antigos no Firestore e recria APENAS o Administrador
+          const usersSnap = await getDocs(collection(db, 'users')).catch(() => null);
+          if (usersSnap && !usersSnap.empty) {
+            await Promise.all(usersSnap.docs.map((d) => deleteDoc(doc(db, 'users', d.id)).catch(() => {})));
+          }
+          for (const usr of defaultUsers) {
+            await setDoc(doc(db, 'users', usr.id), usr, { merge: true }).catch(() => {});
+          }
+
+          await deleteDoc(doc(db, 'system_config', 'company_data')).catch(() => {});
+          await deleteDoc(doc(db, 'system_config', 'os_preferences')).catch(() => {});
+        } catch (err) {
+          console.warn('Erro ao limpar configurações no Firestore:', err);
+        }
       }
 
       // 7. Transição para Tela de Sucesso

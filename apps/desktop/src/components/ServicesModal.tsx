@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Search, PlusCircle, Wrench, Check, LogOut, Edit3, Trash2 } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
 
 export interface ServiceItem {
   id: string;
@@ -42,6 +43,7 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const canManage = Boolean(currentUser?.role === 'Admin' || currentUser?.permissions?.manageServices);
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     try {
@@ -51,8 +53,9 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
       }
     } catch (err) { }
     return [
-      { id: 'name', label: 'Descrição do Serviço', width: 450, visible: true, fixed: true },
-      { id: 'price', label: 'Valor Padrão (R$)', width: 160, visible: true, fixed: true },
+      { id: 'code', label: 'Código', width: 100, visible: true },
+      { id: 'name', label: 'Descrição do Serviço', width: 420, visible: true },
+      { id: 'price', label: 'Valor Padrão (R$)', width: 160, visible: true },
     ];
   });
 
@@ -64,6 +67,16 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm('');
+      setSelectedServiceId(null);
+    } else {
+      setSearchTerm('');
+      setSelectedServiceId(null);
+    }
+  }, [isOpen]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -160,6 +173,16 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
 
   const renderCellContent = (srv: ServiceItem, columnId: string) => {
     switch (columnId) {
+      case 'code':
+        let formattedCode = '0001';
+        if (srv.code) {
+          const num = parseInt(String(srv.code).replace(/\D/g, ''), 10);
+          formattedCode = !isNaN(num) && num > 0 ? String(num).padStart(4, '0') : String(srv.code);
+        } else if (srv.id) {
+          const num = parseInt(String(srv.id).replace(/\D/g, ''), 10);
+          formattedCode = !isNaN(num) && num > 0 ? String(num).padStart(4, '0') : String(srv.id);
+        }
+        return <span className="font-mono font-bold text-sky-700">{formattedCode}</span>;
       case 'name':
         return <span className="font-bold text-slate-900">{srv.name || srv.description}</span>;
       case 'price':
@@ -233,13 +256,12 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
                     .map((col) => (
                       <th
                         key={col.id}
-                        draggable={!col.fixed}
+                        draggable
                         onDragStart={(e) => handleDragStart(e, col.id)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, col.id)}
                         style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className={`p-1.5 border-b border-r border-slate-300 relative group transition-colors ${col.fixed ? 'cursor-default' : 'cursor-grab active:cursor-grabbing hover:bg-slate-300/80'
-                          }`}
+                        className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
                       >
                         <div className="truncate pr-2">{col.label}</div>
                         <div
@@ -304,23 +326,23 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
         </div>
 
         {/* Rodapé Fixo com Ações e Atalho Discreto F2 */}
-        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-slate-700">
+        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-3 truncate min-w-0">
+            <span className="font-semibold text-slate-700 truncate">
               {selectedService ? (
                 <span>
                   Serviço Selecionado: <strong className="text-sky-800">{selectedService.name}</strong> (Valor: R$ {selectedService.price})
                 </span>
               ) : (
-                'Selecione um serviço da lista'
+                'Selecione um serviço na tabela acima'
               )}
             </span>
-            <span className="text-[11px] text-slate-500 font-mono bg-slate-300/80 px-2 py-0.5 rounded border border-slate-300">
+            <span className="text-[11px] text-slate-500 font-mono bg-slate-300/80 px-2 py-0.5 rounded border border-slate-300 shrink-0">
               [F2] Cadastrar Novo Serviço
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {onSelectService && (
               <button
                 onClick={() => {
@@ -330,9 +352,9 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
                   }
                 }}
                 disabled={!selectedServiceId}
-                className="h-8 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+                className="h-8 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
               >
-                <Check className="w-4 h-4" />
+                <Check className="w-4 h-4 shrink-0" />
                 <span>Selecionar Serviço</span>
               </button>
             )}
@@ -344,51 +366,43 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
               }}
               disabled={!canManage}
               title={!canManage ? 'Você não tem permissão para cadastrar serviços.' : undefined}
-              className="h-8 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <PlusCircle className="w-4 h-4" />
+              <PlusCircle className="w-4 h-4 shrink-0" />
               <span>Cadastrar Novo Serviço</span>
             </button>
 
             <button
-              onClick={() => {
-                if (!selectedService) return alert('Por favor, selecione um serviço na tabela.');
-                if (onOpenEditService) {
-                  onClose();
-                  onOpenEditService(selectedService);
-                }
+              onClick={async () => {
+                if (!selectedService) { await dlgAlert({ title: 'Selecione um Serviço', message: 'Por favor, selecione um serviço na tabela.', variant: 'info' }); return; }
+                if (onOpenEditService) { onClose(); onOpenEditService(selectedService); }
               }}
               disabled={!selectedServiceId || !canManage}
               title={!canManage ? 'Você não tem permissão para editar serviços.' : undefined}
-              className="h-8 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Edit3 className="w-4 h-4" />
+              <Edit3 className="w-4 h-4 shrink-0" />
               <span>Editar Serviço</span>
             </button>
 
             <button
-              onClick={() => {
-                if (!selectedService) return alert('Por favor, selecione um serviço na tabela.');
-                if (confirm(`Deseja realmente EXCLUIR o serviço "${selectedService.name || selectedService.description}"?`)) {
-                  if (onDeleteService) {
-                    onDeleteService(selectedService.id);
-                  }
-                  setSelectedServiceId(null);
-                }
+              onClick={async () => {
+                if (!selectedService) { await dlgAlert({ title: 'Selecione um Serviço', message: 'Por favor, selecione um serviço na tabela.', variant: 'info' }); return; }
+                const ok = await dlgConfirm({ title: 'Excluir Serviço', message: `Deseja realmente EXCLUIR o serviço "${selectedService.name || selectedService.description}"?`, variant: 'danger', confirmText: 'Excluir' });
+                if (ok) { if (onDeleteService) onDeleteService(selectedService.id); setSelectedServiceId(null); }
               }}
               disabled={!selectedServiceId || !canManage}
               title={!canManage ? 'Você não tem permissão para excluir serviços.' : undefined}
-              className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-4 h-4 shrink-0" />
               <span>Excluir</span>
             </button>
 
             <button
               onClick={onClose}
-              className="h-8 bg-slate-700 hover:bg-slate-800 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-slate-700 hover:bg-slate-800 text-white px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <LogOut className="w-4 h-4" />
               <span>Sair</span>
             </button>
           </div>

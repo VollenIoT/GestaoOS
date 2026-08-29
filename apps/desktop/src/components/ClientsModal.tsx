@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, Search, PlusCircle, FolderOpen, Edit3, Trash2, LogOut, User, Check } from 'lucide-react';
 
 import { matchesSearchTerm } from '../utils/searchUtils';
@@ -37,8 +37,12 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm);
 
   React.useEffect(() => {
-    if (isOpen && initialSearchTerm !== undefined) {
-      setSearchTerm(initialSearchTerm);
+    if (isOpen) {
+      setSearchTerm(initialSearchTerm || '');
+      setSelectedClientId(null);
+    } else {
+      setSearchTerm('');
+      setSelectedClientId(null);
     }
   }, [isOpen, initialSearchTerm]);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -54,6 +58,8 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
       { id: 'name', label: 'Nome do Cliente', width: 200, visible: true, fixed: true },
       { id: 'phone', label: 'Telefone Fixo', width: 130, visible: true },
       { id: 'whatsapp', label: 'WhatsApp', width: 130, visible: true },
+      { id: 'contactName', label: 'Contato', width: 150, visible: true },
+      { id: 'contactPhone', label: 'Tel. Contato', width: 130, visible: true },
       { id: 'address', label: 'Endereço', width: 200, visible: true },
       { id: 'number', label: 'Nº', width: 65, visible: true },
       { id: 'complement', label: 'Complemento', width: 120, visible: false },
@@ -91,9 +97,82 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
+  // Estado para arraste direto via Mouse
+  const [draggingColId, setDraggingColId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+  const isDraggingRef = useRef(false);
+
+  // Limpa estados ao fechar ou desmontar
+  useEffect(() => {
+    return () => {
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  // Redimensionamento de Coluna com Largura Mínima Global para nunca encolher colunas à esquerda
+  const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
+    if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
+      return;
+    }
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setDraggingColId(colId);
+
+    const onGlobalMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const elem = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      if (th) {
+        const targetId = th.getAttribute('data-col-id');
+        if (targetId && targetId !== colId) {
+          setDragOverColId(targetId);
+        } else {
+          setDragOverColId(null);
+        }
+      } else {
+        setDragOverColId(null);
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onGlobalMouseMove);
+      window.removeEventListener('mouseup', onGlobalMouseUp);
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+
+    const onGlobalMouseUp = (upEvent: MouseEvent) => {
+      const wasDragging = isDraggingRef.current;
+      cleanup();
+
+      if (!wasDragging) return;
+
+      const elem = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      const targetId = th?.getAttribute('data-col-id');
+
+      if (targetId && targetId !== colId) {
+        setColumns((prev) => {
+          const srcIdx = prev.findIndex((c) => c.id === colId);
+          const destIdx = prev.findIndex((c) => c.id === targetId);
+          if (srcIdx === -1 || destIdx === -1) return prev;
+          const newCols = [...prev];
+          const [moved] = newCols.splice(srcIdx, 1);
+          newCols.splice(destIdx, 0, moved);
+          saveColumnsToStorage(newCols);
+          return newCols;
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
+  };
+
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation();
     e.preventDefault();
@@ -119,28 +198,17 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleDragStart = (e: React.DragEvent, colId: string) => {
-    setDraggedColumnId(colId);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent, targetColId: string) => {
-    e.preventDefault();
-    if (!draggedColumnId || draggedColumnId === targetColId) return;
+  const handleMoveColumn = (columnId: string, direction: 'left' | 'right') => {
+    const idx = columns.findIndex((c) => c.id === columnId);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= columns.length) return;
 
     const newCols = [...columns];
-    const sourceIdx = newCols.findIndex((c) => c.id === draggedColumnId);
-    const targetIdx = newCols.findIndex((c) => c.id === targetColId);
-
-    const [removed] = newCols.splice(sourceIdx, 1);
-    newCols.splice(targetIdx, 0, removed);
-
+    const [moved] = newCols.splice(idx, 1);
+    newCols.splice(targetIdx, 0, moved);
     setColumns(newCols);
     saveColumnsToStorage(newCols);
-    setDraggedColumnId(null);
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -241,6 +309,10 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
         return <span className="font-semibold text-slate-800">{c.phone || '-'}</span>;
       case 'whatsapp':
         return <span className="font-semibold text-emerald-700">{c.whatsapp || '-'}</span>;
+      case 'contactName':
+        return <span className="font-semibold text-sky-900">{c.contactName || c.contact1 || '-'}</span>;
+      case 'contactPhone':
+        return <span className="font-semibold text-slate-700">{c.contactPhone || c.contact1Phone || '-'}</span>;
       case 'address':
         return <span className="truncate">{c.address || '-'}</span>;
       case 'number':
@@ -329,23 +401,36 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
                 <tr>
                   {columns
                     .filter((col) => col.visible)
-                    .map((col) => (
-                      <th
-                        key={col.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, col.id)}
-                        onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, col.id)}
-                        style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
-                      >
-                        <div className="truncate pr-2">{col.label}</div>
-                        <div
-                          onMouseDown={(e) => handleMouseDownResize(e, col.id)}
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-sky-500/60 z-30 opacity-0 group-hover:opacity-100"
-                        />
-                      </th>
-                    ))}
+                    .map((col) => {
+                      const isDraggingThis = draggingColId === col.id;
+                      const isOverThis = dragOverColId === col.id;
+
+                      return (
+                        <th
+                          key={col.id}
+                          data-col-id={col.id}
+                          onMouseDown={(e) => handleMouseDownHeader(e, col.id)}
+                          style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px`, userSelect: 'none' }}
+                          className={`p-1.5 border-b border-r border-slate-300 relative group select-none transition-all cursor-grab active:cursor-grabbing hover:bg-slate-300/90 ${
+                            isDraggingThis
+                              ? 'opacity-40 bg-sky-300 border-sky-500 scale-[0.98]'
+                              : isOverThis
+                              ? 'bg-sky-200 border-l-4 border-l-sky-600'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between pointer-events-none select-none">
+                            <span className="truncate pr-1 font-bold">{col.label}</span>
+                            <span className="text-[10px] text-slate-400 opacity-60 group-hover:opacity-100">⠿</span>
+                          </div>
+                          <div
+                            data-resize="true"
+                            onMouseDown={(e) => handleMouseDownResize(e, col.id)}
+                            className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-sky-500/60 z-30 opacity-0 group-hover:opacity-100"
+                          />
+                        </th>
+                      );
+                    })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">

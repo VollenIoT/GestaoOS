@@ -17,10 +17,22 @@ export const ClientOrdersHistoryModal: React.FC<ClientOrdersHistoryModalProps> =
   onClose,
   onSelectOrder,
 }) => {
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[80] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden font-sans">
         {/* Header do Modal */}
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
@@ -44,7 +56,6 @@ export const ClientOrdersHistoryModal: React.FC<ClientOrdersHistoryModalProps> =
               key={os.id}
               onClick={() => {
                 onSelectOrder(os);
-                onClose();
               }}
               className="bg-white border border-slate-200 hover:border-sky-500 p-4 rounded-xl flex items-center justify-between cursor-pointer shadow-sm hover:shadow-md transition-all hover:bg-sky-50/50"
             >
@@ -59,8 +70,22 @@ export const ClientOrdersHistoryModal: React.FC<ClientOrdersHistoryModalProps> =
                     {os.equipment?.type} - {os.equipment?.brand} ({os.equipment?.model || 'Modelo N/A'})
                   </p>
                   <p className="text-xs text-slate-600 truncate max-w-md">
-                    Problema: {os.problemDescription}
+                    Problema: {os.problemDescription || 'Não informado'}
                   </p>
+                  <div className="flex items-center gap-3 text-[11px] pt-1">
+                    <span className="bg-sky-50 text-sky-800 border border-sky-200 px-2 py-0.5 rounded font-medium">
+                      Entrada: <strong className="font-bold">{os.entryDate ? new Date(os.entryDate).toLocaleDateString('pt-BR') : (os.createdAt ? new Date(os.createdAt).toLocaleDateString('pt-BR') : '—')}</strong>
+                    </span>
+                    {os.exitDate ? (
+                      <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded font-medium">
+                        Saída: <strong className="font-bold">{new Date(os.exitDate).toLocaleDateString('pt-BR')}</strong>
+                      </span>
+                    ) : (
+                      <span className="bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded text-[10px]">
+                        Saída: <em>Ainda não finalizada</em>
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 

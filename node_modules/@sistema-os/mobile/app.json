@@ -1,10 +1,11 @@
 {
   "expo": {
-    "name": "Vollen OS",
+    "name": "Vollen - Gestão de OS",
     "slug": "vollen-os",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true
     },
@@ -12,10 +13,12 @@
       "package": "com.vollen.sistemaos",
       "versionCode": 1,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
       },
       "permissions": [
         "INTERNET",
+        "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ]

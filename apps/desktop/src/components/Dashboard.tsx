@@ -128,27 +128,105 @@ export const Dashboard: React.FC<DashboardProps> = ({
 };
 
 export const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  const normalizedKey = (status || '').toUpperCase().trim();
+
+  // Tenta buscar a configuração de cor dinâmica cadastrada no sistema
+  const dynamicStatus = React.useMemo(() => {
+    try {
+      const saved = localStorage.getItem('system_os_statuses') || localStorage.getItem('vollen_os_statuses');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.find(
+            (s: any) =>
+              (s.name || '').toUpperCase().trim() === normalizedKey ||
+              (s.id || '').toUpperCase().trim() === normalizedKey ||
+              (s.code || '').toUpperCase().trim() === normalizedKey
+          );
+        }
+      }
+    } catch {}
+    return null;
+  }, [normalizedKey]);
+
+  // Se houver uma cor personalizada configurada (HEX/RGB)
+  if (dynamicStatus && dynamicStatus.color) {
+    const customHex = dynamicStatus.color;
+    const labelText = dynamicStatus.name ? String(dynamicStatus.name).replace(/_/g, ' ') : status.replace(/_/g, ' ');
+    return (
+      <span
+        style={{
+          backgroundColor: `${customHex}1A`, // ~10% de opacidade para o fundo
+          color: customHex,
+          borderColor: `${customHex}66`, // ~40% de opacidade para a borda
+        }}
+        className="px-2 py-0.5 rounded text-[10px] whitespace-nowrap inline-block border font-bold shadow-2xs"
+      >
+        {labelText}
+      </span>
+    );
+  }
+
   const styles: Record<string, string> = {
-    ABERTA: 'bg-sky-50 text-sky-700 border-sky-200',
-    EM_ATENDIMENTO: 'bg-amber-50 text-amber-700 border-amber-200',
-    AGUARDANDO_APROVACAO: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    AGUARDANDO_PECA: 'bg-orange-50 text-orange-700 border-orange-200',
-    RETORNO_GARANTIA: 'bg-purple-100 text-purple-900 border-purple-300 font-extrabold shadow-xs',
-    FINALIZADA: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    CONCLUIDA: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    CANCELADA: 'bg-red-50 text-red-700 border-red-200',
+    ABERTA: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+    ABERTO: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+    ORCAMENTO_APROVADO: 'bg-purple-100 text-purple-900 border-purple-300 font-bold',
+    'ORÇAMENTO APROVADO': 'bg-purple-100 text-purple-900 border-purple-300 font-bold',
+    EM_ATENDIMENTO: 'bg-sky-100 text-sky-900 border-sky-300 font-bold',
+    'EM ATENDIMENTO': 'bg-sky-100 text-sky-900 border-sky-300 font-bold',
+    APROVADO: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+    VISITA_TECNICA: 'bg-sky-100 text-sky-900 border-sky-300 font-bold',
+    'VISITA TÉCNICA': 'bg-sky-100 text-sky-900 border-sky-300 font-bold',
+    AGUARDANDO_PECA: 'bg-orange-100 text-orange-900 border-orange-300 font-bold',
+    'AGUARDANDO PEÇA': 'bg-orange-100 text-orange-900 border-orange-300 font-bold',
+    'AGUARDANDO PECA': 'bg-orange-100 text-orange-900 border-orange-300 font-bold',
+    AGUARDANDO_APROVACAO: 'bg-indigo-100 text-indigo-900 border-indigo-300 font-bold',
+    'AGUARDANDO APROVAÇÃO': 'bg-indigo-100 text-indigo-900 border-indigo-300 font-bold',
+    RETORNO_GARANTIA: 'bg-purple-100 text-purple-900 border-purple-300 font-extrabold shadow-2xs',
+    'RETORNO EM GARANTIA': 'bg-purple-100 text-purple-900 border-purple-300 font-extrabold shadow-2xs',
+    APARELHO_LIBERADO: 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+    'APARELHO LIBERADO': 'bg-emerald-100 text-emerald-900 border-emerald-300 font-bold',
+    FINALIZADA: 'bg-teal-100 text-teal-900 border-teal-400 font-bold',
+    CONCLUIDA: 'bg-teal-100 text-teal-900 border-teal-400 font-bold',
+    CANCELADA: 'bg-red-100 text-red-900 border-red-300 font-bold',
+    CANCELADO: 'bg-red-100 text-red-900 border-red-300 font-bold',
+    GARANTIA_FINALIZADA: 'bg-teal-100 text-teal-900 border-teal-400 font-bold',
   };
 
   const labels: Record<string, string> = {
-    RETORNO_GARANTIA: 'RETORNO EM GARANTIA',
+    ABERTA: 'Aberta',
+    ABERTO: 'Aberta',
+    ORCAMENTO_APROVADO: 'Orçamento Aprovado',
+    'ORÇAMENTO APROVADO': 'Orçamento Aprovado',
+    EM_ATENDIMENTO: 'Em Atendimento',
+    'EM ATENDIMENTO': 'Em Atendimento',
+    APROVADO: 'Aprovado',
+    VISITA_TECNICA: 'Visita Técnica',
+    'VISITA TÉCNICA': 'Visita Técnica',
+    AGUARDANDO_PECA: 'Aguardando Peça',
+    'AGUARDANDO PEÇA': 'Aguardando Peça',
+    'AGUARDANDO PECA': 'Aguardando Peça',
+    AGUARDANDO_APROVACAO: 'Aguard. Aprovação',
+    'AGUARDANDO APROVAÇÃO': 'Aguard. Aprovação',
+    RETORNO_GARANTIA: 'Retorno Garantia',
+    'RETORNO EM GARANTIA': 'Retorno Garantia',
+    APARELHO_LIBERADO: 'Liberado / Pronto',
+    'APARELHO LIBERADO': 'Liberado / Pronto',
+    FINALIZADA: 'Finalizada',
+    CONCLUIDA: 'Concluída',
+    CANCELADA: 'Cancelada',
+    CANCELADO: 'Cancelada',
+    GARANTIA_FINALIZADA: 'Garantia Finalizada',
   };
+
+  const badgeStyle = styles[normalizedKey] || styles[status] || 'bg-sky-100 text-sky-900 border-sky-300 font-bold';
+  const labelText = labels[normalizedKey] || labels[status] || status.replace(/_/g, ' ');
 
   return (
     <span
-      className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${styles[status] || 'bg-slate-100 text-slate-700'
-        }`}
+      className={`px-2 py-0.5 rounded text-[10px] whitespace-nowrap inline-block border ${badgeStyle}`}
     >
-      {labels[status] || status.replace('_', ' ')}
+      {labelText}
     </span>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   X,
   Search,
@@ -27,6 +27,7 @@ interface FinishedOrdersModalProps {
   onClose: () => void;
   onUpdateOrderStatus: (orderId: string, status: string) => void;
   onOpenEditOS: (order: any) => void;
+  onCreateWarrantyReturn?: (order: any) => void;
 }
 
 export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
@@ -35,6 +36,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
   onClose,
   onUpdateOrderStatus,
   onOpenEditOS,
+  onCreateWarrantyReturn,
 }) => {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
@@ -106,7 +108,104 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [showCanceled, setShowCanceled] = useState<boolean>(false);
 
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm("");
+      setPhoneSearch("");
+      setAddressSearch("");
+      setStatusFilter("ALL");
+      setShowCanceled(false);
+      setSelectedOrderId(null);
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      setStartDate(d.toISOString().split("T")[0]);
+      setEndDate(new Date().toISOString().split("T")[0]);
+    } else {
+      setSearchTerm("");
+      setSelectedOrderId(null);
+    }
+  }, [isOpen]);
+
+  // Estado para arraste direto via Mouse
+  const [draggingColId, setDraggingColId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+  const isDraggingRef = useRef(false);
+
+  // Limpa estados ao fechar ou desmontar
+  useEffect(() => {
+    return () => {
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
+    if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
+      return;
+    }
+    // Só inicia com o botão primário (esquerdo) do mouse
+    if (e.button !== 0) return;
+
+    e.preventDefault();
+    isDraggingRef.current = true;
+    setDraggingColId(colId);
+
+    const onGlobalMouseMove = (moveEvent: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const elem = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      if (th) {
+        const targetId = th.getAttribute('data-col-id');
+        if (targetId && targetId !== colId) {
+          setDragOverColId(targetId);
+        } else {
+          setDragOverColId(null);
+        }
+      } else {
+        setDragOverColId(null);
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onGlobalMouseMove);
+      window.removeEventListener('mouseup', onGlobalMouseUp);
+      isDraggingRef.current = false;
+      setDraggingColId(null);
+      setDragOverColId(null);
+    };
+
+    const onGlobalMouseUp = (upEvent: MouseEvent) => {
+      const wasDragging = isDraggingRef.current;
+      cleanup();
+
+      if (!wasDragging) return;
+
+      const elem = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+      const th = elem?.closest('th[data-col-id]') as HTMLElement | null;
+      const targetId = th?.getAttribute('data-col-id');
+
+      if (targetId && targetId !== colId) {
+        setColumns((prev) => {
+          const srcIdx = prev.findIndex((c) => c.id === colId);
+          const destIdx = prev.findIndex((c) => c.id === targetId);
+          if (srcIdx === -1 || destIdx === -1) return prev;
+          const newCols = [...prev];
+          const [moved] = newCols.splice(srcIdx, 1);
+          newCols.splice(destIdx, 0, moved);
+          saveColumnsToStorage(newCols);
+          return newCols;
+        });
+      }
+    };
+
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
+  };
 
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation(); e.preventDefault();
@@ -125,6 +224,19 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
     window.addEventListener("mouseup", onMouseUp);
   };
 
+  const handleMoveColumn = (columnId: string, direction: 'left' | 'right') => {
+    const idx = columns.findIndex((c) => c.id === columnId);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= columns.length) return;
+
+    const newCols = [...columns];
+    const [moved] = newCols.splice(idx, 1);
+    newCols.splice(targetIdx, 0, moved);
+    setColumns(newCols);
+    saveColumnsToStorage(newCols);
+  };
+
   const toggleColumnVisibility = (columnId: string) => {
     setColumns((prev) => {
       const updated = prev.map((col) => col.fixed ? col : col.id === columnId ? { ...col, visible: !col.visible } : col);
@@ -133,13 +245,31 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
     });
   };
 
+  const seenIds = new Set<string>();
+  const seenCodes = new Set<string>();
   const finishedOrders = orders.filter((os) => {
-    const isFinished = os.status === "FINALIZADA" || os.status === "CONCLUIDA";
+    if (!os || !os.id) return false;
+    if (seenIds.has(os.id)) return false;
+    if (os.code && seenCodes.has(os.code)) return false;
+    seenIds.add(os.id);
+    if (os.code) seenCodes.add(os.code);
+
+    const isFinished = os.status === "FINALIZADA" || os.status === "CONCLUIDA" || os.status === "GARANTIA_FINALIZADA" || os.status === "GARANTIA/FINALIZADA";
     const isCanceled = os.status === "CANCELADA";
     if (!isFinished && (!showCanceled || !isCanceled)) return false;
 
+    // Filtro por Status
+    if (statusFilter !== "ALL") {
+      if (statusFilter === "FINALIZADA" && !isFinished) return false;
+      if (statusFilter === "CANCELADA" && !isCanceled) return false;
+      if (statusFilter !== "FINALIZADA" && statusFilter !== "CANCELADA" && os.status !== statusFilter) return false;
+    }
+
     const matchesName = matchesSearchTerm(os.client?.name, searchTerm);
-    const matchesPhone = !phoneSearch || (os.client?.phone || "").includes(phoneSearch);
+    const matchesPhone =
+      !phoneSearch ||
+      matchesSearchTerm(os.client?.phone, phoneSearch) ||
+      matchesSearchTerm(os.client?.whatsapp, phoneSearch);
     const addr = `${os.client?.address || ""} ${os.client?.neighborhood || ""} ${os.client?.city || ""}`;
     const matchesAddress = matchesSearchTerm(addr, addressSearch);
     let matchesDate = true;
@@ -209,27 +339,39 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
           <button onClick={onClose} className="text-slate-600 hover:text-slate-900 p-1 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="p-4 bg-slate-100 border-b border-slate-300 grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+        <div className="p-4 bg-slate-100 border-b border-slate-300 grid grid-cols-1 md:grid-cols-6 gap-3 text-xs">
           <div>
             <label className="block font-bold text-slate-700 mb-1">Pesquisar por Nome</label>
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-              <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Ex: Maria, Carlos..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600" />
+              <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Ex: Maria, Carlos..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600 font-medium" />
             </div>
           </div>
           <div>
             <label className="block font-bold text-slate-700 mb-1">Telefone / Whats</label>
             <div className="relative">
               <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-              <input type="text" value={phoneSearch} onChange={(e) => setPhoneSearch(e.target.value)} placeholder="Ex: 99999..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600" />
+              <input type="text" value={phoneSearch} onChange={(e) => setPhoneSearch(e.target.value)} placeholder="Ex: 99999..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600 font-medium" />
             </div>
           </div>
           <div>
             <label className="block font-bold text-slate-700 mb-1">Endereco / Bairro</label>
             <div className="relative">
               <MapPin className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-              <input type="text" value={addressSearch} onChange={(e) => setAddressSearch(e.target.value)} placeholder="Ex: Centro, Rua..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600" />
+              <input type="text" value={addressSearch} onChange={(e) => setAddressSearch(e.target.value)} placeholder="Ex: Centro, Rua..." className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-emerald-600 font-medium" />
             </div>
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Status da OS</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-emerald-600 cursor-pointer shadow-xs"
+            >
+              <option value="ALL">Todas Finalizadas</option>
+              <option value="FINALIZADA">Finalizadas / Concluídas</option>
+              <option value="CANCELADA">Canceladas</option>
+            </select>
           </div>
           <div>
             <label className="block font-bold text-slate-700 mb-1">Data Inicial</label>
@@ -255,26 +397,38 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
               <colgroup>{columns.filter((c) => c.visible).map((col) => <col key={col.id} style={{ width: `${col.width}px` }} />)}</colgroup>
               <thead className="bg-slate-200 text-slate-800 font-bold uppercase sticky top-0 z-20 text-[10px]">
                 <tr>
-                  {columns.filter((col) => col.visible).map((col) => (
-                    <th key={col.id} draggable={!col.fixed}
-                      onDragStart={(e) => { setDraggedColumnId(col.id); }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => {
-                        if (!draggedColumnId || draggedColumnId === col.id) return;
-                        const src = columns.findIndex((c) => c.id === draggedColumnId);
-                        const dst = columns.findIndex((c) => c.id === col.id);
-                        if (columns[src].fixed || columns[dst].fixed) return;
-                        const newCols = [...columns]; const [moved] = newCols.splice(src, 1); newCols.splice(dst, 0, moved);
-                        setColumns(newCols);
-                        saveColumnsToStorage(newCols);
-                        setDraggedColumnId(null);
-                      }}
-                      style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                      className={`p-1.5 border-b border-r border-slate-300 relative group transition-colors ${col.fixed ? "cursor-default" : "cursor-grab active:cursor-grabbing hover:bg-slate-300/80"}`}>
-                      <div className="truncate pr-2">{col.label}</div>
-                      <div onMouseDown={(e) => handleMouseDownResize(e, col.id)} className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-emerald-500/60 z-30 opacity-0 group-hover:opacity-100" />
-                    </th>
-                  ))}
+                  {columns
+                    .filter((col) => col.visible)
+                    .map((col) => {
+                      const isDraggingThis = draggingColId === col.id;
+                      const isOverThis = dragOverColId === col.id;
+
+                      return (
+                        <th
+                          key={col.id}
+                          data-col-id={col.id}
+                          onMouseDown={(e) => handleMouseDownHeader(e, col.id)}
+                          style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px`, userSelect: 'none' }}
+                          className={`p-1.5 border-b border-r border-slate-300 relative group select-none transition-all cursor-grab active:cursor-grabbing hover:bg-slate-300/90 ${
+                            isDraggingThis
+                              ? 'opacity-40 bg-emerald-300 border-emerald-500 scale-[0.98]'
+                              : isOverThis
+                              ? 'bg-emerald-200 border-l-4 border-l-emerald-600'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between pointer-events-none select-none">
+                            <span className="truncate pr-1 font-bold">{col.label}</span>
+                            <span className="text-[10px] text-slate-400 opacity-60 group-hover:opacity-100">⠿</span>
+                          </div>
+                          <div
+                            data-resize="true"
+                            onMouseDown={(e) => handleMouseDownResize(e, col.id)}
+                            className="absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-emerald-500/60 z-30 opacity-0 group-hover:opacity-100"
+                          />
+                        </th>
+                      );
+                    })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
@@ -315,15 +469,48 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
         </div>
 
         {contextMenu && (
-          <div style={{ top: contextMenu.y, left: contextMenu.x }} className="fixed z-50 bg-white border border-slate-300 rounded-xl shadow-2xl p-2 text-xs w-48 space-y-1 font-sans" onClick={(e) => e.stopPropagation()}>
-            <div className="font-bold text-slate-700 px-2 py-1 border-b border-slate-200">Exibir / Ocultar Colunas</div>
-            {columns.map((col) => (
-              <button key={col.id} disabled={col.fixed} onClick={() => toggleColumnVisibility(col.id)}
-                className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between transition-colors ${col.fixed ? "opacity-50 cursor-not-allowed text-slate-400" : "hover:bg-slate-100 text-slate-700 cursor-pointer"}`}>
-                <span>{col.label}</span>
-                {col.visible && <Check className="w-3.5 h-3.5 text-emerald-600" />}
-              </button>
-            ))}
+          <div style={{ top: contextMenu.y, left: contextMenu.x }} className="fixed z-50 bg-white border border-slate-300 rounded-xl shadow-2xl p-2 text-xs w-64 space-y-1 font-sans" onClick={(e) => e.stopPropagation()}>
+            <div className="font-bold text-slate-700 px-2 py-1 border-b border-slate-200 flex justify-between items-center">
+              <span>Organizar Colunas</span>
+              <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {columns.map((col, cIdx) => (
+                <div
+                  key={col.id}
+                  className="flex items-center justify-between px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-700 transition-colors"
+                >
+                  <button
+                    disabled={col.fixed}
+                    onClick={() => toggleColumnVisibility(col.id)}
+                    className={`flex-1 text-left flex items-center justify-between mr-2 ${
+                      col.fixed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                  >
+                    <span className="truncate">{col.label}</span>
+                    {col.visible && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 ml-1" />}
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      title="Mover para esquerda"
+                      disabled={cIdx === 0}
+                      onClick={() => handleMoveColumn(col.id, 'left')}
+                      className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      ◀
+                    </button>
+                    <button
+                      title="Mover para direita"
+                      disabled={cIdx === columns.length - 1}
+                      onClick={() => handleMoveColumn(col.id, 'right')}
+                      className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -413,14 +600,20 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onUpdateOrderStatus(selectedOrder.id, reopenStatus);
-                    setIsReopenModalOpen(false);
-                    setSelectedOrderId(null);
+                    if (reopenStatus === 'RETORNO_GARANTIA' && onCreateWarrantyReturn && selectedOrder) {
+                      onCreateWarrantyReturn(selectedOrder);
+                      setIsReopenModalOpen(false);
+                      setSelectedOrderId(null);
+                    } else {
+                      onUpdateOrderStatus(selectedOrder.id, reopenStatus);
+                      setIsReopenModalOpen(false);
+                      setSelectedOrderId(null);
+                    }
                   }}
                   className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer text-xs"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  Confirmar Reabertura
+                  {reopenStatus === 'RETORNO_GARANTIA' ? 'Criar OS de Retorno em Garantia' : 'Confirmar Reabertura'}
                 </button>
               </div>
             </div>

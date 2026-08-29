@@ -13,16 +13,21 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
 
 export interface TechnicianItem {
   id: string;
   code: string;
   name: string;
+  username?: string;
+  password?: string;
   phone: string;
   whatsapp?: string;
   specialty?: string;
   pixKey?: string;
   active: boolean;
+  isAdmin?: boolean;
+  role?: string; // 'TECNICO' | 'ATENDENTE' | 'ADMIN' | string
 }
 
 interface ColumnConfig {
@@ -40,18 +45,7 @@ interface TechniciansModalProps {
   onSelectTechnician?: (technician: TechnicianItem) => void;
 }
 
-const DEFAULT_TECHNICIANS: TechnicianItem[] = [
-  {
-    id: 'tech-1',
-    code: '0001',
-    name: 'Técnico de Exemplo',
-    phone: '(11) 98888-1010',
-    whatsapp: '(11) 98888-1010',
-    specialty: 'Manutenção Geral e Diagnóstico',
-    pixKey: 'tecnico@email.com',
-    active: true,
-  },
-];
+const DEFAULT_TECHNICIANS: TechnicianItem[] = [];
 
 export const TechniciansModal: React.FC<TechniciansModalProps> = ({
   isOpen,
@@ -64,22 +58,52 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
       const saved = localStorage.getItem('vollen_technicians');
       if (saved) return JSON.parse(saved);
     } catch (err) {}
-    return DEFAULT_TECHNICIANS;
+    return [];
   });
+
+  // Recarrega sempre que o modal for aberto para garantir dados 100% atualizados
+  useEffect(() => {
+    if (isOpen) {
+      try {
+        const saved = localStorage.getItem('vollen_technicians');
+        if (saved) {
+          setTechnicians(JSON.parse(saved));
+        }
+      } catch (err) {}
+    }
+  }, [isOpen]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTechId, setSelectedTechId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTech, setEditingTech] = useState<TechnicianItem | null>(null);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm('');
+      setSelectedTechId(null);
+      setIsFormOpen(false);
+      setEditingTech(null);
+    } else {
+      setSearchTerm('');
+      setSelectedTechId(null);
+      setIsFormOpen(false);
+      setEditingTech(null);
+    }
+  }, [isOpen]);
+
   const [formData, setFormData] = useState({
     code: '',
     name: '',
+    role: 'TECNICO' as 'TECNICO' | 'ATENDENTE' | 'ADMIN',
+    username: '',
+    password: '',
     phone: '',
     whatsapp: '',
     specialty: '',
     pixKey: '',
     active: true,
+    isAdmin: false,
   });
 
   const canManage = Boolean(
@@ -90,20 +114,91 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     return [
-      { id: 'code', label: 'Código', width: 80, visible: true, fixed: true },
-      { id: 'name', label: 'Nome do Técnico Responsável', width: 240, visible: true, fixed: true },
-      { id: 'phone', label: 'Telefone / WhatsApp', width: 170, visible: true },
-      { id: 'specialty', label: 'Especialidade / Área', width: 220, visible: true },
-      { id: 'pixKey', label: 'Chave PIX / Repasse', width: 190, visible: true },
-      { id: 'status', label: 'Status', width: 100, visible: true },
+      { id: 'code', label: 'Código', width: 80, visible: true },
+      { id: 'name', label: 'Nome do Funcionário', width: 220, visible: true },
+      { id: 'role', label: 'Função / Cargo', width: 140, visible: true },
+      { id: 'phone', label: 'Telefone / WhatsApp', width: 160, visible: true },
+      { id: 'specialty', label: 'Especialidade / Setor', width: 200, visible: true },
+      { id: 'pixKey', label: 'Chave PIX / Repasse', width: 170, visible: true },
+      { id: 'status', label: 'Status', width: 90, visible: true },
     ];
   });
 
-  useEffect(() => {
+  // Função auxiliar para sincronizar com Firestore e localStorage
+  const syncTechnicians = (techList: TechnicianItem[], deletedId?: string) => {
     try {
-      localStorage.setItem('vollen_technicians', JSON.stringify(technicians));
+      localStorage.setItem('vollen_technicians', JSON.stringify(techList));
+      import('../services/firebase').then(({ db }) => {
+        import('firebase/firestore').then(({ doc, setDoc, deleteDoc }) => {
+          if (deletedId) {
+            deleteDoc(doc(db, 'users', deletedId)).catch(() => {});
+          }
+          techList.forEach((t) => {
+            const username = t.username || t.name.toLowerCase().replace(/\s+/g, '.');
+            const role = t.role || (t.isAdmin ? 'Admin' : 'Tecnico');
+            setDoc(
+              doc(db, 'users', t.id),
+              {
+                id: t.id,
+                username: username,
+                name: t.name,
+                role: role,
+                isAdmin: Boolean(t.isAdmin || role === 'Admin'),
+                phone: t.phone || '',
+                whatsapp: t.whatsapp || '',
+                specialty: t.specialty || '',
+                pixKey: t.pixKey || '',
+                password: t.password || '1234',
+                active: t.active ?? true,
+                updatedAt: new Date().toISOString(),
+              },
+              { merge: true }
+            ).catch(() => {});
+          });
+        });
+      });
     } catch (err) {}
+  };
+
+  useEffect(() => {
+    syncTechnicians(technicians);
   }, [technicians]);
+
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Manipulador para fechar formulário com confirmação se dados foram alterados
+  const { alert, confirm } = useDialog();
+
+  const handleRequestCloseForm = async () => {
+    if (isDirty) {
+      const ok = await confirm({ title: 'Sair sem Salvar?', message: 'Você alterou informações que ainda não foram salvas. Deseja realmente sair sem salvar?', variant: 'warning', confirmText: 'Sair sem salvar' });
+      if (ok) { setIsDirty(false); setIsFormOpen(false); }
+    } else {
+      setIsFormOpen(false);
+    }
+  };
+
+  // Manipulador para fechar o modal principal
+  const handleRequestCloseMain = () => {
+    if (isFormOpen) {
+      handleRequestCloseForm();
+    } else {
+      onClose();
+    }
+  };
+
+  // Suporte a tecla ESC
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleRequestCloseMain();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isFormOpen, isDirty]);
 
   if (!isOpen) return null;
 
@@ -112,6 +207,7 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
     return (
       matchesSearchTerm(t.name, searchTerm) ||
       matchesSearchTerm(t.code, searchTerm) ||
+      matchesSearchTerm(t.role || '', searchTerm) ||
       matchesSearchTerm(t.specialty, searchTerm) ||
       matchesSearchTerm(t.phone, searchTerm) ||
       matchesSearchTerm(t.whatsapp, searchTerm)
@@ -120,6 +216,19 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
 
   const selectedTech = technicians.find((t) => t.id === selectedTechId);
 
+  const formatPhone = (val: string) => {
+    const nums = val.replace(/\D/g, '').slice(0, 11);
+    if (nums.length > 6) {
+      if (nums.length === 11) {
+        return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`;
+      }
+      return `(${nums.slice(0, 2)}) ${nums.slice(2, 6)}-${nums.slice(6)}`;
+    } else if (nums.length > 2) {
+      return `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
+    }
+    return nums;
+  };
+
   const handleOpenCreate = () => {
     const nextNum = technicians.reduce((max, t) => {
       const num = parseInt(t.code.replace(/\D/g, ''), 10);
@@ -127,60 +236,95 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
     }, 0) + 1;
 
     setEditingTech(null);
+    setIsDirty(false);
     setFormData({
       code: String(nextNum).padStart(4, '0'),
       name: '',
+      role: 'TECNICO',
+      username: '',
+      password: '',
       phone: '',
       whatsapp: '',
       specialty: '',
       pixKey: '',
       active: true,
+      isAdmin: false,
     });
     setIsFormOpen(true);
   };
 
-  const handleOpenEdit = (tech?: TechnicianItem) => {
+  const handleOpenEdit = async (tech?: TechnicianItem) => {
     const target = tech || selectedTech;
-    if (!target) return alert('Por favor, selecione um técnico na tabela.');
+    if (!target) { await alert({ title: 'Selecione um Registro', message: 'Por favor, selecione um registro na tabela.', variant: 'info' }); return; }
     setEditingTech(target);
+    setIsDirty(false);
+    const targetRole = (target.role?.toUpperCase() || (target.isAdmin ? 'ADMIN' : 'TECNICO')) as 'TECNICO' | 'ATENDENTE' | 'ADMIN';
     setFormData({
       code: target.code,
       name: target.name,
+      role: targetRole,
+      username: target.username || target.name.toLowerCase().split(' ')[0],
+      password: target.password || '',
       phone: target.phone || '',
       whatsapp: target.whatsapp || target.phone || '',
       specialty: target.specialty || '',
       pixKey: target.pixKey || '',
       active: target.active ?? true,
+      isAdmin: Boolean(target.isAdmin || target.role === 'Admin' || target.role === 'ADMIN'),
     });
     setIsFormOpen(true);
   };
 
-  const handleDelete = () => {
-    if (!selectedTech) return alert('Por favor, selecione um técnico na tabela.');
-    if (confirm(`Deseja realmente EXCLUIR o técnico "${selectedTech.name}"?`)) {
-      setTechnicians((prev) => prev.filter((t) => t.id !== selectedTech.id));
+  const handleDelete = async () => {
+    if (!selectedTech) { await alert({ title: 'Selecione um Registro', message: 'Por favor, selecione um registro na tabela.', variant: 'info' }); return; }
+    const ok = await confirm({ title: 'Excluir Funcionário', message: `Deseja realmente EXCLUIR "${selectedTech.name}"?`, variant: 'danger', confirmText: 'Excluir' });
+    if (ok) {
+      const deletedId = selectedTech.id;
+      const updatedList = technicians.filter((t) => t.id !== deletedId);
+      setTechnicians(updatedList);
+      syncTechnicians(updatedList, deletedId);
       setSelectedTechId(null);
     }
   };
 
-  const handleSaveForm = (e: React.FormEvent) => {
+  const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      return alert('O nome do técnico é obrigatório.');
+    const cleanName = formData.name.trim();
+    if (!cleanName) {
+      await alert({ title: 'Nome Obrigatório', message: 'O nome do funcionário é obrigatório.', variant: 'warning' });
+      return;
     }
 
+    const autoUsername = formData.username.trim() || cleanName.toLowerCase().replace(/\s+/g, '.');
+
+    let updatedList: TechnicianItem[];
+
     if (editingTech) {
-      setTechnicians((prev) =>
-        prev.map((t) => (t.id === editingTech.id ? { ...t, ...formData } : t))
-      );
+      const updatedItem: TechnicianItem = {
+        ...editingTech,
+        ...formData,
+        name: cleanName,
+        username: autoUsername,
+        isAdmin: formData.isAdmin || formData.role === 'ADMIN',
+        role: formData.role,
+      };
+      updatedList = technicians.map((t) => (t.id === editingTech.id ? updatedItem : t));
     } else {
       const newTech: TechnicianItem = {
         id: `tech-${Date.now()}`,
         ...formData,
+        name: cleanName,
+        username: autoUsername,
+        isAdmin: formData.isAdmin || formData.role === 'ADMIN',
+        role: formData.role,
       };
-      setTechnicians((prev) => [...prev, newTech]);
+      updatedList = [newTech, ...technicians];
     }
 
+    // Salva imediatamente no localStorage e sincroniza
+    setTechnicians(updatedList);
+    syncTechnicians(updatedList);
+    setIsDirty(false);
     setIsFormOpen(false);
   };
 
@@ -312,6 +456,23 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                       <td className="p-2 border-r border-slate-200 font-bold text-slate-900 truncate">
                         {t.name}
                       </td>
+                      <td className="p-2 border-r border-slate-200">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold ${
+                            t.isAdmin || t.role === 'Admin' || t.role === 'ADMIN'
+                              ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                              : t.role === 'ATENDENTE'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : 'bg-sky-100 text-sky-800 border border-sky-300'
+                          }`}
+                        >
+                          {t.isAdmin || t.role === 'Admin' || t.role === 'ADMIN'
+                            ? '👑 ADMIN'
+                            : t.role === 'ATENDENTE'
+                            ? '🎧 ATENDENTE'
+                            : '🔧 TÉCNICO'}
+                        </span>
+                      </td>
                       <td className="p-2 border-r border-slate-200 text-slate-700 truncate">
                         {t.whatsapp || t.phone || '-'}
                       </td>
@@ -339,7 +500,7 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                 {filteredTechs.length === 0 && (
                   <tr>
                     <td colSpan={columns.filter((c) => c.visible).length} className="text-center py-12 text-slate-400">
-                      Nenhum técnico encontrado para a pesquisa.
+                      Nenhum funcionário encontrado para a pesquisa.
                     </td>
                   </tr>
                 )}
@@ -351,7 +512,7 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
         {/* Rodapé */}
         <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between text-xs">
           <span className="text-slate-600 italic">
-            Clique 2x em um técnico para editar seus dados ou selecioná-lo.
+            Clique 2x em um funcionário para editar seus dados ou selecioná-lo.
           </span>
           <button
             type="button"
@@ -367,7 +528,6 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
       {isFormOpen && (
         <div
           className="fixed inset-0 z-[60] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4"
-          onClick={() => setIsFormOpen(false)}
         >
           <div
             className="bg-white border border-slate-300 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden font-sans text-xs flex flex-col"
@@ -377,20 +537,27 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
               <div className="flex items-center gap-2">
                 <Wrench className="w-4 h-4 text-white" />
                 <h3 className="text-sm font-bold">
-                  {editingTech ? 'Editar Técnico Responsável' : 'Cadastrar Novo Técnico Responsável'}
+                  {editingTech ? 'Editar Cadastro de Funcionário' : 'Cadastrar Novo Funcionário / Técnico / Atendente'}
                 </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setIsFormOpen(false)}
+                onClick={handleRequestCloseForm}
                 className="text-white/80 hover:text-white p-1 rounded cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveForm} className="p-4 space-y-3 bg-slate-50">
-              <div className="grid grid-cols-3 gap-3">
+            <form
+              onSubmit={(e) => {
+                handleSaveForm(e);
+                setIsDirty(false);
+              }}
+              onChange={() => setIsDirty(true)}
+              className="p-4 space-y-3 bg-slate-50"
+            >
+              <div className="grid grid-cols-4 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Código</label>
                   <input
@@ -416,7 +583,72 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                     className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-indigo-600"
                   />
                 </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Função / Cargo <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.role}
+                    onChange={(e) => {
+                      const newRole = e.target.value as 'TECNICO' | 'ATENDENTE' | 'ADMIN';
+                      setFormData({
+                        ...formData,
+                        role: newRole,
+                        isAdmin: newRole === 'ADMIN',
+                      });
+                    }}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 font-bold text-slate-800 focus:outline-none focus:border-indigo-600 cursor-pointer text-xs"
+                  >
+                    <option value="TECNICO">🔧 Técnico</option>
+                    <option value="ATENDENTE">🎧 Atendente</option>
+                    <option value="ADMIN">👑 Administrador</option>
+                  </select>
+                </div>
               </div>
+
+              {/* Seção de Acesso ao Aplicativo Celular (APK) - Relevante para Técnicos e Admins */}
+              {formData.role !== 'ATENDENTE' ? (
+                <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-2">
+                  <div className="flex items-center gap-1.5 text-indigo-900 font-bold text-xs">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                    <span>Acesso ao Aplicativo do Celular (APK Mobile)</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Usuário / Login no App
+                      </label>
+                      <input
+                        type="text"
+                        value={formData.username}
+                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                        placeholder="Ex: roberto"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-mono focus:outline-none focus:border-indigo-600"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Senha do Aplicativo
+                      </label>
+                      <input
+                        type="password"
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        placeholder="Digite a senha (ex: 1234)"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-center gap-2">
+                  <span className="text-base">🎧</span>
+                  <span>
+                    <strong>Atendente:</strong> Atua diretamente no sistema desktop no balcão e telefone, criando e gerenciando Ordens de Serviço.
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -424,7 +656,7 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                   <input
                     type="text"
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                     placeholder="(00) 00000-0000"
                     className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-indigo-600"
                   />
@@ -438,7 +670,7 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                   <input
                     type="text"
                     value={formData.whatsapp}
-                    onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, whatsapp: formatPhone(e.target.value) })}
                     placeholder="(00) 00000-0000"
                     className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-indigo-600"
                   />
@@ -446,54 +678,92 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Especialidade / Área de Atuação</label>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {formData.role === 'ATENDENTE' ? 'Setor / Observação' : 'Especialidade / Área de Atuação'}
+                </label>
                 <input
                   type="text"
                   value={formData.specialty}
                   onChange={(e) => setFormData({ ...formData, specialty: e.target.value })}
-                  placeholder="Ex: Lavadoras, Geladeiras, Ar Condicionado, TV..."
+                  placeholder={
+                    formData.role === 'ATENDENTE'
+                      ? 'Ex: Recepção, Atendimento WhatsApp, Balcão...'
+                      : 'Ex: Lavadoras, Geladeiras, Ar Condicionado, TV...'
+                  }
                   className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 focus:outline-none focus:border-indigo-600"
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Chave PIX / Dados de Repasse</label>
-                <input
-                  type="text"
-                  value={formData.pixKey}
-                  onChange={(e) => setFormData({ ...formData, pixKey: e.target.value })}
-                  placeholder="Chave PIX, Banco ou Conta"
-                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-mono focus:outline-none focus:border-indigo-600"
-                />
-              </div>
+              {formData.role !== 'ATENDENTE' && (
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Chave PIX / Dados de Repasse</label>
+                  <input
+                    type="text"
+                    value={formData.pixKey}
+                    onChange={(e) => setFormData({ ...formData, pixKey: e.target.value })}
+                    placeholder="Chave PIX, Banco ou Conta"
+                    className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-mono focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+              )}
 
-              <div className="flex items-center gap-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="techActiveCheckbox"
-                  checked={formData.active}
-                  onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                  className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
-                />
-                <label htmlFor="techActiveCheckbox" className="font-bold text-slate-800 cursor-pointer">
-                  Técnico Ativo no Sistema
-                </label>
+              <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="techActiveCheckbox"
+                    checked={formData.active}
+                    onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded cursor-pointer"
+                  />
+                  <label htmlFor="techActiveCheckbox" className="font-bold text-slate-800 cursor-pointer">
+                    {formData.role === 'ATENDENTE'
+                      ? 'Atendente Ativo no Sistema'
+                      : formData.role === 'ADMIN'
+                      ? 'Administrador Ativo no Sistema'
+                      : 'Técnico Ativo no Sistema'}
+                  </label>
+                </div>
+
+                <div className="flex items-start gap-2 bg-purple-50 p-2.5 rounded-xl border border-purple-200">
+                  <input
+                    type="checkbox"
+                    id="techAdminCheckbox"
+                    checked={formData.isAdmin}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        isAdmin: e.target.checked,
+                        role: e.target.checked ? 'ADMIN' : formData.role === 'ADMIN' ? 'TECNICO' : formData.role,
+                      })
+                    }
+                    className="w-4 h-4 text-purple-600 rounded cursor-pointer mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="techAdminCheckbox" className="font-bold text-purple-950 cursor-pointer text-xs flex items-center gap-1.5">
+                      <span>👑 Conceder Privilégios de Administrador (Admin)</span>
+                    </label>
+                    <p className="text-[11px] text-purple-700 mt-0.5 leading-tight">
+                      Permite acesso irrestrito às configurações, gerenciamento e visualização de todas as Ordens de Serviço.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => setIsFormOpen(false)}
+                  onClick={handleRequestCloseForm}
                   className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-1.5 rounded-xl font-bold cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow cursor-pointer"
                 >
                   <Save className="w-4 h-4" />
-                  Salvar Técnico
+                  Salvar Cadastro
                 </button>
               </div>
             </form>

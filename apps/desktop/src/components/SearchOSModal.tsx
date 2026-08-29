@@ -18,6 +18,20 @@ export const SearchOSModal: React.FC<SearchOSModalProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInputVal('');
+        setErrorMessage('');
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSearch = (e: React.FormEvent) => {
@@ -30,43 +44,55 @@ export const SearchOSModal: React.FC<SearchOSModalProps> = ({
       return;
     }
 
-    // Extrai os dígitos do input (ex: "OS-0001" ou "0001" ou "1" -> 1)
+    // Extrai os dígitos do input (ex: "OS-0002" ou "0002" ou "2" -> searchNum = 2)
     const digitsOnly = rawInput.replace(/\D/g, '');
-    const searchNum = parseInt(digitsOnly, 10);
+    const hasDigits = digitsOnly.length > 0;
+    const searchNum = hasDigits ? parseInt(digitsOnly, 10) : NaN;
+    const inputUpper = rawInput.toUpperCase().trim();
 
-    // Encontra a OS ignorando zeros à esquerda, prefixos e acentos no nome
-    const foundOrder = orders.find((os) => {
-      if (!os) return false;
+    // 1. PRIORIDADE MÁXIMA: Busca por número / código de OS
+    let foundOrder = null;
 
-      // Se comparando por código (ex: OS-0001)
-      if (os.code) {
-        const codeDigits = (os.code || '').replace(/\D/g, '');
-        if (codeDigits && !isNaN(searchNum) && parseInt(codeDigits, 10) === searchNum) {
-          return true;
-        }
-        if (matchesSearchTerm(os.code, rawInput)) {
-          return true;
-        }
+    if (hasDigits && !isNaN(searchNum)) {
+      // 1.1 Tenta casamento exato pelo número sequencial do código (ex: "OS-0002" vs 2)
+      foundOrder = orders.find((os) => {
+        if (!os || !os.code) return false;
+        const codeDigits = String(os.code).replace(/\D/g, '');
+        return codeDigits && parseInt(codeDigits, 10) === searchNum;
+      });
+
+      // 1.2 Tenta casamento de código direto como string (ex: "OS-0002" ou "0002")
+      if (!foundOrder) {
+        foundOrder = orders.find((os) => {
+          if (!os || !os.code) return false;
+          const codeUpper = String(os.code).toUpperCase().trim();
+          return codeUpper === inputUpper || codeUpper === `OS-${digitsOnly.padStart(4, '0')}`;
+        });
       }
+    }
 
-      // Se comparando por ID numérico ou string
-      if (os.id) {
-        const idDigits = String(os.id).replace(/\D/g, '');
-        if (idDigits && !isNaN(searchNum) && parseInt(idDigits, 10) === searchNum) {
-          return true;
-        }
-        if (matchesSearchTerm(String(os.id), rawInput)) {
-          return true;
-        }
-      }
+    // 2. Tenta casamento por nome do cliente
+    if (!foundOrder) {
+      foundOrder = orders.find((os) => {
+        if (!os || !os.client?.name) return false;
+        return matchesSearchTerm(os.client.name, rawInput);
+      });
+    }
 
-      // Se comparando por nome do cliente (com suporte a busca sem acentos)
-      if (os.client?.name && matchesSearchTerm(os.client.name, rawInput)) {
-        return true;
-      }
+    // 3. Tenta casamento por telefone ou WhatsApp
+    if (!foundOrder && hasDigits) {
+      foundOrder = orders.find((os) => {
+        if (!os || !os.client) return false;
+        const phoneDigits = String(os.client.phone || '').replace(/\D/g, '');
+        const wppDigits = String(os.client.whatsapp || '').replace(/\D/g, '');
+        return (digitsOnly.length >= 4 && (phoneDigits.includes(digitsOnly) || wppDigits.includes(digitsOnly)));
+      });
+    }
 
-      return false;
-    });
+    // 4. Tenta casamento por ID específico caso seja digitado
+    if (!foundOrder) {
+      foundOrder = orders.find((os) => os && String(os.id).trim() === rawInput);
+    }
 
     if (foundOrder) {
       onSelectOrder(foundOrder);

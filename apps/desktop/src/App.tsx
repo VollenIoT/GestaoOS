@@ -16,26 +16,49 @@ import { BackupModal } from './components/BackupModal';
 import { PartsModal } from './components/PartsModal';
 import { StatusBar } from './components/StatusBar';
 import { ScheduleCalendar } from './components/ScheduleCalendar';
-import { fetchDashboardStats, fetchVisits, fetchOrders, fetchClients, createClient, updateOrder, deleteClient, updateVisit, deleteVisit } from './services/api';
+import {
+  fetchDashboardStats,
+  fetchVisits,
+  fetchOrders,
+  fetchClients,
+  createClient,
+  updateOrder,
+  createOrder,
+  deleteClient,
+  updateVisit,
+  deleteVisit,
+  subscribeOrders,
+  subscribeClients,
+} from './services/api';
 
 import { EquipmentsModal } from './components/EquipmentsModal';
 import { ServicesModal } from './components/ServicesModal';
 import { WarrantyConfigModal } from './components/WarrantyConfigModal';
 import { OrderStatusModal } from './components/OrderStatusModal';
 import { CompanyModal, CompanyData, defaultCompanyData } from './components/CompanyModal';
+import { LinkMobileModal } from './components/LinkMobileModal';
 import { SearchOSModal } from './components/SearchOSModal';
 import { WallpaperModal } from './components/WallpaperModal';
 import { PeriodOrdersReportModal } from './components/PeriodOrdersReportModal';
+import { TechnicianOrdersReportModal } from './components/TechnicianOrdersReportModal';
 import { TechniciansModal } from './components/TechniciansModal';
 import { FactoryResetModal } from './components/FactoryResetModal';
 import { OSGeneralConfigModal } from './components/OSGeneralConfigModal';
 import { PrinterConfigModal } from './components/PrinterConfigModal';
+import { db } from './services/firebase';
+import { collection, onSnapshot, doc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { EstimatesModal } from './components/EstimatesModal';
 import { CreateEstimateModal, Estimate } from './components/CreateEstimateModal';
 import { OrderSequenceModal } from './components/OrderSequenceModal';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [currentUser, setCurrentUser] = useState<any | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('vollen_current_user');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'schedule'>('dashboard');
   const [stats, setStats] = useState<any>(null);
   const [visits, setVisits] = useState<any[]>([]);
@@ -50,101 +73,76 @@ export default function App() {
 
   // ESTADO DA LISTA DE PEÇAS COM ESTOQUE PERSISTIDO
   const [allParts, setAllParts] = useState<any[]>(() => {
-    const defaultParts = [
-      {
-        id: 'part-1',
-        code: '0001',
-        name: 'BOMBA DE DRENAGEM BRASTEMP / CONSUL',
-        costPrice: '45,00',
-        profitMarginPercent: '50',
-        techPrice: '65,00',
-        finalPrice: '120,00',
-        application: 'Lavadoras Brastemp / Consul 10kg a 15kg',
-        stockQuantity: 15,
-        minStock: 3,
-      },
-      {
-        id: 'part-2',
-        code: '0002',
-        name: 'VÁLVULA DE ENTRADA DE ÁGUA DUPLA 127V',
-        costPrice: '28,00',
-        profitMarginPercent: '50',
-        techPrice: '40,00',
-        finalPrice: '85,00',
-        application: 'Electrolux LTE09 / LTR10 / LST12',
-        stockQuantity: 8,
-        minStock: 2,
-      },
-    ];
     try {
       const saved = localStorage.getItem('vollen_parts_stock');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (err) {}
-    return defaultParts;
+    return [];
   });
 
-  const saveParts = (newParts: any[]) => {
+  const saveParts = async (newParts: any[]) => {
     setAllParts(newParts);
     try {
       localStorage.setItem('vollen_parts_stock', JSON.stringify(newParts));
-    } catch (err) {}
+      for (const p of newParts) {
+        await setDoc(doc(db, 'parts', String(p.id)), p, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar peças no Firestore:', err);
+    }
   };
 
   // ESTADO DA LISTA DE SERVIÇOS CADASTRADOS
-  const [allServices, setAllServices] = useState<any[]>([
-    { id: 'srv-1', name: 'Higienização e Limpeza Completa', price: '150,00' },
-    { id: 'srv-2', name: 'Carga de Gás Refrigerante R134a / R600a', price: '220,00' },
-    { id: 'srv-3', name: 'Troca de Placa Eletrônica / Módulo', price: '180,00' },
-    { id: 'srv-4', name: 'Desentupimento e Manutenção Preventiva', price: '120,00' },
-  ]);
+  const [allServices, setAllServices] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('vollen_services');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  const saveServices = async (newServices: any[]) => {
+    setAllServices(newServices);
+    try {
+      localStorage.setItem('vollen_services', JSON.stringify(newServices));
+      for (const s of newServices) {
+        await setDoc(doc(db, 'services', String(s.id)), s, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar serviços no Firestore:', err);
+    }
+  };
 
   // ESTADO DA LISTA DE EQUIPAMENTOS CADASTRADOS
   const [allEquipments, setAllEquipments] = useState<any[]>(() => {
-    const defaultEquipments = [
-      {
-        id: 'eqp-1',
-        code: '0001',
-        type: 'Geladeira Frost Free',
-        brand: 'Brastemp',
-        model: 'BRM54JK',
-        serialNumber: 'SN987654321',
-      },
-      {
-        id: 'eqp-2',
-        code: '0002',
-        type: 'Lava e Seca',
-        brand: 'Samsung',
-        model: 'WD11M',
-        serialNumber: 'SN123456789',
-      },
-      {
-        id: 'eqp-3',
-        code: '0003',
-        type: 'Máquina de Lavar',
-        brand: 'Electrolux',
-        model: 'LES13',
-        serialNumber: 'SN456789123',
-      },
-    ];
     try {
       const saved = localStorage.getItem('vollen_equipments');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (err) {}
-    return defaultEquipments;
+    return [];
   });
 
-  const saveEquipments = (newEquipments: any[]) => {
+  const saveEquipments = async (newEquipments: any[]) => {
     setAllEquipments(newEquipments);
     try {
       localStorage.setItem('vollen_equipments', JSON.stringify(newEquipments));
-    } catch (err) {}
+      for (const eq of newEquipments) {
+        await setDoc(doc(db, 'equipments', String(eq.id)), eq, { merge: true });
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar equipamentos no Firestore:', err);
+    }
   };
+
   const [isModalOpen, setIsModalOpen] = useState(false); // Nível 1: Criar Nova OS
   const [registerModalType, setRegisterModalType] = useState<
     'CLIENT' | 'PART' | 'TECHNICIAN' | 'EQUIPMENT' | 'SERVICE' | null
@@ -178,6 +176,7 @@ export default function App() {
   const [isWarrantyConfigOpen, setIsWarrantyConfigOpen] = useState<boolean>(false);
   const [isWallpaperModalOpen, setIsWallpaperModalOpen] = useState<boolean>(false);
   const [isPeriodReportModalOpen, setIsPeriodReportModalOpen] = useState<boolean>(false);
+  const [isTechnicianReportModalOpen, setIsTechnicianReportModalOpen] = useState<boolean>(false);
   const [isFactoryResetModalOpen, setIsFactoryResetModalOpen] = useState<boolean>(false);
   const [isOSGeneralConfigModalOpen, setIsOSGeneralConfigModalOpen] = useState<boolean>(false);
   const [isPrinterConfigModalOpen, setIsPrinterConfigModalOpen] = useState<boolean>(false);
@@ -226,11 +225,12 @@ export default function App() {
     return defaultCompanyData;
   });
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
+  const [isLinkMobileModalOpen, setIsLinkMobileModalOpen] = useState<boolean>(false);
   const [isSearchOSModalOpen, setIsSearchOSModalOpen] = useState<boolean>(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState<boolean>(false);
   const [isOrderSequenceModalOpen, setIsOrderSequenceModalOpen] = useState<boolean>(false);
 
-  // ESTADO GLOBAL DA CONFIGURAÇÃO PADRÃO DE TERMOS DE GARANTIA E ORÇAMENTO DA OS
+  // ESTADO GLOBAL DA CONFIGURAÇÃO PADRÃO DE TERMOS DOS COMPROVANTES DA OS
   const [defaultWarrantyConfig, setDefaultWarrantyConfig] = useState(() => {
     try {
       const saved = localStorage.getItem('vollen_os_config');
@@ -238,9 +238,11 @@ export default function App() {
     } catch (err) { }
     return {
       defaultDays: '90',
-      defaultTerms: 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado. Não cobre danos causados por mau uso, oscilações na rede elétrica, umidade ou intervenções de terceiros.',
+      defaultTerms: 'A garantia cobre exclusivamente os serviços executados e as peças substituídas identificadas neste documento pelo período estabelecido. Não cobre danos causados por mau uso, quedas, oscilações elétricas, umidade ou intervenção de terceiros.',
       defaultCoverage: 'PECAS_E_MAO_DE_OBRA',
-      defaultEstimateTerms: 'O orçamento possui validade de 10 dias. Equipamentos não retirados em até 90 dias após notificação estarão sujeitos a taxas de armazenamento ou descarte nos termos da lei.',
+      defaultEntryTerms: 'O cliente autoriza a realização da avaliação e diagnóstico técnico no equipamento descrito neste comprovante. Equipamentos não retirados em até 90 dias após notificação de conclusão/orçamento estarão sujeitos a taxas de guarda/armazenamento ou descarte conforme a legislação vigente.',
+      defaultEstimateTerms: 'O orçamento possui validade de 10 dias úteis a contar da data de emissão. Os serviços e peças discriminados estão sujeitos à aprovação prévia do cliente.',
+      defaultExitTerms: 'A garantia cobre exclusivamente os serviços executados e as peças substituídas identificadas neste documento pelo período estabelecido. Não cobre danos causados por mau uso, quedas, oscilações elétricas, umidade ou intervenção de terceiros.',
     };
   });
 
@@ -258,6 +260,93 @@ export default function App() {
   const [openOrdersOpenedFromMenuOS, setOpenOrdersOpenedFromMenuOS] = useState<boolean>(false);
   const [finishedOrdersOpenedFromMenuOS, setFinishedOrdersOpenedFromMenuOS] = useState<boolean>(false);
   const [createOSOpenedFromMenuOS, setCreateOSOpenedFromMenuOS] = useState<boolean>(false);
+
+  // HANDLER: Criar nova OS de Retorno em Garantia a partir de uma OS finalizada
+  const handleCreateWarrantyReturn = async (originalOrder: any) => {
+    try {
+      // Calcula próximo código de OS
+      let maxNum = maxEverOrderCode;
+      try {
+        const parsed = JSON.parse(localStorage.getItem('vollen_os_config') || '{}');
+        if (parsed.initialOrderNumber) {
+          const initN = parseInt(String(parsed.initialOrderNumber).replace(/\D/g, ''), 10);
+          if (!isNaN(initN) && initN > 0 && initN - 1 > maxNum) maxNum = initN - 1;
+        }
+      } catch {}
+      (allOrders || []).forEach((o: any) => {
+        const n = parseInt((o.code || '').replace(/\D/g, ''), 10);
+        if (!isNaN(n) && n > maxNum) maxNum = n;
+      });
+      const newCode = `OS-${String(maxNum + 1).padStart(4, '0')}`;
+      const newId = String(Date.now());
+
+      // Pega a data de saída da OS original como início da garantia
+      const originalExitDate = originalOrder.exitDate || '';
+      const originalWarrantyTerms = originalOrder.warrantyTermsData || {};
+
+      const newOrderData = {
+        id: newId,
+        code: newCode,
+        client: originalOrder.client,
+        clientId: originalOrder.clientId || originalOrder.client?.id || '',
+        equipment: originalOrder.equipment,
+        status: 'RETORNO_GARANTIA',
+        warrantyType: originalOrder.warrantyType || 'GARANTIA_LOJA',
+        warrantyTermsData: {
+          ...originalWarrantyTerms,
+          // Garantia começa a contar da data de saída da OS original
+          startDate: originalExitDate || originalWarrantyTerms.startDate || new Date().toISOString().split('T')[0],
+        },
+        originalOsCode: originalOrder.code,
+        originalOsId: originalOrder.id,
+        originalExecutedService: originalOrder.originalExecutedService || originalOrder.executedService || '',
+        problemDescription: '',
+        technicalReport: '',
+        executedService: '',
+        returnExecutedService: '',
+        entryDate: new Date().toISOString().split('T')[0],
+        exitDate: '',
+        partsUsed: [],
+        parts: [],
+        partsList: [],
+        servicesExecuted: [],
+        services: [],
+        servicesList: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Cria a nova OS
+      const createdOrder = await createOrder(newOrderData);
+
+      // Registra na OS original que ela gerou um retorno em garantia
+      await updateOrder(originalOrder.id, {
+        warrantyReturnOsCode: newCode,
+        warrantyReturnOsId: newId,
+      });
+
+      // Atualiza estado local imediatamente
+      setAllOrders((prev: any[]) => [
+        createdOrder,
+        ...prev.map((o: any) =>
+          o.id === originalOrder.id
+            ? { ...o, warrantyReturnOsCode: newCode, warrantyReturnOsId: newId }
+            : o
+        ),
+      ]);
+      setMaxEverOrderCode(maxNum + 1);
+
+      // Fecha a lista de OS finalizadas e abre a nova OS no modal de criação
+      setIsFinishedOrdersModalOpen(false);
+      setOrderToEdit(createdOrder);
+      setCameFromFinishedOrders(false);
+      setIsModalOpen(true);
+      setStatusMessage(`OS de Retorno em Garantia ${newCode} criada com sucesso!`);
+    } catch (err) {
+      console.error('Erro ao criar OS de retorno em garantia:', err);
+      setStatusMessage('Erro ao criar OS de retorno em garantia.');
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -278,7 +367,76 @@ export default function App() {
       }
 
       const clientsData = await fetchClients().catch(() => []);
-      if (Array.isArray(clientsData)) setAllClients(clientsData);
+      if (Array.isArray(clientsData)) {
+        setAllClients(clientsData);
+      }
+
+      // Sincroniza cadastros locais de peças, serviços e equipamentos
+      try {
+        const localParts = JSON.parse(localStorage.getItem('vollen_parts_stock') || '[]');
+        const localServices = JSON.parse(localStorage.getItem('vollen_services') || '[]');
+        const localEquipments = JSON.parse(localStorage.getItem('vollen_equipments') || '[]');
+
+        if (Array.isArray(localParts) && localParts.length > 0) {
+          setAllParts(localParts);
+        } else {
+          setAllParts((prev) => {
+            if (prev.length > 0) {
+              try { localStorage.setItem('vollen_parts_stock', JSON.stringify(prev)); } catch (e) {}
+            }
+            return prev;
+          });
+        }
+
+        if (Array.isArray(localServices) && localServices.length > 0) {
+          setAllServices(localServices);
+        } else {
+          setAllServices((prev) => {
+            if (prev.length > 0) {
+              try { localStorage.setItem('vollen_services', JSON.stringify(prev)); } catch (e) {}
+            }
+            return prev;
+          });
+        }
+
+        if (Array.isArray(localEquipments) && localEquipments.length > 0) {
+          setAllEquipments(localEquipments);
+        } else {
+          setAllEquipments((prev) => {
+            if (prev.length > 0) {
+              try { localStorage.setItem('vollen_equipments', JSON.stringify(prev)); } catch (e) {}
+            }
+            return prev;
+          });
+        }
+
+        // Busca coleções do Firestore de forma assíncrona sem travar a interface
+        Promise.all([
+          getDocs(collection(db, 'parts')).catch(() => null),
+          getDocs(collection(db, 'services')).catch(() => null),
+          getDocs(collection(db, 'equipments')).catch(() => null),
+        ]).then(([partsSnap, srvSnap, eqSnap]) => {
+          if (srvSnap) {
+            const sList = srvSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setAllServices(sList);
+            localStorage.setItem('vollen_services', JSON.stringify(sList));
+          }
+
+          if (partsSnap) {
+            const pList = partsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setAllParts(pList);
+            localStorage.setItem('vollen_parts_stock', JSON.stringify(pList));
+          }
+
+          if (eqSnap) {
+            const eList = eqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            setAllEquipments(eList);
+            localStorage.setItem('vollen_equipments', JSON.stringify(eList));
+          }
+        }).catch(() => {});
+      } catch (err) {
+        console.warn('Erro ao carregar cadastros:', err);
+      }
     } catch (err) {
       console.error('Erro ao carregar dados:', err);
     }
@@ -286,15 +444,163 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    // Sincronização em tempo real das coleções do Firestore
+    const unsubOrders = subscribeOrders((realtimeOrders) => {
+      setAllOrders(realtimeOrders);
+      const fetchedMax = realtimeOrders.reduce((max, o) => {
+        const num = parseInt((o.code || '').replace(/\D/g, ''), 10);
+        return isNaN(num) ? max : Math.max(max, num);
+      }, 0);
+      setMaxEverOrderCode(fetchedMax);
+    });
+
+    const unsubClients = subscribeClients((realtimeClients) => {
+      setAllClients(realtimeClients);
+    });
+
+    let unsubParts = () => {};
+    let unsubServices = () => {};
+    let unsubEquipments = () => {};
+    let unsubCompany = () => {};
+    let unsubStatuses = () => {};
+    let unsubConfig = () => {};
+
+    try {
+      unsubParts = onSnapshot(collection(db, 'parts'), (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setAllParts(list);
+        try { localStorage.setItem('vollen_parts_stock', JSON.stringify(list)); } catch (e) {}
+      });
+
+      unsubServices = onSnapshot(collection(db, 'services'), (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setAllServices(list);
+        try { localStorage.setItem('vollen_services', JSON.stringify(list)); } catch (e) {}
+      });
+
+      unsubEquipments = onSnapshot(collection(db, 'equipments'), (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setAllEquipments(list);
+        try { localStorage.setItem('vollen_equipments', JSON.stringify(list)); } catch (e) {}
+      });
+
+      unsubCompany = onSnapshot(doc(db, 'system_config', 'company_data'), (snap) => {
+        if (snap.exists()) {
+          const comp = snap.data() as CompanyData;
+          setCompanyInfoState(comp);
+          try {
+            localStorage.setItem('vollen_company_data', JSON.stringify(comp));
+          } catch (e) {}
+        }
+      });
+      unsubStatuses = onSnapshot(collection(db, 'os_statuses'), (snap) => {
+        if (!snap.empty) {
+          const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          try {
+            localStorage.setItem('custom_os_statuses_v3', JSON.stringify(list));
+          } catch (e) {}
+        }
+      });
+      unsubConfig = onSnapshot(doc(db, 'system_config', 'os_preferences'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          try {
+            localStorage.setItem('vollen_os_preferences', JSON.stringify(data));
+            localStorage.setItem('vollen_os_general_config', JSON.stringify(data));
+          } catch (e) {}
+        }
+      });
+    } catch (err) {
+      console.warn('Erro ao conectar listeners de catálogo:', err);
+    }
+
+    return () => {
+      unsubOrders();
+      unsubClients();
+      unsubParts();
+      unsubServices();
+      unsubEquipments();
+      unsubCompany();
+      unsubStatuses();
+      unsubConfig();
+    };
   }, [selectedDate]);
 
-  // Conversão suave de CAPS LOCK via CSS na classe do body ou quando aplicável
+  // Conversão global e ativa de CAPS LOCK para todos os inputs e formulários do sistema
   useEffect(() => {
     if (isCapsLockActive) {
       document.body.classList.add('app-caps-active');
     } else {
       document.body.classList.remove('app-caps-active');
     }
+
+    // Intercepta digitação antes de inserir o caractere no input
+    const handleBeforeInput = (e: any) => {
+      if (!isCapsLockActive) return;
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+      if (!target || !['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+
+      const type = (target.getAttribute('type') || '').toLowerCase();
+      if (['password', 'email', 'file', 'date', 'time', 'number', 'color', 'range', 'checkbox', 'radio'].includes(type)) return;
+
+      if (e.data && typeof e.data === 'string' && e.data !== e.data.toUpperCase()) {
+        e.preventDefault();
+        const upperChar = e.data.toUpperCase();
+        
+        // Insere o caractere maiúsculo disparando eventos React
+        const start = target.selectionStart ?? target.value.length;
+        const end = target.selectionEnd ?? target.value.length;
+        const prevVal = target.value;
+        const newVal = prevVal.substring(0, start) + upperChar + prevVal.substring(end);
+
+        // Atualiza via Prototype setter para o React registrar o onChange
+        const prototype = Object.getPrototypeOf(target);
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(target, newVal);
+        } else {
+          target.value = newVal;
+        }
+
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.setSelectionRange(start + upperChar.length, start + upperChar.length);
+      }
+    };
+
+    const handleInputUppercase = (e: Event) => {
+      if (!isCapsLockActive) return;
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement | null;
+      if (!target || !['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+
+      const type = (target.getAttribute('type') || '').toLowerCase();
+      if (['password', 'email', 'file', 'date', 'time', 'number', 'color', 'range', 'checkbox', 'radio'].includes(type)) return;
+
+      const upper = target.value.toUpperCase();
+      if (target.value !== upper) {
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+        const prototype = Object.getPrototypeOf(target);
+        const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+        if (descriptor && descriptor.set) {
+          descriptor.set.call(target, upper);
+        } else {
+          target.value = upper;
+        }
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        if (start !== null && end !== null) {
+          target.setSelectionRange(start, end);
+        }
+      }
+    };
+
+    document.addEventListener('beforeinput', handleBeforeInput, true);
+    document.addEventListener('input', handleInputUppercase, true);
+
+    return () => {
+      document.removeEventListener('beforeinput', handleBeforeInput, true);
+      document.removeEventListener('input', handleInputUppercase, true);
+    };
   }, [isCapsLockActive]);
 
   // Navegação Global com Tecla Enter entre Campos de Formulário (e Salvar no Último Campo)
@@ -335,9 +641,6 @@ export default function App() {
 
           if (nextFocusable && nextFocusable.tagName !== 'BUTTON') {
             nextFocusable.focus();
-            if (nextFocusable instanceof HTMLInputElement) {
-              nextFocusable.select();
-            }
           } else {
             // Se não houver mais campos de texto, buscar o botão de submit/salvar do formulário ou container
             const submitBtn = focusables.find(
@@ -388,6 +691,7 @@ export default function App() {
     isWarrantyConfigOpen ||
     isWallpaperModalOpen ||
     isPeriodReportModalOpen ||
+    isTechnicianReportModalOpen ||
     isFactoryResetModalOpen ||
     isOSGeneralConfigModalOpen ||
     isOrderSequenceModalOpen ||
@@ -395,13 +699,35 @@ export default function App() {
     isEstimatesModalOpen ||
     isCreateEstimateModalOpen ||
     isCompanyModalOpen ||
+    isLinkMobileModalOpen ||
     isSearchOSModalOpen ||
     isScheduleModalOpen
   );
 
-  // Atalhos Globais de Teclado (F2, F5, F6, F7, F8) - Ativos APENAS na tela inicial
+  // O CAPS LOCK é uma funcionalidade VIRTUAL interna do sistema
+  // Converte toda digitação dentro do programa em MAIÚSCULAS sem ligar o CapsLock físico do Windows
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Se o usuário clicar na tecla CapsLock enquanto estiver no programa, alterna o botão virtual
+      if (e.key === 'CapsLock' || e.code === 'CapsLock') {
+        setIsCapsLockActive((prev) => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Bloqueio Global do F5 / Ctrl+R do Navegador/Webview e Atalhos de Teclado (F2, F5, F6, F7, F8)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Bloqueia sempre a recarga da página por F5 ou Ctrl+R para não recarregar/deslogar
+      if (e.key === 'F5' || (e.ctrlKey && e.key.toLowerCase() === 'r')) {
+        e.preventDefault();
+      }
+
       // Se houver qualquer modal aberto na tela ou se estiver digitando em inputs, bloqueia novos atalhos
       if (isAnyModalOpen) {
         return;
@@ -436,8 +762,8 @@ export default function App() {
       }
     };
 
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
   }, [isAnyModalOpen]);
 
   // Handlers para Orçamentos
@@ -521,10 +847,24 @@ export default function App() {
     setStatusMessage(`Gerando Ordem de Serviço a partir do Orçamento #${estimate.code}...`);
   };
 
-  const handleLogout = () => setCurrentUser(null);
+  const handleLogout = () => {
+    try {
+      sessionStorage.removeItem('vollen_current_user');
+    } catch {}
+    setCurrentUser(null);
+  };
 
   if (!currentUser) {
-    return <LoginScreen onLoginSuccess={(user) => setCurrentUser(user)} />;
+    return (
+      <LoginScreen
+        onLoginSuccess={(user) => {
+          try {
+            sessionStorage.setItem('vollen_current_user', JSON.stringify(user));
+          } catch {}
+          setCurrentUser(user);
+        }}
+      />
+    );
   }
 
   return (
@@ -561,6 +901,7 @@ export default function App() {
         onOpenServicesModal={() => setIsServicesModalOpen(true)}
         onOpenOrderStatusModal={() => setIsOrderStatusModalOpen(true)}
         onOpenCompanyModal={() => setIsCompanyModalOpen(true)}
+        onOpenLinkMobileModal={() => setIsLinkMobileModalOpen(true)}
         onOpenEstimatesModal={() => setIsEstimatesModalOpen(true)}
         onOpenCreateEstimateModal={() => {
           setEstimateToEdit(null);
@@ -581,6 +922,9 @@ export default function App() {
             .catch((err) => {
               console.error('Erro ao carregar ordens com excluídas:', err);
             });
+        }}
+        onOpenTechnicianOrdersReportModal={() => {
+          setIsTechnicianReportModalOpen(true);
         }}
       />
 
@@ -659,9 +1003,33 @@ export default function App() {
             setIsMenuOSOpen(true);
           }
         }}
-        onOpenClientsModal={() => setIsClientsModalOpen(true)}
-        onOpenPartsModal={() => setIsPartsModalOpen(true)}
-        onOpenServicesModal={() => setIsServicesModalOpen(true)}
+        onOpenClientsModal={() => {
+          setClientSelectCallback(() => (client: any) => {
+            setSelectedClientForNewOS(client);
+            if (orderToEdit) {
+              setOrderToEdit((prev: any) => ({
+                ...prev,
+                clientId: client.id,
+                client,
+              }));
+            }
+          });
+          setIsClientsModalOpen(true);
+        }}
+        onOpenPartsModal={() => {
+          setPartSelectCallback(() => (part: any) => {
+            setSelectedPartForOS(part);
+            setTimeout(() => setSelectedPartForOS(null), 300);
+          });
+          setIsPartsModalOpen(true);
+        }}
+        onOpenServicesModal={() => {
+          setServiceSelectCallback(() => (service: any) => {
+            setSelectedServiceForOS(service);
+            setTimeout(() => setSelectedServiceForOS(null), 300);
+          });
+          setIsServicesModalOpen(true);
+        }}
         onOpenClientHistory={(clientName, clientId) => {
           const clientMatch = allClients.find(
             (c) => c.id === clientId || c.name.toLowerCase() === clientName.toLowerCase()
@@ -680,6 +1048,26 @@ export default function App() {
         onDeleteOrder={(deletedId) => {
           setAllOrders((prev) => prev.filter((o) => o.id !== deletedId));
           setStatusMessage('Ordem de Serviço excluída definitivamente.');
+        }}
+        onUpdatePartsStock={saveParts}
+        onSaveEquipment={(newEq) => {
+          const typeFormatted = (newEq.type || newEq.name || '').trim();
+          if (!typeFormatted) return;
+          const normalizedNew = typeFormatted.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          const exists = allEquipments.some((e) => {
+            const existingName = (e.type || e.name || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+            return existingName === normalizedNew;
+          });
+          if (exists) {
+            return; // Não duplica se já existir
+          }
+          const updated = [newEq, ...allEquipments];
+          saveEquipments(updated);
+        }}
+        onCreateWarrantyReturn={handleCreateWarrantyReturn}
+        onOpenWarrantyOrder={(targetOS) => {
+          setOrderToEdit(targetOS);
+          loadData();
         }}
         onSuccess={async (savedOrder?: any) => {
           if (estimateToConvertToOS) {
@@ -814,6 +1202,7 @@ export default function App() {
             setIsMenuOSOpen(true);
           }
         }}
+        onCreateWarrantyReturn={handleCreateWarrantyReturn}
         onUpdateOrderStatus={async (orderId, newStatus) => {
           setAllOrders((prev) =>
             prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
@@ -971,7 +1360,10 @@ export default function App() {
         onOpenClientOrdersHistoryModal={() => setIsClientOrdersHistoryOpen(true)}
         onOpenSelectedOSFromClient={(order) => {
           setViewingClient(null);
-          setEditingOrder(order);
+          setRegisterModalType(null);
+          setIsClientsModalOpen(false);
+          setOrderToEdit(order);
+          setIsModalOpen(true);
         }}
         onClose={() => {
           const wasClientForm = registerModalType === 'CLIENT' || Boolean(viewingClient);
@@ -1002,18 +1394,38 @@ export default function App() {
           loadData();
         }}
         onSaveEquipment={(eqForm) => {
+          const typeFormatted = (eqForm.type || '').trim();
+          if (!typeFormatted) {
+            alert('Por favor, informe o nome do equipamento.');
+            return;
+          }
+
+          // Verifica se já existe um equipamento com o mesmo nome/tipo (ignorando acentos e maiúsculas/minúsculas)
+          const normalizedNew = typeFormatted.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+          const duplicate = allEquipments.find((e) => {
+            if (eqForm.id && e.id === eqForm.id) return false;
+            const existingName = (e.type || e.name || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+            return existingName === normalizedNew;
+          });
+
+          if (duplicate) {
+            alert(`Já existe um equipamento cadastrado com o nome "${duplicate.type || duplicate.name}" (Código: ${duplicate.code || 'N/D'}). Não é permitido cadastrar duplicados.`);
+            return;
+          }
+
           const maxNum = allEquipments.reduce((max, e) => {
             const num = parseInt(String(e.code || '').replace(/\D/g, ''), 10);
             return isNaN(num) ? max : Math.max(max, num);
           }, 0);
           const nextCode = String(maxNum + 1).padStart(4, '0');
+          const finalType = isCapsLockActive ? typeFormatted.toUpperCase() : typeFormatted;
           const newEq = {
             id: eqForm.id || String(Date.now()),
             code: eqForm.code ? String(eqForm.code).padStart(4, '0') : nextCode,
-            type: eqForm.type || 'Equipamento Geral',
-            brand: eqForm.brand || '',
-            model: eqForm.model || '',
-            serialNumber: eqForm.serialNumber || '',
+            type: finalType,
+            brand: isCapsLockActive ? (eqForm.brand || '').toUpperCase() : (eqForm.brand || ''),
+            model: isCapsLockActive ? (eqForm.model || '').toUpperCase() : (eqForm.model || ''),
+            serialNumber: isCapsLockActive ? (eqForm.serialNumber || '').toUpperCase() : (eqForm.serialNumber || ''),
           };
           const exists = allEquipments.some((e) => e.id === newEq.id);
           const updated = exists
@@ -1033,15 +1445,15 @@ export default function App() {
           const newPart = {
             id: partForm.id || String(Date.now()),
             code: partForm.code ? partForm.code.replace('PEC-', '') : nextCode,
-            name: partForm.name || 'PEÇA SEM NOME',
-            brand: partForm.brand || '',
-            group: partForm.group || '',
-            location: partForm.location || '',
+            name: isCapsLockActive ? (partForm.name || '').toUpperCase() : (partForm.name || 'PEÇA SEM NOME'),
+            brand: isCapsLockActive ? (partForm.brand || '').toUpperCase() : (partForm.brand || ''),
+            group: isCapsLockActive ? (partForm.group || '').toUpperCase() : (partForm.group || ''),
+            location: isCapsLockActive ? (partForm.location || '').toUpperCase() : (partForm.location || ''),
             costPrice: partForm.costPrice || '',
             profitMarginPercent: partForm.profitMarginPercent || '',
             techPrice: partForm.techPrice || '',
             finalPrice: partForm.finalPrice || '0,00',
-            application: partForm.application || '',
+            application: isCapsLockActive ? (partForm.application || '').toUpperCase() : (partForm.application || ''),
             stockQuantity: Number(partForm.stockQuantity) || 0,
             minStock: Number(partForm.minStock) || 0,
           };
@@ -1063,16 +1475,14 @@ export default function App() {
           const newService = {
             id: serviceForm.id || String(Date.now()),
             code: serviceForm.code || nextCode,
-            name: serviceForm.name || 'SERVIÇO SEM NOME',
+            name: isCapsLockActive ? (serviceForm.name || '').toUpperCase() : (serviceForm.name || 'SERVIÇO SEM NOME'),
             price: serviceForm.price || '0,00',
           };
-          setAllServices((prev) => {
-            const exists = prev.some((s) => s.id === newService.id);
-            if (exists) {
-              return prev.map((s) => (s.id === newService.id ? newService : s));
-            }
-            return [newService, ...prev];
-          });
+          const exists = allServices.some((s) => s.id === newService.id);
+          const updated = exists
+            ? allServices.map((s) => (s.id === newService.id ? newService : s))
+            : [newService, ...allServices];
+          saveServices(updated);
           setStatusMessage(`Serviço "${newService.name}" salvo com sucesso!`);
           setViewingService(null);
           setIsServicesModalOpen(true);
@@ -1152,8 +1562,14 @@ export default function App() {
           setViewingPart(part);
           setIsPartsModalOpen(false);
         }}
-        onDeletePart={(partId) => {
-          setAllParts((prev) => prev.filter((p) => p.id !== partId));
+        onDeletePart={async (partId) => {
+          const updated = allParts.filter((p) => p.id !== partId);
+          saveParts(updated);
+          try {
+            await deleteDoc(doc(db, 'parts', String(partId)));
+          } catch (e) {
+            console.warn('Erro ao excluir peça no Firestore:', e);
+          }
           setStatusMessage('Peça excluída com sucesso.');
         }}
       />
@@ -1186,8 +1602,14 @@ export default function App() {
           setViewingService(service);
           setIsServicesModalOpen(false);
         }}
-        onDeleteService={(serviceId) => {
-          setAllServices((prev) => prev.filter((s) => s.id !== serviceId));
+        onDeleteService={async (serviceId) => {
+          const updated = allServices.filter((s) => s.id !== serviceId);
+          saveServices(updated);
+          try {
+            await deleteDoc(doc(db, 'services', String(serviceId)));
+          } catch (e) {
+            console.warn('Erro ao excluir serviço no Firestore:', e);
+          }
           setStatusMessage('Serviço excluído com sucesso.');
         }}
       />
@@ -1198,24 +1620,27 @@ export default function App() {
         onClose={() => setIsBackupModalOpen(false)}
       />
 
-      {/* Modal de Configuração de OS > Termos de Garantia e Orçamento Padrão */}
+      {/* Modal de Configuração de OS > Termos dos Comprovantes Padrão */}
       <WarrantyConfigModal
         isOpen={isWarrantyConfigOpen}
         defaultDays={defaultWarrantyConfig.defaultDays}
         defaultTerms={defaultWarrantyConfig.defaultTerms}
         defaultCoverage={defaultWarrantyConfig.defaultCoverage}
+        defaultEntryTerms={defaultWarrantyConfig.defaultEntryTerms}
         defaultEstimateTerms={defaultWarrantyConfig.defaultEstimateTerms}
+        defaultExitTerms={defaultWarrantyConfig.defaultExitTerms}
         onClose={() => setIsWarrantyConfigOpen(false)}
         onSave={(newCfg) => {
           setDefaultWarrantyConfig(newCfg);
           localStorage.setItem('vollen_os_config', JSON.stringify(newCfg));
-          setStatusMessage('Configurações padrão dos Termos de Garantia e Orçamento salvas com sucesso.');
+          setStatusMessage('Configurações padrão dos Termos de OS salvas com sucesso.');
         }}
       />
 
       {/* Modal de Gerenciamento de Status de OS */}
       <OrderStatusModal
         isOpen={isOrderStatusModalOpen}
+        currentUser={currentUser}
         onClose={() => setIsOrderStatusModalOpen(false)}
       />
 
@@ -1244,7 +1669,7 @@ export default function App() {
         onSelectOrder={(selectedOS) => {
           setOrderToEdit(selectedOS);
           setSelectedClientForNewOS(null);
-          if (selectedOS.status === 'FINALIZADA' || selectedOS.status === 'CONCLUIDA') {
+          if (selectedOS.status === 'FINALIZADA' || selectedOS.status === 'CONCLUIDA' || selectedOS.status === 'GARANTIA_FINALIZADA' || selectedOS.status === 'GARANTIA/FINALIZADA') {
             setCameFromFinishedOrders(true);
             setCameFromOpenOrders(false);
           } else {
@@ -1260,6 +1685,7 @@ export default function App() {
         isOpen={isScheduleModalOpen}
         onClose={() => setIsScheduleModalOpen(false)}
         visits={visits}
+        orders={allOrders}
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
         onEditVisit={async (visitDataToUpdate) => {
@@ -1342,7 +1768,7 @@ export default function App() {
           setIsPeriodReportModalOpen(false);
           setOrderToEdit(order);
           setSelectedClientForNewOS(null);
-          if (order.status === 'FINALIZADA' || order.status === 'CONCLUIDA') {
+          if (order.status === 'FINALIZADA' || order.status === 'CONCLUIDA' || order.status === 'GARANTIA_FINALIZADA' || order.status === 'GARANTIA/FINALIZADA') {
             setCameFromFinishedOrders(true);
             setCameFromOpenOrders(false);
           } else {
@@ -1351,6 +1777,34 @@ export default function App() {
           }
           setIsModalOpen(true);
         }}
+      />
+
+      {/* Modal de Relatório de Ordens de Serviço por Técnico */}
+      <TechnicianOrdersReportModal
+        isOpen={isTechnicianReportModalOpen}
+        orders={allOrdersWithDeleted.length > 0 ? allOrdersWithDeleted : allOrders}
+        companyInfo={companyInfoState}
+        onClose={() => setIsTechnicianReportModalOpen(false)}
+        onOpenOrderDetails={(order) => {
+          setIsTechnicianReportModalOpen(false);
+          setOrderToEdit(order);
+          setSelectedClientForNewOS(null);
+          if (order.status === 'FINALIZADA' || order.status === 'CONCLUIDA' || order.status === 'GARANTIA_FINALIZADA' || order.status === 'GARANTIA/FINALIZADA') {
+            setCameFromFinishedOrders(true);
+            setCameFromOpenOrders(false);
+          } else {
+            setCameFromOpenOrders(true);
+            setCameFromFinishedOrders(false);
+          }
+          setIsModalOpen(true);
+        }}
+      />
+
+      {/* Modal de Vinculação com Celular (QR Code) */}
+      <LinkMobileModal
+        isOpen={isLinkMobileModalOpen}
+        companyInfo={companyInfoState}
+        onClose={() => setIsLinkMobileModalOpen(false)}
       />
 
       {/* Modal de Restauração de Padrão de Fábrica */}
@@ -1364,8 +1818,14 @@ export default function App() {
           setWallpaperPosY(50);
           setWallpaperScale(100);
           setCompanyInfoState(defaultCompanyData);
+          setAllOrders([]);
+          setAllOrdersWithDeleted([]);
+          setAllClients([]);
+          setVisits([]);
+          setEstimates([]);
+          setMaxEverOrderCode(0);
           await loadData();
-          setStatusMessage('Padrão de fábrica restaurado com sucesso.');
+          setStatusMessage('Padrão de fábrica restaurado com sucesso. Todos os dados foram limpos.');
         }}
       />
 

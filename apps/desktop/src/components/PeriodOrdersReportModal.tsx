@@ -145,6 +145,18 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
     return { total, abertas, finalizadas, canceladas, excluidas, faturamento };
   }, [filteredOrders]);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handlePrintReport = () => {

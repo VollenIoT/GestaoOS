@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
   StatusBar,
@@ -6,54 +6,302 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  BackHandler,
 } from 'react-native';
-import { FileText, Users, Calendar, Wrench, Settings } from 'lucide-react-native';
+import { FileText, Users, Calendar, Wrench, LogOut, Settings, Sliders, Building2 } from 'lucide-react-native';
+import { Image } from 'react-native';
 import { OrdersListScreen } from './src/screens/OrdersListScreen';
+import { ClientsListScreen } from './src/screens/ClientsListScreen';
+import { OptionsScreen } from './src/screens/OptionsScreen';
 import { CreateOrderScreen } from './src/screens/CreateOrderScreen';
 import { CreateClientScreen } from './src/screens/CreateClientScreen';
 import { DailyVisitsScreen } from './src/screens/DailyVisitsScreen';
 import { VisitExecutionScreen } from './src/screens/VisitExecutionScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
+import { QrLinkScreen } from './src/screens/QrLinkScreen';
 import {
   fetchOrdersMobile,
   fetchClientsMobile,
-  getServerUrl,
-  setServerUrl,
+  fetchVisitsByTechnician,
+  fetchCompanyDataMobile,
+  subscribeCompanyDataMobile,
+  TEST_MODE_COMPANY,
+  saveOrderMobile,
+  syncPendingOrdersMobile,
+  subscribeOrdersMobile,
+  subscribeClientsMobile,
+  getCurrentUserMobile,
+  logoutUserMobile,
+  getLinkedCompanyMobile,
+  unlinkCompanyMobile,
 } from './src/services/api';
+import {
+  sendLocalVisitNotification,
+  getViewedVisitIds,
+} from './src/services/notifications';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'orders' | 'clients' | 'schedule' | 'settings'>('orders');
+  const [linkedCompany, setLinkedCompany] = useState<any | null>(null);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [companyInfo, setCompanyInfo] = useState<any>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [activeTab, setActiveTab] = useState<'orders' | 'clients' | 'schedule' | 'options'>('orders');
   const [orders, setOrders] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const [clientToEdit, setClientToEdit] = useState<any | null>(null);
+  const [unreadVisitsCount, setUnreadVisitsCount] = useState<number>(0);
   
   // Telas ativas em pilha
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [orderToEdit, setOrderToEdit] = useState<any | null>(null);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [selectedVisit, setSelectedVisit] = useState<any | null>(null);
+  // Sub-seção da tela de Opções (para o botão voltar funcionar)
+  const [optionsSection, setOptionsSection] = useState<'MENU' | 'PARTS' | 'EQUIPMENTS' | 'SERVICES'>('MENU');
+
+  const prevVisitIdsRef = useRef<string[]>([]);
+  const isFirstLoadRef = useRef(true);
+
+  // Trata o botão físico / gestual de voltar do celular Android
+  useEffect(() => {
+    const onBackPress = () => {
+      // 1. Fechar detalhes de visita
+      if (selectedVisit) {
+        setSelectedVisit(null);
+        return true;
+      }
+
+      // 2. Quando o formulário de OS está aberto, o próprio CreateOrderScreen cuida do botão voltar (e de seus modais como Selecionar Cliente)
+      if (isCreatingOrder) {
+        return false;
+      }
+
+      // 3. Sair do formulário de cliente (pede confirmação)
+      if (isCreatingClient) {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          'Descartar alterações?',
+          'Há informações preenchidas nesta tela. Deseja voltar e descartar as alterações?',
+          [
+            { text: 'Continuar editando', style: 'cancel' },
+            { text: 'Descartar', style: 'destructive', onPress: () => { setIsCreatingClient(false); setClientToEdit(null); } },
+          ]
+        );
+        return true;
+      }
+
+      // 4. Voltar da sub-tela de Opções para o menu de Opções
+      if (activeTab === 'options' && optionsSection !== 'MENU') {
+        setOptionsSection('MENU');
+        return true;
+      }
+
+      // 5. Voltar de qualquer aba para a aba principal (OS)
+      if (activeTab !== 'orders') {
+        setActiveTab('orders');
+        return true;
+      }
+
+      // 6. Na tela principal: perguntar antes de sair do app
+      const { Alert } = require('react-native');
+      Alert.alert(
+        'Sair do aplicativo?',
+        'Deseja realmente sair do Vollen OS?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Sair', style: 'destructive', onPress: () => BackHandler.exitApp() },
+        ]
+      );
+      return true;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => subscription.remove();
+  }, [selectedVisit, isCreatingClient, isCreatingOrder, activeTab, optionsSection]);
+
+  useEffect(() => {
+    async function checkAuth() {
+      const linked = await getLinkedCompanyMobile();
+      setLinkedCompany(linked);
+
+      const user = await getCurrentUserMobile();
+
+      // Em modo de teste, sempre usar dados neutros sem buscar do Firestore
+      if (linked?.isTestMode) {
+        setCompanyInfo(TEST_MODE_COMPANY);
+      } else {
+        const company = await fetchCompanyDataMobile();
+        if (company) setCompanyInfo(company);
+      }
+
+      setCurrentUser(user);
+      setAuthChecked(true);
+    }
+    checkAuth();
+
+    const unsubComp = subscribeCompanyDataMobile((data) => {
+      if (data) setCompanyInfo(data);
+    });
+    return () => unsubComp();
+  }, []);
+
+  const filterOrdersForCurrentUser = (rawOrders: any[], user: any) => {
+    if (!user) return [];
+    if (user.role === 'Admin' || user.isAdmin || user.username === 'admin') return rawOrders;
+
+    const currentName = (user.name || '').toLowerCase().trim();
+    const currentUsername = (user.username || '').toLowerCase().trim();
+    const currentId = String(user.id || '').toLowerCase().trim();
+
+    return rawOrders.filter((o) => {
+      const assigned = (o.technician || o.technicianName || '').toLowerCase().trim();
+      const techId = String(o.technicianId || '').toLowerCase().trim();
+
+      if (!assigned && !techId) return false;
+
+      return (
+        (assigned && currentName && assigned === currentName) ||
+        (assigned && currentUsername && assigned === currentUsername) ||
+        (techId && currentId && techId === currentId)
+      );
+    });
+  };
+
+  const updateVisitsAndNotify = async (user: any) => {
+    if (!user) return;
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const visits = await fetchVisitsByTechnician(user.name || user.username, todayStr);
+      const viewedIds = await getViewedVisitIds();
+
+      const currentVisitIds = visits.map((v) => v.id || v.orderId);
+      const unread = visits.filter((v) => !viewedIds.includes(v.id || v.orderId));
+      setUnreadVisitsCount(unread.length);
+
+      // Se não for a primeira carga, detecta visitas inseridas recentemente e notifica
+      if (!isFirstLoadRef.current) {
+        const newVisits = visits.filter((v) => !prevVisitIdsRef.current.includes(v.id || v.orderId));
+        for (const nv of newVisits) {
+          sendLocalVisitNotification(nv, (targetVisit) => {
+            setSelectedVisit(targetVisit);
+          });
+        }
+      } else {
+        isFirstLoadRef.current = false;
+      }
+
+      prevVisitIdsRef.current = currentVisitIds;
+    } catch (err) {
+      console.warn('Erro ao atualizar contador de visitas:', err);
+    }
+  };
 
   const loadAllData = async () => {
     try {
       const [ords, clis] = await Promise.all([fetchOrdersMobile(), fetchClientsMobile()]);
-      setOrders(ords);
+      setOrders(filterOrdersForCurrentUser(ords, currentUser));
       setClients(clis);
+      await updateVisitsAndNotify(currentUser);
     } catch (err) {
       console.error('Erro ao carregar dados móveis:', err);
     }
   };
 
   useEffect(() => {
+    if (!currentUser) return;
     loadAllData();
-  }, []);
+    syncPendingOrdersMobile();
+
+    // Escuta em tempo real direto da nuvem
+    const unsubOrders = subscribeOrdersMobile((realtimeOrders) => {
+      setOrders(filterOrdersForCurrentUser(realtimeOrders, currentUser));
+      syncPendingOrdersMobile();
+      updateVisitsAndNotify(currentUser);
+    });
+    const unsubClients = subscribeClientsMobile((realtimeClients) => {
+      setClients(realtimeClients);
+    });
+
+    return () => {
+      unsubOrders();
+      unsubClients();
+    };
+  }, [currentUser]);
+
+  const handleLogout = async () => {
+    await logoutUserMobile();
+    setCurrentUser(null);
+  };
+
+  if (!authChecked) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#38bdf8" />
+      </SafeAreaView>
+    );
+  }
+
+  // 1. Se o celular ainda não foi vinculado a uma empresa via QR Code / SuperLogin
+  if (!linkedCompany) {
+    return (
+      <QrLinkScreen
+        onLinkedSuccess={async (linked) => {
+          const compData = linked?.testPayload || linked;
+          setLinkedCompany(compData);
+          setCurrentUser(null);
+          fetchCompanyDataMobile().then((comp) => {
+            if (comp) setCompanyInfo(comp);
+          });
+        }}
+      />
+    );
+  }
+
+  // 2. Se já foi vinculado à empresa, exibe a tela de login do técnico
+  if (!currentUser) {
+    return (
+      <LoginScreen
+        onLoginSuccess={(user) => setCurrentUser(user)}
+        onUnlinkCompany={async () => {
+          await unlinkCompanyMobile();
+          setLinkedCompany(null);
+          setCurrentUser(null);
+        }}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
 
-      {/* Header Principal do App */}
+      {/* Header Principal do App (Identidade da Empresa Conectada) */}
       <View style={styles.header}>
-        <View style={styles.logoBadge}>
-          <Wrench size={16} color="#38bdf8" />
+        <View style={styles.headerLeft}>
+          <View style={styles.logoBadge}>
+            {companyInfo?.logoUrl ? (
+              <Image
+                source={{ uri: companyInfo.logoUrl }}
+                style={{ width: 28, height: 28, borderRadius: 6 }}
+                resizeMode="contain"
+              />
+            ) : (
+              <Wrench size={16} color="#38bdf8" />
+            )}
+          </View>
+          <View style={{ flexShrink: 1 }}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {companyInfo?.tradingName || companyInfo?.name || 'Vollen OS'}
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {currentUser.name || currentUser.username} {currentUser.role === 'Admin' || currentUser.isAdmin ? '👑 (Admin)' : ''}
+            </Text>
+          </View>
         </View>
-        <Text style={styles.headerTitle}>Vollen OS Mobile</Text>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <LogOut size={18} color="#ef4444" />
+        </TouchableOpacity>
       </View>
 
       {/* Roteamento de Telas */}
@@ -61,53 +309,102 @@ export default function App() {
         {isCreatingOrder ? (
           <CreateOrderScreen
             clients={clients}
-            onBack={() => setIsCreatingOrder(false)}
-            onSaved={() => {
+            orderToEdit={orderToEdit}
+            onBack={() => {
               setIsCreatingOrder(false);
+              setOrderToEdit(null);
+            }}
+            onSaved={() => {
               loadAllData();
             }}
-            onOpenCreateClient={() => setIsCreatingClient(true)}
+            onOpenCreateClient={() => {
+              setClientToEdit(null);
+              setIsCreatingClient(true);
+            }}
           />
         ) : isCreatingClient ? (
           <CreateClientScreen
-            onBack={() => setIsCreatingClient(false)}
-            onSaved={(newClient) => {
+            clientToEdit={clientToEdit}
+            onBack={() => {
               setIsCreatingClient(false);
+              setClientToEdit(null);
+            }}
+            onSaved={() => {
+              setIsCreatingClient(false);
+              setClientToEdit(null);
               loadAllData();
             }}
           />
         ) : selectedVisit ? (
           <VisitExecutionScreen
             visit={selectedVisit}
-            onBack={() => setSelectedVisit(null)}
+            onBack={() => {
+              setSelectedVisit(null);
+              updateVisitsAndNotify(currentUser);
+            }}
             onRefresh={() => {
               setSelectedVisit(null);
               loadAllData();
+            }}
+            onEditOrder={(order) => {
+              setSelectedVisit(null);
+              setOrderToEdit(order);
+              setIsCreatingOrder(true);
             }}
           />
         ) : activeTab === 'orders' ? (
           <OrdersListScreen
             orders={orders}
-            onSelectOrder={(order) => {}}
-            onOpenCreateOrder={() => setIsCreatingOrder(true)}
+            onSelectOrder={(order) => setSelectedVisit(order)}
+            onOpenCreateOrder={() => {
+              setOrderToEdit(null);
+              setIsCreatingOrder(true);
+            }}
+            onEditOrder={(order) => {
+              setOrderToEdit(order);
+              setIsCreatingOrder(true);
+            }}
+            onCancelOrder={async (order) => {
+              try {
+                await saveOrderMobile({ ...order, status: 'CANCELADA' });
+                loadAllData();
+              } catch (err) {
+                console.error('Erro ao cancelar OS:', err);
+              }
+            }}
             onRefresh={loadAllData}
           />
         ) : activeTab === 'schedule' ? (
           <DailyVisitsScreen
-            technicianName="Técnico Roberto"
-            onSelectVisit={(visit) => setSelectedVisit(visit)}
+            technicianName={currentUser?.name || currentUser?.username || 'Técnico'}
+            onSelectVisit={(visit) => {
+              setSelectedVisit(visit);
+              updateVisitsAndNotify(currentUser);
+            }}
           />
-        ) : (
-          <OrdersListScreen
-            orders={orders}
-            onSelectOrder={() => {}}
-            onOpenCreateOrder={() => setIsCreatingOrder(true)}
+        ) : activeTab === 'clients' ? (
+          <ClientsListScreen
+            clients={clients}
+            onOpenCreateClient={() => {
+              setClientToEdit(null);
+              setIsCreatingClient(true);
+            }}
+            onEditClient={(client) => {
+              setClientToEdit(client);
+              setIsCreatingClient(true);
+            }}
             onRefresh={loadAllData}
           />
-        )}
+        ) : activeTab === 'options' ? (
+          <OptionsScreen
+            onRefreshAll={loadAllData}
+            section={optionsSection}
+            onSectionChange={setOptionsSection}
+          />
+        ) : null}
       </View>
 
-      {/* Barra de Navegação Inferior (Bottom Navigation) */}
+      {/* Barra de Navegação Inferior (Bottom Navigation com Aba Clientes, Visitas e Opções para Admin) */}
       {!isCreatingOrder && !isCreatingClient && !selectedVisit && (
         <View style={styles.bottomNav}>
           <TouchableOpacity
@@ -122,21 +419,57 @@ export default function App() {
 
           <TouchableOpacity
             style={[styles.navItem, activeTab === 'schedule' && styles.navItemActive]}
-            onPress={() => setActiveTab('schedule')}
+            onPress={() => {
+              setActiveTab('schedule');
+              updateVisitsAndNotify(currentUser);
+            }}
           >
-            <Calendar size={20} color={activeTab === 'schedule' ? '#38bdf8' : '#64748b'} />
-            <Text style={[styles.navText, activeTab === 'schedule' && styles.navTextActive]}>
-              Visitas
+            <View style={{ position: 'relative' }}>
+              <Calendar size={20} color={activeTab === 'schedule' ? '#38bdf8' : '#64748b'} />
+              {unreadVisitsCount > 0 && (
+                <View style={styles.tabBadge}>
+                  <Text style={styles.tabBadgeText}>
+                    {unreadVisitsCount > 9 ? '9+' : unreadVisitsCount}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text
+              style={[
+                styles.navText,
+                activeTab === 'schedule' && styles.navTextActive,
+                unreadVisitsCount > 0 && { color: '#38bdf8', fontWeight: 'bold' },
+              ]}
+            >
+              Visitas {unreadVisitsCount > 0 ? `(${unreadVisitsCount})` : ''}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setIsCreatingClient(true)}
+            style={[styles.navItem, activeTab === 'clients' && styles.navItemActive]}
+            onPress={() => setActiveTab('clients')}
           >
-            <Users size={20} color="#64748b" />
-            <Text style={styles.navText}>+ Cliente</Text>
+            <Users size={20} color={activeTab === 'clients' ? '#38bdf8' : '#64748b'} />
+            <Text style={[styles.navText, activeTab === 'clients' && styles.navTextActive]}>
+              Clientes ({clients.length})
+            </Text>
           </TouchableOpacity>
+
+          {/* Aba Opções (Exibida para Usuários Administradores) */}
+          {(currentUser?.role === 'Admin' || currentUser?.isAdmin || currentUser?.username === 'admin') && (
+            <TouchableOpacity
+              style={[styles.navItem, activeTab === 'options' && styles.navItemActive]}
+              onPress={() => {
+                setOptionsSection('MENU');
+                setActiveTab('options');
+              }}
+            >
+              <Sliders size={20} color={activeTab === 'options' ? '#38bdf8' : '#64748b'} />
+              <Text style={[styles.navText, activeTab === 'options' && styles.navTextActive]}>
+                Opções
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </SafeAreaView>
@@ -144,42 +477,79 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1e293b',
+    backgroundColor: '#0f172a',
     borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-    gap: 8,
+    borderBottomColor: '#1e293b',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   logoBadge: {
-    backgroundColor: '#0369a1',
-    padding: 6,
+    backgroundColor: '#0284c7',
+    padding: 8,
     borderRadius: 8,
   },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#ffffff' },
-  content: { flex: 1 },
+  headerSubtitle: { fontSize: 12, color: '#38bdf8', marginTop: 1 },
+  logoutBtn: {
+    padding: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+  },
+  content: { flex: 1, backgroundColor: '#f1f5f9' },
   bottomNav: {
     flexDirection: 'row',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#ffffff',
     borderTopWidth: 1,
-    borderTopColor: '#334155',
+    borderTopColor: '#e2e8f0',
     paddingVertical: 8,
     paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 8,
   },
   navItem: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 4,
     gap: 2,
+    position: 'relative',
   },
   navItemActive: {
     borderTopWidth: 2,
-    borderTopColor: '#38bdf8',
+    borderTopColor: '#0284c7',
   },
-  navText: { fontSize: 10, fontWeight: 'bold', color: '#64748b' },
-  navTextActive: { color: '#38bdf8' },
+  navText: { fontSize: 10, fontWeight: 'bold', color: '#94a3b8' },
+  navTextActive: { color: '#0284c7' },
+  tabBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -10,
+    backgroundColor: '#0284c7',
+    borderRadius: 9,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#ffffff',
+  },
+  tabBadgeText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '900',
+  },
 });
+

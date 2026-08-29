@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,45 +7,123 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  BackHandler,
 } from 'react-native';
 import { ArrowLeft, Save, User, Phone, MapPin } from 'lucide-react-native';
 import { saveClientMobile } from '../services/api';
 
 interface CreateClientScreenProps {
+  clientToEdit?: any;
   onBack: () => void;
   onSaved: (newClient: any) => void;
 }
 
 export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
+  clientToEdit,
   onBack,
   onSaved,
 }) => {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
-  const [cep, setCep] = useState('');
-  const [address, setAddress] = useState('');
-  const [number, setNumber] = useState('');
-  const [neighborhood, setNeighborhood] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('SP');
+  const [name, setName] = useState(clientToEdit?.name || '');
+  const [phone, setPhone] = useState(clientToEdit?.phone || '');
+  const [whatsapp, setWhatsapp] = useState(clientToEdit?.whatsapp || '');
+  const [cep, setCep] = useState(clientToEdit?.cep || '');
+  const [address, setAddress] = useState(clientToEdit?.address || '');
+  const [number, setNumber] = useState(clientToEdit?.number || '');
+  const [neighborhood, setNeighborhood] = useState(clientToEdit?.neighborhood || '');
+  const [city, setCity] = useState(clientToEdit?.city || '');
+  const [state, setState] = useState(clientToEdit?.state || '');
   const [submitting, setSubmitting] = useState(false);
+  const [loadingCep, setLoadingCep] = useState(false);
 
-  const handleFetchCep = async () => {
-    const cleanCep = cep.replace(/\D/g, '');
+  // Formata CEP automaticamente: 00000-000
+  const formatCep = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 8);
+    if (digits.length > 5) {
+      return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+    }
+    return digits;
+  };
+
+  // Formata telefone/celular automaticamente com parênteses e traço
+  const formatPhone = (val: string) => {
+    const nums = val.replace(/\D/g, '').slice(0, 11);
+    if (nums.length > 6) {
+      if (nums.length === 11) {
+        return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`;
+      }
+      return `(${nums.slice(0, 2)}) ${nums.slice(2, 6)}-${nums.slice(6)}`;
+    } else if (nums.length > 2) {
+      return `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
+    }
+    return nums;
+  };
+
+  // Busca automática do CEP via ViaCEP
+  const searchCepData = async (rawCep: string) => {
+    const cleanCep = rawCep.replace(/\D/g, '');
     if (cleanCep.length !== 8) return;
 
+    setLoadingCep(true);
     try {
       const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
       const data = await res.json();
       if (!data.erro) {
-        setAddress(data.logradouro || '');
-        setNeighborhood(data.bairro || '');
-        setCity(data.localidade || '');
-        setState(data.uf || 'SP');
+        if (data.logradouro) setAddress(data.logradouro);
+        if (data.bairro) setNeighborhood(data.bairro);
+        if (data.localidade) setCity(data.localidade);
+        if (data.uf) setState(data.uf);
+      } else {
+        Alert.alert('CEP não encontrado', 'O CEP informado não retornou endereço. Preencha manualmente.');
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Erro ao consultar CEP:', err);
+    } finally {
+      setLoadingCep(false);
+    }
   };
+
+  // Monitora alterações não salvas no formulário
+  const isDirty = useMemo(() => {
+    return (
+      name !== (clientToEdit?.name || '') ||
+      phone !== (clientToEdit?.phone || '') ||
+      whatsapp !== (clientToEdit?.whatsapp || '') ||
+      cep !== (clientToEdit?.cep || '') ||
+      address !== (clientToEdit?.address || '') ||
+      number !== (clientToEdit?.number || '') ||
+      neighborhood !== (clientToEdit?.neighborhood || '') ||
+      city !== (clientToEdit?.city || '') ||
+      state !== (clientToEdit?.state || '')
+    );
+  }, [name, phone, whatsapp, cep, address, number, neighborhood, city, state, clientToEdit]);
+
+  const handleRequestBack = () => {
+    if (isDirty) {
+      Alert.alert(
+        'Sair sem Salvar',
+        'Você alterou informações deste cliente que ainda não foram salvas. Deseja realmente sair sem salvar?',
+        [
+          { text: 'Continuar Editando', style: 'cancel' },
+          {
+            text: 'Sim, Sair sem Salvar',
+            style: 'destructive',
+            onPress: () => onBack(),
+          },
+        ]
+      );
+    } else {
+      onBack();
+    }
+  };
+
+  useEffect(() => {
+    const backAction = () => {
+      handleRequestBack();
+      return true;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [name, phone, whatsapp, cep, address, number, neighborhood, city, state, clientToEdit]);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -56,6 +134,8 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
     setSubmitting(true);
     try {
       const client = await saveClientMobile({
+        id: clientToEdit?.id,
+        code: clientToEdit?.code,
         name,
         phone,
         whatsapp,
@@ -67,7 +147,7 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
         state,
       });
 
-      Alert.alert('Sucesso', 'Cliente cadastrado com sucesso!');
+      Alert.alert('Sucesso', clientToEdit ? 'Cliente atualizado com sucesso!' : 'Cliente cadastrado com sucesso!');
       onSaved(client);
     } catch {
       Alert.alert('Erro', 'Não foi possível salvar o cliente.');
@@ -79,10 +159,10 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+        <TouchableOpacity onPress={handleRequestBack} style={styles.backButton}>
           <ArrowLeft size={22} color="#ffffff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Novo Cliente</Text>
+        <Text style={styles.headerTitle}>{clientToEdit ? 'Editar Cliente' : 'Novo Cliente'}</Text>
         <TouchableOpacity onPress={handleSave} disabled={submitting} style={styles.saveButton}>
           <Save size={20} color="#ffffff" />
         </TouchableOpacity>
@@ -113,7 +193,7 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
                 placeholderTextColor="#94a3b8"
                 keyboardType="phone-pad"
                 value={phone}
-                onChangeText={setPhone}
+                onChangeText={(text) => setPhone(formatPhone(text))}
               />
             </View>
             <View style={{ flex: 1 }}>
@@ -124,7 +204,7 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
                 placeholderTextColor="#94a3b8"
                 keyboardType="phone-pad"
                 value={whatsapp}
-                onChangeText={setWhatsapp}
+                onChangeText={(text) => setWhatsapp(formatPhone(text))}
               />
             </View>
           </View>
@@ -136,17 +216,20 @@ export const CreateClientScreen: React.FC<CreateClientScreenProps> = ({
             <Text style={styles.cardTitle}>Endereço</Text>
           </View>
 
-          <Text style={styles.label}>CEP (Busca Automática)</Text>
+          <Text style={styles.label}>CEP (Busca Automática) {loadingCep ? '⏳ Buscando endereço...' : ''}</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, loadingCep && { borderColor: '#38bdf8' }]}
             placeholder="00000-000"
             placeholderTextColor="#94a3b8"
             keyboardType="numeric"
+            maxLength={9}
             value={cep}
             onChangeText={(t) => {
-              setCep(t);
-              if (t.replace(/\D/g, '').length === 8) {
-                setTimeout(handleFetchCep, 200);
+              const formatted = formatCep(t);
+              setCep(formatted);
+              const clean = formatted.replace(/\D/g, '');
+              if (clean.length === 8) {
+                searchCepData(clean);
               }
             }}
           />

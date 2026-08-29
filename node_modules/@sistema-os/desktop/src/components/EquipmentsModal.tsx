@@ -39,8 +39,8 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
       if (saved) return JSON.parse(saved);
     } catch (err) { }
     return [
-      { id: 'code', label: 'Código', width: 120, visible: true, fixed: true },
-      { id: 'type', label: 'Nome / Tipo de Equipamento', width: 400, visible: true, fixed: true },
+      { id: 'code', label: 'Código', width: 120, visible: true },
+      { id: 'type', label: 'Nome / Tipo de Equipamento', width: 400, visible: true },
     ];
   });
 
@@ -52,6 +52,16 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm('');
+      setSelectedEquipmentId(null);
+    } else {
+      setSearchTerm('');
+      setSelectedEquipmentId(null);
+    }
+  }, [isOpen]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -230,13 +240,12 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
                     .map((col) => (
                       <th
                         key={col.id}
-                        draggable={!col.fixed}
+                        draggable
                         onDragStart={(e) => handleDragStart(e, col.id)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, col.id)}
                         style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className={`p-1.5 border-b border-r border-slate-300 relative group transition-colors ${col.fixed ? 'cursor-default' : 'cursor-grab active:cursor-grabbing hover:bg-slate-300/80'
-                          }`}
+                        className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
                       >
                         <div className="truncate pr-2">{col.label}</div>
                         <div
@@ -322,23 +331,23 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
         )}
 
         {/* Rodapé Fixo com Ações e Atalho Discreto F2 */}
-        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <span className="font-semibold text-slate-700">
+        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-3 truncate min-w-0">
+            <span className="font-semibold text-slate-700 truncate">
               {selectedEquipment ? (
                 <span>
                   Equipamento Selecionado: <strong className="text-sky-700">{selectedEquipment.type}</strong>
                 </span>
               ) : (
-                'Selecione um equipamento da lista'
+                'Selecione um equipamento na tabela acima'
               )}
             </span>
-            <span className="text-[11px] text-slate-500 font-mono bg-slate-300/80 px-2 py-0.5 rounded border border-slate-300">
+            <span className="text-[11px] text-slate-500 font-mono bg-slate-300/80 px-2 py-0.5 rounded border border-slate-300 shrink-0">
               [F2] Cadastrar Novo Equipamento
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => {
                 onClose();
@@ -346,9 +355,9 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
               }}
               disabled={!canManage}
               title={!canManage ? 'Você não tem permissão para cadastrar equipamentos.' : undefined}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <PlusCircle className="w-4 h-4" />
+              <PlusCircle className="w-4 h-4 shrink-0" />
               <span>Cadastrar Novo Equipamento</span>
             </button>
 
@@ -364,9 +373,9 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
               }}
               disabled={!selectedEquipmentId || !canManage}
               title={!canManage ? 'Você não tem permissão para editar equipamentos.' : undefined}
-              className="bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Edit3 className="w-4 h-4" />
+              <Edit3 className="w-4 h-4 shrink-0" />
               <span>Editar Equipamento</span>
             </button>
 
@@ -382,15 +391,15 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
               }}
               disabled={!selectedEquipmentId || !canManage}
               title={!canManage ? 'Você não tem permissão para excluir equipamentos.' : undefined}
-              className="bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-4 h-4 shrink-0" />
               <span>Excluir</span>
             </button>
 
             <button
               onClick={onClose}
-              className="bg-slate-700 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
+              className="h-8 bg-slate-700 hover:bg-slate-800 text-white px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
               <span>Sair</span>
             </button>

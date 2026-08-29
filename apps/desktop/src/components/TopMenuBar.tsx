@@ -23,6 +23,7 @@ import {
   Calendar,
   Calculator,
   Hash,
+  Smartphone,
 } from 'lucide-react';
 
 interface TopMenuBarProps {
@@ -39,8 +40,10 @@ interface TopMenuBarProps {
   onOpenServicesModal?: () => void;
   onOpenOrderStatusModal?: () => void;
   onOpenCompanyModal?: () => void;
+  onOpenLinkMobileModal?: () => void;
   onOpenWallpaperModal?: () => void;
   onOpenPeriodReportModal?: () => void;
+  onOpenTechnicianOrdersReportModal?: () => void;
   onOpenTechniciansModal?: () => void;
   onOpenFactoryResetModal?: () => void;
   onOpenOSGeneralConfigModal?: () => void;
@@ -65,8 +68,10 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onOpenServicesModal,
   onOpenOrderStatusModal,
   onOpenCompanyModal,
+  onOpenLinkMobileModal,
   onOpenWallpaperModal,
   onOpenPeriodReportModal,
+  onOpenTechnicianOrdersReportModal,
   onOpenTechniciansModal,
   onOpenFactoryResetModal,
   onOpenOSGeneralConfigModal,
@@ -227,14 +232,6 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             </button>
 
             <button
-              onClick={() => handleAction(() => onOpenTechniciansModal ? onOpenTechniciansModal() : onOpenRegister('TECHNICIAN'))}
-              className="w-full text-left px-4 py-2 hover:bg-slate-200 hover:text-indigo-700 flex items-center gap-2 font-bold text-indigo-900 cursor-pointer"
-            >
-              <Wrench className="w-3.5 h-3.5 text-indigo-600" />
-              Cadastrar Técnico Responsável
-            </button>
-
-            <button
               onClick={() => handleAction(() => onOpenPartsModal ? onOpenPartsModal() : onOpenRegister('PART'))}
               className="w-full text-left px-4 py-2 hover:bg-slate-200 hover:text-amber-700 flex items-center gap-2 font-bold text-amber-900 cursor-pointer"
             >
@@ -265,7 +262,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               className="w-full text-left px-4 py-2 hover:bg-slate-200 hover:text-sky-700 flex items-center gap-2 font-bold text-slate-800 cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5 text-sky-700" />
-              Cadastrar Usuário / Senha
+              Gestão de Usuários e Senhas
             </button>
           </div>
         )}
@@ -434,13 +431,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
 
             <div className="border-t border-slate-200 my-1"></div>
 
-            {/* 4. Termos de Garantia & Orçamento */}
+            {/* 4. Termos dos Comprovantes (Entrada, Orçamento e Saída) */}
             <button
               onClick={() => handleAction(() => onOpenRegister ? onOpenRegister('WARRANTY_TERMS' as any) : null)}
-              className="w-full text-left px-4 py-2 hover:bg-slate-200 hover:text-purple-700 font-bold text-purple-700 flex items-center gap-2 cursor-pointer"
+              className="w-full text-left px-4 py-2 hover:bg-slate-200 hover:text-sky-700 font-bold text-sky-800 flex items-center gap-2 cursor-pointer"
             >
-              <FileText className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-              <span>Termos de Garantia & Orçamento</span>
+              <FileText className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+              <span>Termos dos Comprovantes (Entrada / Orçamento / Saída)</span>
             </button>
           </div>
         )}
@@ -512,9 +509,31 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               <span>Lista de OS por Períodos (Relatório)</span>
             </button>
 
+            {/* 3. Relatório de OS por Técnico */}
+            <button
+              onClick={() => handleAction(() => {
+                if (onOpenTechnicianOrdersReportModal) onOpenTechnicianOrdersReportModal();
+              })}
+              className="w-full text-left px-4 py-2.5 hover:bg-slate-200 hover:text-emerald-700 flex items-center gap-2.5 font-bold cursor-pointer text-emerald-950"
+            >
+              <Wrench className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Relatório por Técnico</span>
+            </button>
+
+            {/* 4. Vincular Celular (ApiKey) */}
+            <button
+              onClick={() => handleAction(() => {
+                if (onOpenLinkMobileModal) onOpenLinkMobileModal();
+              })}
+              className="w-full text-left px-4 py-2.5 hover:bg-sky-100 hover:text-sky-800 flex items-center gap-2.5 font-bold cursor-pointer text-sky-950"
+            >
+              <Smartphone className="w-4 h-4 text-sky-600 shrink-0" />
+              <span>Vincular Celular (ApiKey)</span>
+            </button>
+
             <div className="border-t border-slate-200 my-1"></div>
 
-            {/* 3. Dados da Empresa */}
+            {/* 5. Dados da Empresa */}
             <button
               onClick={() => handleAction(() => {
                 if (onOpenCompanyModal) onOpenCompanyModal();
@@ -527,7 +546,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
 
             <div className="border-t border-red-200 my-1"></div>
 
-            {/* 4. Restaurar Padrão de Fábrica */}
+            {/* 5. Restaurar Padrão de Fábrica */}
             <button
               onClick={() => handleAction(() => {
                 if (onOpenFactoryResetModal) onOpenFactoryResetModal();

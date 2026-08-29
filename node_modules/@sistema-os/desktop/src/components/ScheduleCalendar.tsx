@@ -7,6 +7,7 @@ interface ScheduleCalendarProps {
   isOpen?: boolean;
   onClose?: () => void;
   visits: any[];
+  orders?: any[];
   selectedDate: string;
   onDateChange: (date: string) => void;
   onEditVisit?: (visit: any) => void;
@@ -18,6 +19,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   isOpen = true,
   onClose,
   visits,
+  orders = [],
   selectedDate,
   onDateChange,
   onEditVisit,
@@ -37,7 +39,37 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
     notes: '',
   });
 
-  const filteredVisits = visits.filter((v) => {
+  React.useEffect(() => {
+    if (!isOpen || !onClose) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (editingVisit) {
+          setEditingVisit(null);
+        } else if (deletingVisitId) {
+          setDeletingVisitId(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, editingVisit, deletingVisitId]);
+
+  // Enriquece cada visita com os dados da OS correspondente caso não venha embutido
+  const enrichedVisits = React.useMemo(() => {
+    return visits.map((v) => {
+      const order = v.order || orders.find((o) => o.id === v.orderId || o.code === v.orderId || o.code === v.orderCode);
+      return {
+        ...v,
+        order: order || v.order || null,
+        technicianName: v.technicianName || order?.technician || order?.technicianName || '',
+      };
+    });
+  }, [visits, orders]);
+
+  const filteredVisits = enrichedVisits.filter((v) => {
     if (!v.date) return false;
     const vDateClean = v.date.includes('T') ? v.date.split('T')[0] : v.date;
     if (startDate && endDate) {
@@ -411,7 +443,7 @@ const VisitCard: React.FC<{
       <div className="flex justify-between items-start mb-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded">
-            {visit.order?.code || 'OS-----'}
+            {visit.order?.code || visit.orderCode || 'OS-----'}
           </span>
           <span className="text-xs font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded flex items-center gap-1">
             <Clock className="w-3 h-3 text-amber-700" />
@@ -428,7 +460,7 @@ const VisitCard: React.FC<{
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <StatusBadge status={visit.status} />
+          <StatusBadge status={visit.status || visit.order?.status} />
           <button
             onClick={onEdit}
             className="text-slate-400 hover:text-sky-600 p-1 rounded hover:bg-slate-100 transition-colors cursor-pointer"
@@ -448,25 +480,39 @@ const VisitCard: React.FC<{
 
       <h4 className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
         <User className="w-4 h-4 text-slate-500" />
-        {visit.order?.client?.name || 'Cliente'}
+        {visit.order?.client?.name || visit.clientName || 'Cliente'}
       </h4>
 
-      <p className="text-xs text-slate-600 flex items-center gap-1 mt-1">
-        <Phone className="w-3.5 h-3.5 text-slate-400" />
-        {visit.order?.client?.phone}
-      </p>
+      {(visit.order?.client?.phone || visit.order?.client?.whatsapp || visit.clientPhone) && (
+        <p className="text-xs text-slate-600 flex items-center gap-1 mt-1">
+          <Phone className="w-3.5 h-3.5 text-slate-400" />
+          {visit.order?.client?.phone || visit.order?.client?.whatsapp || visit.clientPhone}
+        </p>
+      )}
 
       <p className="text-xs text-slate-600 flex items-center gap-1 mt-1">
         <MapPin className="w-3.5 h-3.5 text-slate-400" />
-        {visit.order?.client?.address}, {visit.order?.client?.number} - {visit.order?.client?.neighborhood}
+        {[
+          visit.order?.client?.address || visit.clientAddress,
+          visit.order?.client?.number ? `nº ${visit.order.client.number}` : null,
+          visit.order?.client?.neighborhood || null
+        ].filter(Boolean).join(', ') || 'Endereço não informado'}
       </p>
 
       <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex justify-between items-center text-xs">
         <span className="text-slate-500">
-          Equipamento: <strong className="text-slate-800">{visit.order?.equipment?.type}</strong>
+          Equipamento:{' '}
+          <strong className="text-slate-800">
+            {typeof visit.order?.equipment === 'object' && visit.order?.equipment !== null
+              ? [visit.order.equipment.type, visit.order.equipment.brand, visit.order.equipment.model].filter(Boolean).join(' - ')
+              : String(visit.order?.equipment || visit.deviceType || 'Equipamento Geral')}
+          </strong>
         </span>
         <span className="text-slate-500">
-          Técnico: <strong className="text-sky-700">{visit.technicianName}</strong>
+          Técnico:{' '}
+          <strong className={visit.technicianName ? 'text-sky-700 font-bold' : 'text-slate-400'}>
+            {visit.technicianName || 'Nenhum'}
+          </strong>
         </span>
       </div>
     </div>

@@ -23,24 +23,24 @@ export interface CompanyData {
 }
 
 export const defaultCompanyData: CompanyData = {
-  name: 'Vollen Assistência Técnica LTDA',
-  tradingName: 'Vollen Assistência Técnica',
+  name: 'VOLLEN ASSISTÊNCIA TÉCNICA E SERVIÇOS LTDA',
+  tradingName: 'VOLLEN ASSISTÊNCIA TÉCNICA',
   cnpj: '00.000.000/0001-00',
   ie: 'ISENTO',
   im: '',
-  phone: '(11) 99999-9999',
-  whatsapp: '(11) 99999-9999',
-  email: 'atendimento@vollen.com.br',
-  website: 'www.vollen.com.br',
-  cep: '01000-000',
-  address: 'Av. Principal',
+  phone: '(11) 3000-0000',
+  whatsapp: '(11) 99999-0000',
+  email: 'contato@assistenciavollen.com.br',
+  website: 'www.assistenciavollen.com.br',
+  cep: '01001-000',
+  address: 'AVENIDA PAULISTA',
   number: '1000',
-  complement: '',
-  neighborhood: 'Centro',
-  city: 'São Paulo',
+  complement: 'SALA 101',
+  neighborhood: 'BELA VISTA',
+  city: 'SÃO PAULO',
   state: 'SP',
   logoUrl: '',
-  slogan: 'Assistência Técnica e Manutenção Especializada',
+  slogan: 'ASSISTÊNCIA TÉCNICA ESPECIALIZADA E MANUTENÇÃO',
 };
 
 interface CompanyModalProps {
@@ -65,11 +65,45 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
   const [successMsg, setSuccessMsg] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('vollen_company_data');
-      if (saved) setFormData(JSON.parse(saved));
-    } catch (err) {}
+    if (isOpen) {
+      // 1. Tenta carregar do localStorage imediatamente
+      try {
+        const saved = localStorage.getItem('vollen_company_data');
+        if (saved) {
+          setFormData(JSON.parse(saved));
+        }
+      } catch (err) {}
+
+      // 2. Busca a versão mais atualizada do Firestore
+      import('../services/firebase').then(({ db }) => {
+        import('firebase/firestore').then(({ doc, getDoc }) => {
+          getDoc(doc(db, 'system_config', 'company_data'))
+            .then((snap) => {
+              if (snap.exists()) {
+                const cloudData = snap.data() as CompanyData;
+                setFormData(cloudData);
+                try {
+                  localStorage.setItem('vollen_company_data', JSON.stringify(cloudData));
+                } catch (e) {}
+              }
+            })
+            .catch(() => {});
+        });
+      });
+    }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -90,18 +124,44 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalData = {
+      ...formData,
+      name: (formData.name || formData.tradingName || '').trim(),
+      tradingName: (formData.tradingName || formData.name || '').trim(),
+    };
+
     try {
-      localStorage.setItem('vollen_company_data', JSON.stringify(formData));
+      localStorage.setItem('vollen_company_data', JSON.stringify(finalData));
       window.dispatchEvent(new Event('storage'));
+
+      import('../services/firebase').then(({ db }) => {
+        import('firebase/firestore').then(({ doc, setDoc }) => {
+          setDoc(doc(db, 'system_config', 'company_data'), finalData, { merge: true }).catch(() => {});
+        });
+      });
     } catch (err) {
       console.error('Erro ao salvar no localStorage:', err);
     }
-    onSave(formData);
+
+    onSave(finalData);
     setSuccessMsg(true);
     setTimeout(() => {
       setSuccessMsg(false);
       onClose();
-    }, 800);
+    }, 600);
+  };
+
+  const formatPhone = (val: string) => {
+    const nums = val.replace(/\D/g, '').slice(0, 11);
+    if (nums.length > 6) {
+      if (nums.length === 11) {
+        return `(${nums.slice(0, 2)}) ${nums.slice(2, 7)}-${nums.slice(7)}`;
+      }
+      return `(${nums.slice(0, 2)}) ${nums.slice(2, 6)}-${nums.slice(6)}`;
+    } else if (nums.length > 2) {
+      return `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
+    }
+    return nums;
   };
 
   return (
@@ -250,7 +310,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <input
                       type="text"
                       value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                       placeholder="(00) 0000-0000"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
                     />
@@ -260,7 +320,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <input
                       type="text"
                       value={formData.whatsapp}
-                      onChange={(e) => setFormData({ ...formData, whatsapp: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, whatsapp: formatPhone(e.target.value) })}
                       placeholder="(00) 90000-0000"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
                     />

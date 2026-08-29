@@ -9,6 +9,9 @@ import {
   Edit3,
   Trash2,
   RefreshCw,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
 } from 'lucide-react';
 
 export interface OSStatusItem {
@@ -18,6 +21,9 @@ export interface OSStatusItem {
   color: string;
   description?: string;
   isSystemDefault?: boolean;
+  deductStock?: boolean;
+  returnStock?: boolean;
+  orderIndex?: number;
 }
 
 interface ColumnConfig {
@@ -31,47 +37,130 @@ interface ColumnConfig {
 interface OrderStatusModalProps {
   isOpen: boolean;
   onClose: () => void;
+  currentUser?: any;
 }
 
 export const ALLOWED_COLORS = [
-  { name: 'Azul (Aberta)', value: '#0284c7' },
-  { name: 'Laranja (Em Atendimento / Aguardando Peça)', value: '#f97316' },
-  { name: 'Creme / Amarelo Claro (Aparelho Liberado)', value: '#fef08a' },
-  { name: 'Verde (Finalizada)', value: '#16a34a' },
+  { name: 'Amarelo (Aberta)', value: '#eab308' },
+  { name: 'Roxo / Violeta (Orçamento Aprovado)', value: '#8b5cf6' },
+  { name: 'Azul Cobalto (Em Atendimento / Visita Técnica)', value: '#0284c7' },
+  { name: 'Verde Esmeralda (Aprovado)', value: '#059669' },
+  { name: 'Laranja (Aguardando Peça)', value: '#f97316' },
+  { name: 'Verde Claro / Menta (Aparelho Liberado e Pronto)', value: '#10b981' },
+  { name: 'Verde Escuro / Floresta (Finalizada / Concluída)', value: '#047857' },
   { name: 'Vermelho (Cancelada)', value: '#dc2626' },
 ];
 
 const DEFAULT_STATUSES: OSStatusItem[] = [
-  { id: '1', code: '0001', name: 'ABERTA', color: '#0284c7', description: 'Ordem de serviço aberta aguardando avaliação', isSystemDefault: true },
-  { id: '2', code: '0002', name: 'EM_ATENDIMENTO', color: '#f97316', description: 'Técnico trabalhando no equipamento', isSystemDefault: true },
-  { id: '3', code: '0003', name: 'AGUARDANDO_PECA', color: '#f97316', description: 'Aguardando chegada de peças para conclusão', isSystemDefault: true },
-  { id: '4', code: '0004', name: 'APARELHO_LIBERADO', color: '#fef08a', description: 'Aparelho pronto e liberado para retirada pelo cliente', isSystemDefault: true },
-  { id: '5', code: '0005', name: 'FINALIZADA', color: '#16a34a', description: 'Serviço concluído e entregue ao cliente', isSystemDefault: true },
-  { id: '6', code: '0006', name: 'CANCELADA', color: '#dc2626', description: 'Ordem de serviço cancelada', isSystemDefault: true },
+  { id: '1', code: '0001', name: 'ABERTA', color: '#eab308', description: 'Ordem de serviço aberta aguardando avaliação', isSystemDefault: true, deductStock: false, returnStock: false },
+  { id: '7', code: '0002', name: 'ORCAMENTO_APROVADO', color: '#8b5cf6', description: 'Orçamento aprovado pelo cliente com reserva de peças', isSystemDefault: true, deductStock: true, returnStock: false },
+  { id: '2', code: '0003', name: 'EM_ATENDIMENTO', color: '#0284c7', description: 'Técnico trabalhando no equipamento / Visita Técnica', isSystemDefault: true, deductStock: false, returnStock: false },
+  { id: '8', code: '0004', name: 'APROVADO', color: '#059669', description: 'Serviço e orçamento aprovados pelo cliente', isSystemDefault: true, deductStock: true, returnStock: false },
+  { id: '3', code: '0005', name: 'AGUARDANDO_PECA', color: '#f97316', description: 'Aguardando chegada de peças para conclusão', isSystemDefault: true, deductStock: false, returnStock: false },
+  { id: '4', code: '0006', name: 'APARELHO_LIBERADO', color: '#10b981', description: 'Aparelho pronto e liberado para retirada pelo cliente', isSystemDefault: true, deductStock: false, returnStock: false },
+  { id: '5', code: '0007', name: 'FINALIZADA', color: '#047857', description: 'Serviço concluído e entregue ao cliente', isSystemDefault: true, deductStock: false, returnStock: false },
+  { id: '6', code: '0008', name: 'CANCELADA', color: '#dc2626', description: 'Ordem de serviço cancelada', isSystemDefault: true, deductStock: false, returnStock: true },
 ];
 
 export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   isOpen,
   onClose,
+  currentUser,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatusId, setSelectedStatusId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStatus, setEditingStatus] = useState<OSStatusItem | null>(null);
 
+  const [draggedRowId, setDraggedRowId] = useState<string | null>(null);
+
   const [statuses, setStatuses] = useState<OSStatusItem[]>(() => {
     try {
       const saved = localStorage.getItem('custom_os_statuses_v3');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a: any, b: any) => (a.orderIndex ?? 999) - (b.orderIndex ?? 999));
+        }
+      }
     } catch (err) {}
-    return DEFAULT_STATUSES;
+    return DEFAULT_STATUSES.map((s, idx) => ({ ...s, orderIndex: idx }));
   });
 
-  const saveStatusesToStorage = (newStatuses: OSStatusItem[]) => {
+  // Garante que os status estejam sempre sincronizados com o Firestore ao abrir o modal
+  React.useEffect(() => {
+    import('../services/firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ collection, getDocs, setDoc, doc }) => {
+        getDocs(collection(db, 'os_statuses')).then((snap) => {
+          if (snap.empty) {
+            // Se o Firestore estiver vazio, sobe todos os status cadastrados com seus índices de ordem
+            for (let i = 0; i < statuses.length; i++) {
+              const st = { ...statuses[i], orderIndex: i };
+              setDoc(doc(db, 'os_statuses', st.id), st, { merge: true }).catch(() => null);
+            }
+          } else {
+            const list = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as OSStatusItem & { orderIndex?: number }))
+              .sort((a: any, b: any) => (a.orderIndex ?? 999) - (b.orderIndex ?? 999));
+            setStatuses(list);
+            localStorage.setItem('custom_os_statuses_v3', JSON.stringify(list));
+          }
+        });
+      });
+    });
+  }, [isOpen]);
+
+  const saveStatusesToStorage = async (newStatuses: OSStatusItem[]) => {
     try {
-      localStorage.setItem('custom_os_statuses_v3', JSON.stringify(newStatuses));
+      const ordered = newStatuses.map((st, idx) => ({ ...st, orderIndex: idx }));
+      localStorage.setItem('custom_os_statuses_v3', JSON.stringify(ordered));
+      // Sincroniza com o Firestore para o aplicativo mobile e outras telas
+      const { setDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../services/firebase');
+      for (const st of ordered) {
+        await setDoc(doc(db, 'os_statuses', st.id), st, { merge: true }).catch(() => null);
+      }
     } catch (err) {}
   };
+
+  const handleMoveRow = (index: number, direction: 'UP' | 'DOWN') => {
+    const targetIndex = direction === 'UP' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= statuses.length) return;
+
+    const updated = [...statuses];
+    const [movedItem] = updated.splice(index, 1);
+    updated.splice(targetIndex, 0, movedItem);
+
+    setStatuses(updated);
+    saveStatusesToStorage(updated);
+  };
+
+  const handleRowDrop = (targetStatusId: string) => {
+    if (!draggedRowId || draggedRowId === targetStatusId) {
+      setDraggedRowId(null);
+      setDragOverTargetId(null);
+      return;
+    }
+
+    const sourceIdx = statuses.findIndex((s) => s.id === draggedRowId);
+    const targetIdx = statuses.findIndex((s) => s.id === targetStatusId);
+    if (sourceIdx < 0 || targetIdx < 0) {
+      setDraggedRowId(null);
+      setDragOverTargetId(null);
+      return;
+    }
+
+    const updated = [...statuses];
+    const [removed] = updated.splice(sourceIdx, 1);
+    updated.splice(targetIdx, 0, removed);
+
+    setStatuses(updated);
+    saveStatusesToStorage(updated);
+    setDraggedRowId(null);
+    setDragOverTargetId(null);
+  };
+
+  const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     try {
@@ -79,10 +168,13 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
       if (saved) return JSON.parse(saved);
     } catch (err) {}
     return [
-      { id: 'code', label: 'Código', width: 95, visible: true, fixed: true },
-      { id: 'color', label: 'Cor', width: 80, visible: true, fixed: true },
-      { id: 'name', label: 'Nome do Status', width: 220, visible: true, fixed: true },
-      { id: 'description', label: 'Descrição / Finalidade', width: 350, visible: true },
+      { id: 'dragHandle', label: '☰', width: 42, visible: true, fixed: true },
+      { id: 'code', label: 'Código', width: 85, visible: true },
+      { id: 'color', label: 'Cor', width: 65, visible: true },
+      { id: 'name', label: 'Nome do Status', width: 220, visible: true },
+      { id: 'deductStock', label: 'Baixa Estoque', width: 105, visible: true },
+      { id: 'returnStock', label: 'Retorna Peças', width: 105, visible: true },
+      { id: 'description', label: 'Descrição / Finalidade', width: 330, visible: true },
     ];
   });
 
@@ -95,10 +187,50 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setSearchTerm('');
+      setSelectedStatusId(null);
+    } else {
+      setSearchTerm('');
+      setSelectedStatusId(null);
+    }
+  }, [isOpen]);
+
+  const isAdmin = Boolean(
+    !currentUser ||
+    currentUser?.role === 'Admin' ||
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.role === 'admin' ||
+    currentUser?.accessLevel === 'ADMIN' ||
+    currentUser?.isAdmin === true ||
+    currentUser?.username?.toLowerCase() === 'admin' ||
+    (currentUser?.name || '').toLowerCase().includes('admin')
+  );
+
   // Form local state
   const [formName, setFormName] = useState('');
   const [formColor, setFormColor] = useState('#0284c7');
+  const [formDeductStock, setFormDeductStock] = useState(false);
+  const [formReturnStock, setFormReturnStock] = useState(false);
   const [formDescription, setFormDescription] = useState('');
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isFormOpen) {
+          setIsFormOpen(false);
+          setEditingStatus(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isFormOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -183,14 +315,21 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
     setEditingStatus(null);
     setFormName('');
     setFormColor('#0284c7');
+    setFormDeductStock(false);
+    setFormReturnStock(false);
     setFormDescription('');
     setIsFormOpen(true);
   };
 
   const handleOpenEditForm = (st: OSStatusItem) => {
+    if (st.isSystemDefault && !isAdmin) {
+      return alert('Apenas Administradores podem editar status padrão do sistema.');
+    }
     setEditingStatus(st);
     setFormName(st.name);
     setFormColor(st.color);
+    setFormDeductStock(Boolean(st.deductStock));
+    setFormReturnStock(Boolean(st.returnStock));
     setFormDescription(st.description || '');
     setIsFormOpen(true);
   };
@@ -199,12 +338,22 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
     e.preventDefault();
     if (!formName.trim()) return alert('Por favor, informe o nome do Status.');
 
-    const formattedName = formName.trim().toUpperCase().replace(/\s+/g, '_');
+    const formattedName = formName.trim();
 
     if (editingStatus) {
+      if (editingStatus.isSystemDefault && !isAdmin) {
+        return alert('Apenas Administradores podem salvar alterações em status padrão do sistema.');
+      }
       const updated = statuses.map((s) =>
         s.id === editingStatus.id
-          ? { ...s, name: formattedName, color: formColor, description: formDescription }
+          ? {
+              ...s,
+              name: formattedName,
+              color: formColor,
+              deductStock: formDeductStock,
+              returnStock: formReturnStock,
+              description: formDescription,
+            }
           : s
       );
       setStatuses(updated);
@@ -221,6 +370,8 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
         code: nextCode,
         name: formattedName,
         color: formColor,
+        deductStock: formDeductStock,
+        returnStock: formReturnStock,
         description: formDescription,
         isSystemDefault: false,
       };
@@ -232,28 +383,73 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
     setIsFormOpen(false);
   };
 
-  const handleDeleteStatus = () => {
+  const handleDeleteStatus = async () => {
     if (!selectedStatus) return alert('Por favor, selecione um status na tabela.');
-    if (selectedStatus.isSystemDefault) return alert('Status padrão do sistema não pode ser excluído.');
+    if (selectedStatus.isSystemDefault && !isAdmin) {
+      return alert('Apenas Administradores podem excluir status padrão do sistema.');
+    }
 
     if (confirm(`Deseja realmente EXCLUIR o status "${selectedStatus.name}"?`)) {
-      const updated = statuses.filter((s) => s.id !== selectedStatus.id);
+      const idToDelete = selectedStatus.id;
+      const updated = statuses.filter((s) => s.id !== idToDelete);
       setStatuses(updated);
-      saveStatusesToStorage(updated);
       setSelectedStatusId(null);
+      await saveStatusesToStorage(updated);
+      try {
+        const { doc, deleteDoc } = await import('firebase/firestore');
+        const { db } = await import('../services/firebase');
+        await deleteDoc(doc(db, 'os_statuses', idToDelete));
+      } catch (err) {}
     }
   };
 
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
+    if (!isAdmin) {
+      return alert('Apenas Administradores podem restaurar os status padrão do sistema.');
+    }
     if (confirm('Deseja restaurar os status padrão do sistema?')) {
       setStatuses(DEFAULT_STATUSES);
-      saveStatusesToStorage(DEFAULT_STATUSES);
       setSelectedStatusId(null);
+      await saveStatusesToStorage(DEFAULT_STATUSES);
     }
   };
 
   const renderCellContent = (st: OSStatusItem, columnId: string) => {
     switch (columnId) {
+      case 'dragHandle':
+        return (
+          <div className="flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors p-0.5 cursor-grab active:cursor-grabbing">
+            <GripVertical className="w-3.5 h-3.5" />
+          </div>
+        );
+      case 'deductStock':
+        return (
+          <div className="flex items-center justify-center">
+            {st.deductStock ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-1.5 py-0.5 rounded">
+                <Check className="w-3 h-3" /> Sim
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                Não
+              </span>
+            )}
+          </div>
+        );
+      case 'returnStock':
+        return (
+          <div className="flex items-center justify-center">
+            {st.returnStock ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded">
+                <RefreshCw className="w-3 h-3" /> Sim
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                Não
+              </span>
+            )}
+          </div>
+        );
       case 'code':
         return (
           <span className="font-mono font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
@@ -365,14 +561,12 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
                     .map((col) => (
                       <th
                         key={col.id}
-                        draggable={!col.fixed}
+                        draggable
                         onDragStart={(e) => handleDragStart(e, col.id)}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, col.id)}
                         style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
-                        className={`p-1.5 border-b border-r border-slate-300 relative group transition-colors ${
-                          col.fixed ? 'cursor-default' : 'cursor-grab active:cursor-grabbing hover:bg-slate-300/80'
-                        }`}
+                        className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
                       >
                         <div className="truncate pr-2">{col.label}</div>
                         <div
@@ -386,18 +580,65 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
               <tbody className="divide-y divide-slate-200 bg-white">
                 {filteredStatuses.map((st) => {
                   const isSelected = st.id === selectedStatusId;
+                  const isBeingDragged = draggedRowId === st.id;
+                  const isDragOver = dragOverTargetId === st.id && !isBeingDragged;
+
                   return (
                     <tr
                       key={st.id}
+                      draggable="true"
+                      onDragStart={(e) => {
+                        setDraggedRowId(st.id);
+                        e.dataTransfer.setData('text/plain', st.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragEnter={(e) => {
+                        e.preventDefault();
+                        if (draggedRowId && draggedRowId !== st.id) {
+                          setDragOverTargetId(st.id);
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const fromId = e.dataTransfer.getData('text/plain') || draggedRowId;
+                        if (fromId && fromId !== st.id) {
+                          const sourceIdx = statuses.findIndex((s) => s.id === fromId);
+                          const targetIdx = statuses.findIndex((s) => s.id === st.id);
+                          if (sourceIdx >= 0 && targetIdx >= 0) {
+                            const updated = [...statuses];
+                            const [removed] = updated.splice(sourceIdx, 1);
+                            updated.splice(targetIdx, 0, removed);
+                            setStatuses(updated);
+                            saveStatusesToStorage(updated);
+                          }
+                        }
+                        setDraggedRowId(null);
+                        setDragOverTargetId(null);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedRowId(null);
+                        setDragOverTargetId(null);
+                      }}
                       onClick={() => setSelectedStatusId(st.id)}
                       onDoubleClick={() => {
                         setSelectedStatusId(st.id);
                         handleOpenEditForm(st);
                       }}
-                      className={`cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'bg-amber-100/90 font-semibold text-amber-950 border-l-4 border-amber-600'
-                          : 'hover:bg-slate-100 bg-white'
+                      className={`cursor-grab active:cursor-grabbing transition-all select-none ${
+                        isBeingDragged ? 'opacity-30 bg-sky-100 border-2 border-dashed border-sky-500' : ''
+                      } ${
+                        isDragOver ? 'bg-amber-100/90 border-t-4 border-t-amber-600' : ''
+                      } ${
+                        isSelected && !isBeingDragged && !isDragOver
+                          ? 'bg-amber-100 font-semibold text-amber-950 border-l-4 border-amber-600'
+                          : !isBeingDragged && !isDragOver
+                          ? 'hover:bg-slate-100 bg-white'
+                          : ''
                       }`}
                     >
                       {columns
@@ -527,33 +768,33 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
                   required
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  placeholder="Ex: EM_ORCAMENTO, AGUARDANDO_APROVACAO..."
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold focus:outline-none focus:border-sky-600 uppercase font-mono"
+                  placeholder="Ex: Em Orçamento, Aguardando Aprovação..."
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold focus:outline-none focus:border-sky-600"
                 />
               </div>
 
               <div>
                 <label className="block font-bold text-slate-800 mb-1.5">Cor de Identificação</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {ALLOWED_COLORS.map((c) => (
-                    <button
-                      key={c.value}
-                      type="button"
-                      onClick={() => setFormColor(c.value)}
-                      title={c.name}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                        formColor === c.value
-                          ? 'border-slate-800 ring-2 ring-sky-500/50 bg-white text-slate-900 shadow-sm'
-                          : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-white'
-                      }`}
-                    >
-                      <span
-                        className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-xs inline-block"
+                <div className="flex flex-wrap items-center gap-2.5 p-2 bg-white border border-slate-200 rounded-xl">
+                  {ALLOWED_COLORS.map((c) => {
+                    const isSelected = formColor === c.value;
+                    return (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() => setFormColor(c.value)}
+                        title={c.name}
+                        className={`w-7 h-7 rounded-full transition-all cursor-pointer flex items-center justify-center ${
+                          isSelected
+                            ? 'ring-2 ring-offset-2 ring-slate-800 scale-110 shadow-sm'
+                            : 'hover:scale-105 opacity-85 hover:opacity-100'
+                        }`}
                         style={{ backgroundColor: c.value }}
-                      />
-                      <span>{c.name.split(' (')[0]}</span>
-                    </button>
-                  ))}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 text-white drop-shadow-md" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -566,6 +807,52 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
                   placeholder="Ex: Utilizado para equipamentos em bancada..."
                   className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-800 focus:outline-none focus:border-sky-600"
                 />
+              </div>
+
+              {/* OPÇÃO DE BAIXA AUTOMÁTICA DE ESTOQUE */}
+              <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formDeductStock}
+                    onChange={(e) => {
+                      setFormDeductStock(e.target.checked);
+                      if (e.target.checked) setFormReturnStock(false);
+                    }}
+                    className="mt-0.5 w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <span className="font-bold text-slate-900 text-xs block">
+                      Dar baixa nas peças no estoque
+                    </span>
+                    <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
+                      Quando este status for selecionado na Ordem de Serviço, o sistema efetuará a baixa automática das peças do estoque vinculadas à OS (sem duplicidades).
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {/* OPÇÃO DE DEVOLUÇÃO/ESTORNO DE PEÇAS AO ESTOQUE */}
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formReturnStock}
+                    onChange={(e) => {
+                      setFormReturnStock(e.target.checked);
+                      if (e.target.checked) setFormDeductStock(false);
+                    }}
+                    className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <span className="font-bold text-slate-900 text-xs block">
+                      Retornar / Devolver peças ao estoque (se estiverem separadas)
+                    </span>
+                    <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
+                      Quando este status for selecionado (ex: Cancelada / Desistência), o sistema devolverá automaticamente ao estoque apenas as peças que já haviam sido separadas/baixadas anteriormente. Se a peça não tiver sido separada, o estoque não sofrerá alteração.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
