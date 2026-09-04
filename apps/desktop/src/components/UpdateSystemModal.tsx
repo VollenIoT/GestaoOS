@@ -386,7 +386,7 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
                     className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Atualizar Sistema Agora (Sem Sair do Programa)</span>
+                    <span>Atualizar Sistema Agora</span>
                   </button>
                 )}
               </div>
