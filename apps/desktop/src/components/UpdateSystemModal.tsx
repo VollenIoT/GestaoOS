@@ -148,7 +148,7 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
         console.warn('Verificação nativa Tauri:', tauriErr);
       }
 
-      // 3. Fallback: Se não detectou via Tauri nativo, usa os dados do canal do Firebase
+      // 3. Se houver versão mais recente no Firestore
       if (cloudInfo && cloudInfo.version && isVersionNewer(cloudInfo.version, CURRENT_SYSTEM_VERSION)) {
         setHasUpdate(true);
         setLatestVersionInfo(cloudInfo);
@@ -156,8 +156,8 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
         setHasUpdate(false);
       }
     } catch (err: any) {
-      console.warn('Erro ao consultar atualizações:', err);
-      setErrorMessage('Não foi possível verificar atualizações no momento. Verifique sua conexão.');
+      console.warn('Verificação de atualizações:', err);
+      // Se não há atualização ou consulta silenciosa, não quebra a interface
       setHasUpdate(false);
     } finally {
       setChecking(false);
