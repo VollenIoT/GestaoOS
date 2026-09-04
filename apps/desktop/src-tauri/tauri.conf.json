@@ -44,7 +44,10 @@
         "installMode": "perMachine",
         "languages": [
           "Portuguese"
-        ]
+        ],
+        "customLanguageFiles": {
+          "Portuguese": "Portuguese.nsh"
+        }
       }
     }
   },
