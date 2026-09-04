@@ -12,13 +12,13 @@ import {
   MASTER_CATALOG_FIREBASE_CONFIG,
 } from './licenseService';
 
-// Determina se há configuração ativa do tenant (ou usa a base padrão MASTER_CATALOG_FIREBASE_CONFIG)
+// Determina se há configuração ativa do tenant. Se não houver, opera em MODO LOCAL PURO (sem nuvem).
 export function getActiveFirebaseConfig() {
   const tenantConfig = getSavedTenantFirebaseConfig();
   if (tenantConfig && tenantConfig.projectId && tenantConfig.apiKey) {
     return tenantConfig;
   }
-  return MASTER_CATALOG_FIREBASE_CONFIG;
+  return null;
 }
 
 const activeConfig = getActiveFirebaseConfig();
