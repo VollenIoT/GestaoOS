@@ -2,53 +2,39 @@
              COMO LANÇAR ATUALIZAÇÕES DO SISTEMA OS (VOLLEN)
 =============================================================================
 
-Todos os clientes possuem a mesma versão padronizada do sistema.
-Você não precisa abrir o programa para enviar uma nova atualização para os clientes.
-Tudo é feito diretamente a partir da pasta deste projeto.
+Agora o sistema possui ATUALIZAÇÃO 100% AUTOMÁTICA (Sem links, sem uploads manuais)!
 
 -----------------------------------------------------------------------------
-1. COMO GERAR O NOVO INSTALADOR (.EXE)
------------------------------------------------------------------------------
-1. Na pasta raiz do projeto, dê dois cliques em:
-   -> gerar-instalador.bat
-
-2. O instalador atualizado (.exe) será gerado na pasta:
-   -> apps\desktop\src-tauri\target\release\bundle\nsis\
-
-3. Suba esse arquivo .exe para o seu site, servidor, Google Drive, Dropbox ou OneDrive,
-   e obtenha o link de download direto do arquivo.
-
------------------------------------------------------------------------------
-2. COMO PUBLICAR A ATUALIZAÇÃO PARA TODOS OS CLIENTES
+PASSO A PASSO PARA LANÇAR UMA NOVA VERSÃO:
 -----------------------------------------------------------------------------
 1. Na pasta raiz do projeto, dê dois cliques em:
    -> lancar-atualizacao.bat
 
-2. O terminal abrirá e solicitará 4 informações simples:
-   - 1. Número da Nova Versão (ex: 1.0.1 ou 1.1.0)
+2. O terminal solicitará apenas 3 informações simples:
+   - 1. Versão (ex: 3.0.1) — ele já sugere a próxima automaticamente!
    - 2. Título do Lançamento (ex: Melhorias e Novas Funções)
-   - 3. Link de Download do Instalador (.exe ou link do Drive)
-   - 4. Novidades / Notas da Versão (ex: Melhorias na impressão, Correção no estoque)
+   - 3. Novidades desta Versão (uma por linha)
 
-3. Pressione Enter. O script conecta automaticamente na Nuvem (Firebase)
-   e publica a atualização em 1 segundo!
+3. Pressione Enter e confirme com 'S'.
+
+E PRONTO! 🎉
+O script faz tudo sozinho:
+- Atualiza todos os arquivos de configuração locais.
+- Dispara o build e assinatura automática no GitHub.
+- Disponibiliza a atualização direta para todos os clientes!
 
 -----------------------------------------------------------------------------
-3. O QUE ACONTECE NOS COMPUTADORES DOS CLIENTES?
+O QUE ACONTECE NOS COMPUTADORES DOS CLIENTES?
 -----------------------------------------------------------------------------
-1. O cliente abre o sistema ou vai em:
+1. Ao abrir o sistema ou ir em:
    Menu Opções -> Verificar Atualizações do Sistema.
 
-2. O sistema avisa que existe uma nova versão disponível (ex: v1.0.1)
-   mostrando as novidades que você escreveu.
+2. O cliente vê a nova versão disponível e clica em:
+   "Atualizar Agora".
 
-3. O cliente clica no botão "Baixar e Atualizar Agora".
+3. O próprio sistema baixa em segundo plano com barra de progresso,
+   instala e reinicia sozinho, sem abrir nenhum site ou navegador!
 
-4. Ao rodar o instalador da nova versão por cima:
-   -> NENHUM DADO É PERDIDO!
-   -> Todas as Ordens de Serviço, Clientes, Peças, Serviços, Histórico e Configurações
-      ficam 100% preservados e intactos no banco de dados.
-
-=============================================================================
-             SISTEMA OS VOLLEN - GESTÃO PROFISSIONAL DE OS
+-> NENHUM DADO É PERDIDO! Todas as Ordens de Serviço, Clientes, Peças,
+   Serviços e Configurações ficam 100% intactos no banco de dados.
 =============================================================================

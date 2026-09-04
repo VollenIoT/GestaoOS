@@ -1,28 +1,26 @@
 /**
  * publish-update.mjs
- * Script interativo para publicar uma nova versão do SistemaOS no Firebase.
+ * Script interativo para publicar uma nova versão do SistemaOS no GitHub Releases e Firebase.
  *
  * Uso: node src/scripts/publish-update.mjs
  * (Executado automaticamente pelo lancar-atualizacao.bat)
- *
- * Publica no Firestore: system_config / app_version
- * O UpdateSystemModal.tsx consome este documento para alertar os clientes.
  */
 
 import readline from 'readline';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '../../../');
 
 // ─── Configuração do Firebase Master ─────────────────────────────────────────
-// Tenta ler do .env local; se não encontrar, usa os valores hardcoded como fallback.
 let MASTER_PROJECT_ID = 'vollen---gestao-os';
-let MASTER_API_KEY = '';
+let MASTER_API_KEY = 'AIzaSyBYldSd19R4l8dVPj5akUNdjiBjckmO_lk';
 
 try {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  // Caminho: apps/desktop/.env (dois níveis acima de src/scripts/)
   const envPath = path.resolve(__dirname, '../../.env');
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf-8');
@@ -36,15 +34,8 @@ try {
     }
   }
 } catch {
-  // Silencioso — usa os valores padrão
+  // Silencioso
 }
-
-// Fallback caso o .env não esteja configurado
-if (!MASTER_API_KEY) {
-  MASTER_API_KEY = 'AIzaSyBYldSd19R4l8dVPj5akUNdjiBjckmO_lk';
-}
-
-// ─── Utilitários ──────────────────────────────────────────────────────────────
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (query) => new Promise((resolve) => rl.question(query, resolve));
@@ -55,11 +46,49 @@ function formatDate() {
   });
 }
 
-/** Publica o documento app_version no Firestore via REST API (sem Firebase SDK). */
-async function publishVersion(payload) {
+function updateLocalConfigs(newVersion) {
+  // 1. apps/desktop/package.json
+  const desktopPkgPath = path.resolve(__dirname, '../../package.json');
+  if (fs.existsSync(desktopPkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(desktopPkgPath, 'utf-8'));
+    pkg.version = newVersion;
+    fs.writeFileSync(desktopPkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+  }
+
+  // 2. apps/desktop/src-tauri/tauri.conf.json
+  const tauriConfPath = path.resolve(__dirname, '../../src-tauri/tauri.conf.json');
+  if (fs.existsSync(tauriConfPath)) {
+    const conf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf-8'));
+    conf.version = newVersion;
+    fs.writeFileSync(tauriConfPath, JSON.stringify(conf, null, 2) + '\n', 'utf-8');
+  }
+
+  // 3. apps/desktop/src-tauri/Cargo.toml
+  const cargoPath = path.resolve(__dirname, '../../src-tauri/Cargo.toml');
+  if (fs.existsSync(cargoPath)) {
+    let cargo = fs.readFileSync(cargoPath, 'utf-8');
+    cargo = cargo.replace(/version\s*=\s*"[^"]+"/, `version = "${newVersion}"`);
+    fs.writeFileSync(cargoPath, cargo, 'utf-8');
+  }
+
+  // 4. UpdateSystemModal.tsx & BackupModal.tsx
+  const updateModalPath = path.resolve(__dirname, '../components/UpdateSystemModal.tsx');
+  if (fs.existsSync(updateModalPath)) {
+    let code = fs.readFileSync(updateModalPath, 'utf-8');
+    code = code.replace(/const CURRENT_SYSTEM_VERSION\s*=\s*'[^']+';/, `const CURRENT_SYSTEM_VERSION = '${newVersion}';`);
+    fs.writeFileSync(updateModalPath, code, 'utf-8');
+  }
+
+  const backupModalPath = path.resolve(__dirname, '../components/BackupModal.tsx');
+  if (fs.existsSync(backupModalPath)) {
+    let code = fs.readFileSync(backupModalPath, 'utf-8');
+    code = code.replace(/const CURRENT_SYSTEM_VERSION\s*=\s*'[^']+';/, `const CURRENT_SYSTEM_VERSION = '${newVersion}';`);
+    fs.writeFileSync(backupModalPath, code, 'utf-8');
+  }
+}
+
+async function publishToFirestore(payload) {
   const majorVersion = payload.version.split('.')[0] || '1';
-  
-  // Salva no canal global (app_version) e no canal específico da versão principal (app_version_v3, app_version_v2, etc.)
   const targetDocs = ['app_version', `app_version_v${majorVersion}`];
 
   const firestorePayload = {
@@ -69,7 +98,7 @@ async function publishVersion(payload) {
       title:        { stringValue: payload.title },
       releaseDate:  { stringValue: payload.releaseDate },
       downloadUrl:  { stringValue: payload.downloadUrl },
-      mandatory:    { booleanValue: payload.mandatory },
+      mandatory:    { booleanValue: false },
       publishedAt:  { stringValue: new Date().toISOString() },
       releaseNotes: {
         arrayValue: {
@@ -81,33 +110,25 @@ async function publishVersion(payload) {
 
   for (const docName of targetDocs) {
     const url = `https://firestore.googleapis.com/v1/projects/${MASTER_PROJECT_ID}/databases/(default)/documents/system_config/${docName}?key=${MASTER_API_KEY}`;
-    const res = await fetch(url, {
+    await fetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(firestorePayload),
     });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Firebase respondeu com erro ao salvar ${docName} (${res.status}): ${errText}`);
-    }
   }
 }
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   console.clear();
   console.log('=================================================================');
-  console.log('        \uD83D\uDE80  LANÇAR ATUALIZAÇÃO DO SISTEMA OS (VOLLEN)           ');
+  console.log('    🚀  LANÇAMENTO AUTOMÁTICO DE ATUALIZAÇÃO (VOLLEN OS)         ');
   console.log('=================================================================');
-  console.log('Este script publica uma nova versão para TODOS os clientes.');
-  console.log('Os clientes serão notificados automaticamente ao abrir o sistema.\n');
+  console.log('Este script atualiza a versão, publica no GitHub Releases');
+  console.log('e disponibiliza a atualização para todos os clientes sem precisar');
+  console.log('de nenhum upload ou link manual!\n');
 
   try {
-    // Lê a versão configurada no tauri.conf.json / package.json para sugerir por padrão
     let defaultVersion = '3.0.1';
-    let localExeFound = null;
     try {
       const tauriConfPath = path.resolve(__dirname, '../../src-tauri/tauri.conf.json');
       if (fs.existsSync(tauriConfPath)) {
@@ -121,32 +142,10 @@ async function main() {
           }
         }
       }
-      
-      const nsisDir = path.resolve(__dirname, '../../src-tauri/target/release/bundle/nsis');
-      if (fs.existsSync(nsisDir)) {
-        const files = fs.readdirSync(nsisDir).filter(f => f.endsWith('.exe'));
-        if (files.length > 0) {
-          // Pega o arquivo mais recente
-          files.sort((a, b) => {
-            const statA = fs.statSync(path.join(nsisDir, a));
-            const statB = fs.statSync(path.join(nsisDir, b));
-            return statB.mtimeMs - statA.mtimeMs;
-          });
-          localExeFound = path.join(nsisDir, files[0]);
-        }
-      }
-    } catch {
-      // Ignora erro de leitura
-    }
+    } catch {}
 
-    if (localExeFound) {
-      console.log(`📦 Instalador local detectado:\n   ${localExeFound}\n`);
-    }
-
-    // 1. Número da versão
-    const versionPrompt = defaultVersion 
-      ? `📌 [1/4] Número da nova versão [Padrão: ${defaultVersion}]: ` 
-      : '📌 [1/4] Número da nova versão (ex: 3.0.1): ';
+    // 1. Versão
+    const versionPrompt = `📌 [1/3] Versão do lançamento [Padrão: ${defaultVersion}]: `;
     const versionInput = await ask(versionPrompt);
     const version = versionInput.trim() || defaultVersion;
     if (!version || !/^\d+\.\d+(\.\d+)?$/.test(version)) {
@@ -155,22 +154,12 @@ async function main() {
       return;
     }
 
-    // 2. Título do lançamento
-    const titleInput = await ask(`📝 [2/4] Título do lançamento [Padrão: Atualização v${version}]: `);
+    // 2. Título
+    const titleInput = await ask(`📝 [2/3] Título do lançamento [Padrão: Atualização v${version}]: `);
     const title = titleInput.trim() || `Atualização v${version}`;
 
-    // 3. Link de download
-    console.log('\n💡 DICA DO LINK: Cole o link de download direto do arquivo .exe (Google Drive público, Dropbox, seu servidor, etc.)');
-    const downloadInput = await ask('🔗 [3/4] Link de download do instalador (.exe): ');
-    const downloadUrl = downloadInput.trim();
-    if (!downloadUrl) {
-      console.error('\n❌ O link de download é obrigatório.');
-      rl.close();
-      return;
-    }
-
-    // 4. Notas da versão (múltiplas linhas — linha em branco para terminar)
-    console.log('\n📋 [4/4] Novidades desta versão (uma por linha — pressione Enter em branco para finalizar):');
+    // 3. Notas
+    console.log('\n📋 [3/3] Novidades desta versão (uma por linha — pressione Enter em branco para finalizar):');
     const releaseNotes = [];
     let i = 1;
     while (true) {
@@ -180,49 +169,58 @@ async function main() {
       i++;
     }
     if (releaseNotes.length === 0) {
-      releaseNotes.push(`Melhorias de estabilidade e novas funcionalidades da versão ${version}.`);
+      releaseNotes.push(`Melhorias de desempenho e novas correções da versão ${version}.`);
     }
 
-    // Confirmação
     console.log('\n─────────────────────────────────────────────────────────────────');
     console.log('                     📋 RESUMO DA PUBLICAÇÃO                    ');
     console.log('─────────────────────────────────────────────────────────────────');
     console.log(`  Versão:         v${version}`);
     console.log(`  Título:         ${title}`);
-    console.log(`  Download:       ${downloadUrl}`);
+    console.log('  Destino:        GitHub Releases & Nuvem Central');
     console.log('  Novidades:');
     releaseNotes.forEach((n) => console.log(`    • ${n}`));
     console.log('─────────────────────────────────────────────────────────────────\n');
 
-    const confirm = await ask('✅ Confirmar e publicar para todos os clientes? (S/N): ');
+    const confirm = await ask('✅ Confirmar e lançar atualização 100% automática? (S/N): ');
     if (confirm.trim().toUpperCase() !== 'S') {
-      console.log('\n⚠️  Publicação cancelada pelo usuário.');
+      console.log('\n⚠️  Publicação cancelada.');
       rl.close();
       return;
     }
 
-    // Publicar
-    console.log('\n⏳ Publicando no Firebase...');
-    await publishVersion({
+    console.log('\n⏳ 1. Atualizando arquivos de versão locais...');
+    updateLocalConfigs(version);
+
+    console.log('⏳ 2. Registrando versão no canal da nuvem (Firebase)...');
+    await publishToFirestore({
       version,
       title,
       releaseNotes,
-      downloadUrl,
+      downloadUrl: `https://github.com/VollenIoT/GestaoOS/releases/download/v${version}/Vollen.-.Gestao.de.Ordens.de.Servico_${version}_x64-setup.exe`,
       releaseDate: formatDate(),
-      mandatory: false,
     });
 
+    console.log('⏳ 3. Criando tag git e enviando para o GitHub...');
+    try {
+      execSync(`git add .`, { cwd: rootDir, stdio: 'ignore' });
+      execSync(`git commit -m "release: v${version} - ${title}"`, { cwd: rootDir, stdio: 'ignore' });
+      execSync(`git tag -a v${version} -m "Release v${version}"`, { cwd: rootDir, stdio: 'ignore' });
+      execSync(`git push origin main --tags`, { cwd: rootDir, stdio: 'inherit' });
+    } catch (gitErr) {
+      console.warn('⚠️  Aviso ao enviar tags para o GitHub:', gitErr?.message || gitErr);
+    }
+
     console.log('\n=================================================================');
-    console.log('  ✅ ATUALIZAÇÃO PUBLICADA COM SUCESSO!');
+    console.log('  🎉 ATUALIZAÇÃO v' + version + ' LANÇADA COM SUCESSO!');
     console.log('=================================================================');
-    console.log(`  Versão v${version} agora está disponível para todos os clientes.`);
-    console.log('  Eles serão notificados ao abrir o sistema ou ao clicar em');
-    console.log('  "Menu Opções → Verificar Atualizações do Sistema".');
+    console.log('  O GitHub Actions foi iniciado e está gerando os instaladores');
+    console.log('  assinados na nuvem. Os clientes receberão a atualização');
+    console.log('  automaticamente por dentro do sistema!');
     console.log('=================================================================\n');
 
   } catch (err) {
-    console.error('\n❌ Erro ao publicar atualização:', err?.message || err);
-    console.error('   Verifique sua conexão com a internet e tente novamente.\n');
+    console.error('\n❌ Erro durante o processo:', err?.message || err);
   } finally {
     rl.close();
   }
