@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { modalStack } from '../utils/modalStack';
 
-export const CURRENT_SYSTEM_VERSION = '3.0.0';
+export const CURRENT_SYSTEM_VERSION = '3.0.1';
 
 export interface AppVersionInfo {
   version: string;
