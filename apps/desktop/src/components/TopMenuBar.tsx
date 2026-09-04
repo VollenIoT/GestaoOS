@@ -279,142 +279,143 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
       }
       if (data.auditLogs) localStorage.setItem('audit_logs', JSON.stringify(data.auditLogs));
 
-      // 3. Se o Firestore estiver ativo, sincroniza os dados restaurados para o banco em nuvem
+      // 3. Se o Firestore estiver ativo com chave de licença, tenta sincronizar com a nuvem sem travar a tela
       if (db) {
         try {
-          // Limpa coleções existentes antes de gravar os registros do backup
-          const [oldOrdersSnap, oldClientsSnap, oldPartsSnap, oldServicesSnap, oldEqSnap, oldEstSnap, oldCashMovSnap] = await Promise.all([
-            getDocs(collection(db, 'orders')).catch(() => null),
-            getDocs(collection(db, 'clients')).catch(() => null),
-            getDocs(collection(db, 'parts')).catch(() => null),
-            getDocs(collection(db, 'services')).catch(() => null),
-            getDocs(collection(db, 'equipments')).catch(() => null),
-            getDocs(collection(db, 'estimates')).catch(() => null),
-            getDocs(collection(db, 'cash_movements')).catch(() => null),
+          const syncCloudPromise = async () => {
+            // Limpa coleções existentes antes de gravar os registros do backup
+            const [oldOrdersSnap, oldClientsSnap, oldPartsSnap, oldServicesSnap, oldEqSnap, oldEstSnap, oldCashMovSnap] = await Promise.all([
+              getDocs(collection(db, 'orders')).catch(() => null),
+              getDocs(collection(db, 'clients')).catch(() => null),
+              getDocs(collection(db, 'parts')).catch(() => null),
+              getDocs(collection(db, 'services')).catch(() => null),
+              getDocs(collection(db, 'equipments')).catch(() => null),
+              getDocs(collection(db, 'estimates')).catch(() => null),
+              getDocs(collection(db, 'cash_movements')).catch(() => null),
+            ]);
+
+            if (oldOrdersSnap && !oldOrdersSnap.empty) {
+              await Promise.all(oldOrdersSnap.docs.map((d) => deleteDoc(doc(db, 'orders', d.id)).catch(() => {})));
+            }
+            if (oldClientsSnap && !oldClientsSnap.empty) {
+              await Promise.all(oldClientsSnap.docs.map((d) => deleteDoc(doc(db, 'clients', d.id)).catch(() => {})));
+            }
+            if (oldPartsSnap && !oldPartsSnap.empty) {
+              await Promise.all(oldPartsSnap.docs.map((d) => deleteDoc(doc(db, 'parts', d.id)).catch(() => {})));
+            }
+            if (oldServicesSnap && !oldServicesSnap.empty) {
+              await Promise.all(oldServicesSnap.docs.map((d) => deleteDoc(doc(db, 'services', d.id)).catch(() => {})));
+            }
+            if (oldEqSnap && !oldEqSnap.empty) {
+              await Promise.all(oldEqSnap.docs.map((d) => deleteDoc(doc(db, 'equipments', d.id)).catch(() => {})));
+            }
+            if (oldEstSnap && !oldEstSnap.empty) {
+              await Promise.all(oldEstSnap.docs.map((d) => deleteDoc(doc(db, 'estimates', d.id)).catch(() => {})));
+            }
+            if (oldCashMovSnap && !oldCashMovSnap.empty) {
+              await Promise.all(oldCashMovSnap.docs.map((d) => deleteDoc(doc(db, 'cash_movements', d.id)).catch(() => {})));
+            }
+
+            // Grava dados restaurados
+            const clientsList = data.clients || (data.storage && data.storage.vollen_clients) || [];
+            if (Array.isArray(clientsList)) {
+              for (const c of clientsList) {
+                if (c && c.id) await setDoc(doc(db, 'clients', String(c.id)), c, { merge: true }).catch(() => {});
+              }
+            }
+
+            const ordersList = data.orders || (data.storage && data.storage.vollen_orders) || [];
+            if (Array.isArray(ordersList)) {
+              for (const o of ordersList) {
+                if (o && o.id) await setDoc(doc(db, 'orders', String(o.id)), o, { merge: true }).catch(() => {});
+              }
+            }
+
+            const rawPartsList = data.parts || (data.storage && (data.storage.vollen_parts_stock || data.storage.vollen_parts)) || [];
+            if (Array.isArray(rawPartsList)) {
+              const partsList = rawPartsList.map((p: any) => ({
+                ...p,
+                stockQuantity: Number(p.stockQuantity !== undefined ? p.stockQuantity : 0),
+                minStock: Number(p.minStock !== undefined ? p.minStock : 0),
+              }));
+              for (const p of partsList) {
+                if (p && p.id) await setDoc(doc(db, 'parts', String(p.id)), p, { merge: true }).catch(() => {});
+              }
+            }
+
+            const servicesList = data.services || (data.storage && data.storage.vollen_services) || [];
+            if (Array.isArray(servicesList)) {
+              for (const s of servicesList) {
+                if (s && s.id) await setDoc(doc(db, 'services', String(s.id)), s, { merge: true }).catch(() => {});
+              }
+            }
+
+            const eqList = data.equipments || (data.storage && (data.storage.vollen_equipments || data.storage.system_equipments)) || [];
+            if (Array.isArray(eqList)) {
+              for (const e of eqList) {
+                const eqId = e.id || e.code || String(Date.now());
+                if (eqId) await setDoc(doc(db, 'equipments', String(eqId)), { ...e, id: String(eqId) }, { merge: true }).catch(() => {});
+              }
+            }
+
+            const cashMovList = data.cashMovements || (data.storage && (data.storage.vollen_cash_movements || data.storage.cash_transactions)) || [];
+            if (Array.isArray(cashMovList)) {
+              for (const mov of cashMovList) {
+                const movId = mov.id || String(Date.now());
+                if (movId) await setDoc(doc(db, 'cash_movements', String(movId)), { ...mov, id: String(movId) }, { merge: true }).catch(() => {});
+              }
+            }
+
+            const sessionToRestore = data.currentCashSession || (data.storage && (data.storage.vollen_current_cash_session || data.storage.daily_cash_register_status));
+            if (sessionToRestore) {
+              await setDoc(doc(db, 'cash_registers', 'current_session'), sessionToRestore, { merge: true }).catch(() => {});
+            } else {
+              await deleteDoc(doc(db, 'cash_registers', 'current_session')).catch(() => {});
+            }
+
+            const estimatesList = data.estimates || (data.storage && data.storage.vollen_estimates) || [];
+            if (Array.isArray(estimatesList)) {
+              for (const est of estimatesList) {
+                if (est && est.id) await setDoc(doc(db, 'estimates', String(est.id)), est, { merge: true }).catch(() => {});
+              }
+            }
+
+            const osStatusesList = data.osStatuses || (data.storage && (data.storage.custom_os_statuses_v3 || data.storage.system_os_statuses)) || [];
+            if (Array.isArray(osStatusesList) && osStatusesList.length > 0) {
+              for (const st of osStatusesList) {
+                const stId = st.id || String(Date.now());
+                if (stId) await setDoc(doc(db, 'os_statuses', String(stId)), { ...st, id: String(stId) }, { merge: true }).catch(() => {});
+              }
+            }
+
+            const techniciansList = data.technicians || (data.storage && data.storage.vollen_technicians) || [];
+            if (Array.isArray(techniciansList) && techniciansList.length > 0) {
+              for (const tech of techniciansList) {
+                const techId = tech.id || String(Date.now());
+                if (techId) await setDoc(doc(db, 'technicians', String(techId)), { ...tech, id: String(techId) }, { merge: true }).catch(() => {});
+              }
+            }
+
+            if (data.companyData) {
+              await setDoc(doc(db, 'system_config', 'company_data'), data.companyData, { merge: true }).catch(() => {});
+            }
+
+            const osPrefs = data.osPreferences || data.osGeneralConfig || (data.storage && (data.storage.vollen_os_preferences || data.storage.vollen_os_general_config));
+            if (osPrefs) {
+              await setDoc(doc(db, 'system_config', 'os_preferences'), osPrefs, { merge: true }).catch(() => {});
+            }
+
+            const warrantyConfig = data.warrantyTerms || (data.storage && (data.storage.warranty_config || data.storage.vollen_warranty_terms));
+            if (warrantyConfig) {
+              await setDoc(doc(db, 'system_config', 'warranty_config'), warrantyConfig, { merge: true }).catch(() => {});
+            }
+          };
+
+          // Limita a espera de sincronização na nuvem a no máximo 2 segundos para nunca travar a conclusão
+          await Promise.race([
+            syncCloudPromise(),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
           ]);
-
-          if (oldOrdersSnap && !oldOrdersSnap.empty) {
-            await Promise.all(oldOrdersSnap.docs.map((d) => deleteDoc(doc(db, 'orders', d.id)).catch(() => {})));
-          }
-          if (oldClientsSnap && !oldClientsSnap.empty) {
-            await Promise.all(oldClientsSnap.docs.map((d) => deleteDoc(doc(db, 'clients', d.id)).catch(() => {})));
-          }
-          if (oldPartsSnap && !oldPartsSnap.empty) {
-            await Promise.all(oldPartsSnap.docs.map((d) => deleteDoc(doc(db, 'parts', d.id)).catch(() => {})));
-          }
-          if (oldServicesSnap && !oldServicesSnap.empty) {
-            await Promise.all(oldServicesSnap.docs.map((d) => deleteDoc(doc(db, 'services', d.id)).catch(() => {})));
-          }
-          if (oldEqSnap && !oldEqSnap.empty) {
-            await Promise.all(oldEqSnap.docs.map((d) => deleteDoc(doc(db, 'equipments', d.id)).catch(() => {})));
-          }
-          if (oldEstSnap && !oldEstSnap.empty) {
-            await Promise.all(oldEstSnap.docs.map((d) => deleteDoc(doc(db, 'estimates', d.id)).catch(() => {})));
-          }
-          if (oldCashMovSnap && !oldCashMovSnap.empty) {
-            await Promise.all(oldCashMovSnap.docs.map((d) => deleteDoc(doc(db, 'cash_movements', d.id)).catch(() => {})));
-          }
-
-          // Grava dados restaurados
-          const clientsList = data.clients || (data.storage && data.storage.vollen_clients) || [];
-          if (Array.isArray(clientsList)) {
-            for (const c of clientsList) {
-              if (c && c.id) await setDoc(doc(db, 'clients', String(c.id)), c, { merge: true }).catch(() => {});
-            }
-          }
-
-          const ordersList = data.orders || (data.storage && data.storage.vollen_orders) || [];
-          if (Array.isArray(ordersList)) {
-            for (const o of ordersList) {
-              if (o && o.id) await setDoc(doc(db, 'orders', String(o.id)), o, { merge: true }).catch(() => {});
-            }
-          }
-
-          const rawPartsList = data.parts || (data.storage && (data.storage.vollen_parts_stock || data.storage.vollen_parts)) || [];
-          if (Array.isArray(rawPartsList)) {
-            const partsList = rawPartsList.map((p: any) => ({
-              ...p,
-              stockQuantity: Number(p.stockQuantity !== undefined ? p.stockQuantity : 0),
-              minStock: Number(p.minStock !== undefined ? p.minStock : 0),
-            }));
-            localStorage.setItem('vollen_parts', JSON.stringify(partsList));
-            localStorage.setItem('vollen_parts_stock', JSON.stringify(partsList));
-            for (const p of partsList) {
-              if (p && p.id) await setDoc(doc(db, 'parts', String(p.id)), p, { merge: true }).catch(() => {});
-            }
-          }
-
-          const servicesList = data.services || (data.storage && data.storage.vollen_services) || [];
-          if (Array.isArray(servicesList)) {
-            for (const s of servicesList) {
-              if (s && s.id) await setDoc(doc(db, 'services', String(s.id)), s, { merge: true }).catch(() => {});
-            }
-          }
-
-          // Restaura todos os equipamentos tanto da chave equipments quanto das chaves do storage
-          const eqList = data.equipments || (data.storage && (data.storage.vollen_equipments || data.storage.system_equipments)) || [];
-          if (Array.isArray(eqList)) {
-            for (const e of eqList) {
-              const eqId = e.id || e.code || String(Date.now());
-              if (eqId) await setDoc(doc(db, 'equipments', String(eqId)), { ...e, id: String(eqId) }, { merge: true }).catch(() => {});
-            }
-          }
-
-          // Restaura todas as movimentações e sessões de caixa
-          const cashMovList = data.cashMovements || (data.storage && (data.storage.vollen_cash_movements || data.storage.cash_transactions)) || [];
-          if (Array.isArray(cashMovList)) {
-            for (const mov of cashMovList) {
-              const movId = mov.id || String(Date.now());
-              if (movId) await setDoc(doc(db, 'cash_movements', String(movId)), { ...mov, id: String(movId) }, { merge: true }).catch(() => {});
-            }
-          }
-
-          const sessionToRestore = data.currentCashSession || (data.storage && (data.storage.vollen_current_cash_session || data.storage.daily_cash_register_status));
-          if (sessionToRestore) {
-            await setDoc(doc(db, 'cash_registers', 'current_session'), sessionToRestore, { merge: true }).catch(() => {});
-          } else {
-            await deleteDoc(doc(db, 'cash_registers', 'current_session')).catch(() => {});
-          }
-
-          const estimatesList = data.estimates || (data.storage && data.storage.vollen_estimates) || [];
-          if (Array.isArray(estimatesList)) {
-            for (const est of estimatesList) {
-              if (est && est.id) await setDoc(doc(db, 'estimates', String(est.id)), est, { merge: true }).catch(() => {});
-            }
-          }
-
-          // Restaura Status de OS personalizados
-          const osStatusesList = data.osStatuses || (data.storage && (data.storage.custom_os_statuses_v3 || data.storage.system_os_statuses)) || [];
-          if (Array.isArray(osStatusesList) && osStatusesList.length > 0) {
-            for (const st of osStatusesList) {
-              const stId = st.id || String(Date.now());
-              if (stId) await setDoc(doc(db, 'os_statuses', String(stId)), { ...st, id: String(stId) }, { merge: true }).catch(() => {});
-            }
-          }
-
-          // Restaura Técnicos
-          const techniciansList = data.technicians || (data.storage && data.storage.vollen_technicians) || [];
-          if (Array.isArray(techniciansList) && techniciansList.length > 0) {
-            for (const tech of techniciansList) {
-              const techId = tech.id || String(Date.now());
-              if (techId) await setDoc(doc(db, 'technicians', String(techId)), { ...tech, id: String(techId) }, { merge: true }).catch(() => {});
-            }
-          }
-
-          // Restaura Dados da Empresa, Preferências de OS e Termos de Garantia
-          if (data.companyData) {
-            await setDoc(doc(db, 'system_config', 'company_data'), data.companyData, { merge: true }).catch(() => {});
-          }
-
-          const osPrefs = data.osPreferences || data.osGeneralConfig || (data.storage && (data.storage.vollen_os_preferences || data.storage.vollen_os_general_config));
-          if (osPrefs) {
-            await setDoc(doc(db, 'system_config', 'os_preferences'), osPrefs, { merge: true }).catch(() => {});
-          }
-
-          const warrantyConfig = data.warrantyTerms || (data.storage && (data.storage.warranty_config || data.storage.vollen_warranty_terms));
-          if (warrantyConfig) {
-            await setDoc(doc(db, 'system_config', 'warranty_config'), warrantyConfig, { merge: true }).catch(() => {});
-          }
         } catch (cloudErr) {
           console.warn('Aviso na sincronização de nuvem da restauração:', cloudErr);
         }
@@ -1146,7 +1147,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
       {/* MODAL FIXO DE STATUS / CONFIRMAÇÃO DE RESTAURAÇÃO DE BACKUP */}
       {restoreStatus.isOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden font-sans animate-fadeIn">
+          <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden font-sans whitespace-normal animate-fadeIn">
             {/* Header do Modal */}
             <div
               className={`p-4 border-b flex items-center gap-2.5 ${
@@ -1164,14 +1165,14 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               ) : (
                 <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
               )}
-              <h3 className="font-bold text-sm">{restoreStatus.title}</h3>
+              <h3 className="font-bold text-sm leading-snug break-words">{restoreStatus.title}</h3>
             </div>
 
             {/* Corpo do Modal */}
-            <div className="p-6 space-y-3 text-slate-700 text-xs">
+            <div className="p-6 space-y-3 text-slate-700 text-xs whitespace-normal break-words">
               <p className="leading-relaxed font-medium text-slate-800">{restoreStatus.message}</p>
               {restoreStatus.details && (
-                <p className="text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium">
+                <p className="text-slate-600 bg-slate-50 border border-slate-200 p-3 rounded-xl font-medium leading-relaxed">
                   {restoreStatus.details}
                 </p>
               )}
@@ -1181,7 +1182,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-2">
               {restoreStatus.isRestoring ? (
                 <span className="text-xs font-bold text-sky-700 flex items-center gap-1.5 py-1">
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                   Gravando registros...
                 </span>
               ) : restoreStatus.isSuccess ? (
@@ -1192,7 +1193,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                   }}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-md shadow-emerald-600/30 flex items-center gap-2 cursor-pointer transition-all text-xs"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
                   OK, Recarregar Sistema
                 </button>
               ) : (

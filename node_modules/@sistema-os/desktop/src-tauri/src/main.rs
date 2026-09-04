@@ -207,12 +207,66 @@ async fn download_and_run_installer(
     },
   );
 
-  // Executar instalador silenciosamente ou em janela padrão do NSIS
+  // Executar instalador com privilégios de administrador (UAC) para evitar erro 740
   #[cfg(target_os = "windows")]
   {
-    Command::new(&installer_path)
-      .spawn()
-      .map_err(|e| format!("Erro ao iniciar o instalador: {}", e))?;
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    let path_wide: Vec<u16> = OsStr::new(&installer_path)
+      .encode_wide()
+      .chain(std::iter::once(0))
+      .collect();
+
+    let verb_wide: Vec<u16> = OsStr::new("runas")
+      .encode_wide()
+      .chain(std::iter::once(0))
+      .collect();
+
+    extern "system" {
+      fn ShellExecuteW(
+        hwnd: isize,
+        lpOperation: *const u16,
+        lpFile: *const u16,
+        lpParameters: *const u16,
+        lpDirectory: *const u16,
+        nShowCmd: i32,
+      ) -> isize;
+    }
+
+    let res = unsafe {
+      ShellExecuteW(
+        0,
+        verb_wide.as_ptr(),
+        path_wide.as_ptr(),
+        std::ptr::null(),
+        std::ptr::null(),
+        1, // SW_SHOWNORMAL
+      )
+    };
+
+    if res <= 32 {
+      // Se 'runas' falhar, tenta com 'open' padrão
+      let verb_open: Vec<u16> = OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+      let res_open = unsafe {
+        ShellExecuteW(
+          0,
+          verb_open.as_ptr(),
+          path_wide.as_ptr(),
+          std::ptr::null(),
+          std::ptr::null(),
+          1,
+        )
+      };
+
+      if res_open <= 32 {
+        return Err(format!("Erro ao executar o instalador (código de erro Windows: {}).", res_open));
+      }
+    }
   }
 
   #[cfg(not(target_os = "windows"))]
@@ -223,7 +277,7 @@ async fn download_and_run_installer(
       .map_err(|e| format!("Erro ao iniciar o instalador: {}", e))?;
   }
 
-  // Dar 1 segundo e encerrar a aplicação atual para permitir que o instalador substitua os arquivos
+  // Dar tempo para o processo do instalador abrir e encerrar a aplicação atual
   std::thread::sleep(std::time::Duration::from_millis(800));
   std::process::exit(0);
 }

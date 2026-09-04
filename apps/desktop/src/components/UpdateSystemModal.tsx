@@ -9,7 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { modalStack } from '../utils/modalStack';
 
-export const CURRENT_SYSTEM_VERSION = '3.0.1';
+export const CURRENT_SYSTEM_VERSION = '3.0.2';
 
 export interface AppVersionInfo {
   version: string;
@@ -111,40 +111,47 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
       const masterDb = getMasterFirestore();
       const currentMajor = CURRENT_SYSTEM_VERSION.split('.')[0] || '1';
 
-      // 1. Tenta verificar pelo Atualizador Nativo (GitHub Releases / Tauri)
+      // 1. Consulta metadados da versão no canal da nuvem (título, notas, data)
+      let cloudInfo: AppVersionInfo | null = null;
+      try {
+        const docRef = doc(masterDb, 'system_config', `app_version_v${currentMajor}`);
+        let docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+          const globalDoc = doc(masterDb, 'system_config', 'app_version');
+          docSnap = await getDoc(globalDoc);
+        }
+
+        if (docSnap.exists()) {
+          cloudInfo = docSnap.data() as AppVersionInfo;
+        }
+      } catch (cloudErr) {
+        console.warn('Aviso ao consultar metadados do Firebase:', cloudErr);
+      }
+
+      // 2. Tenta verificar pelo Atualizador Nativo (GitHub Releases / Tauri)
       try {
         const tauriUpdate = await checkTauriUpdate();
         if (tauriUpdate?.available && isVersionNewer(tauriUpdate.version, CURRENT_SYSTEM_VERSION)) {
           setHasUpdate(true);
           setLatestVersionInfo({
             version: tauriUpdate.version,
-            title: `Atualização v${tauriUpdate.version}`,
-            releaseNotes: tauriUpdate.body ? tauriUpdate.body.split('\n').filter(Boolean) : ['Melhorias de desempenho e novas correções.'],
+            title: cloudInfo?.title || `Atualização v${tauriUpdate.version}`,
+            releaseDate: cloudInfo?.releaseDate || new Date().toLocaleDateString('pt-BR'),
+            releaseNotes: (cloudInfo?.releaseNotes && cloudInfo.releaseNotes.length > 0)
+              ? cloudInfo.releaseNotes
+              : (tauriUpdate.body ? tauriUpdate.body.split('\n').filter(Boolean) : ['Melhorias de desempenho e novas correções.']),
           });
           return;
         }
       } catch (tauriErr) {
-        console.warn('Verificação nativa Tauri não obteve atualização:', tauriErr);
+        console.warn('Verificação nativa Tauri:', tauriErr);
       }
 
-      // 2. Fallback: Consulta canal do Firebase Central
-      const docRef = doc(masterDb, 'system_config', `app_version_v${currentMajor}`);
-      let docSnap = await getDoc(docRef);
-
-      if (!docSnap.exists()) {
-        const globalDoc = doc(masterDb, 'system_config', 'app_version');
-        docSnap = await getDoc(globalDoc);
-      }
-
-      if (docSnap.exists()) {
-        const data = docSnap.data() as AppVersionInfo;
-        setLatestVersionInfo(data);
-
-        if (data.version && isVersionNewer(data.version, CURRENT_SYSTEM_VERSION)) {
-          setHasUpdate(true);
-        } else {
-          setHasUpdate(false);
-        }
+      // 3. Fallback: Se não detectou via Tauri nativo, usa os dados do canal do Firebase
+      if (cloudInfo && cloudInfo.version && isVersionNewer(cloudInfo.version, CURRENT_SYSTEM_VERSION)) {
+        setHasUpdate(true);
+        setLatestVersionInfo(cloudInfo);
       } else {
         setHasUpdate(false);
       }
