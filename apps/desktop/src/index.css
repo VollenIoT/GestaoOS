@@ -4,7 +4,30 @@
 
 body {
   font-family: 'Inter', sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
 }
+
+/* Remove o contorno preto padrão de foco em botões e itens clicáveis */
+button:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button:focus,
+[role="button"]:focus {
+  outline: none;
+}
+
+/* Permite seleção e interação de texto normal dentro de campos de digitação */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 
 /* Regra CAPS LOCK: Força visualização e digitação em maiúsculas dentro dos campos de texto do sistema */
 body.app-caps-active input:not([type="password"]):not([type="email"]):not([type="color"]):not([type="date"]):not([type="time"]):not([type="number"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]),
@@ -81,8 +104,11 @@ body.app-caps-active textarea {
     justify-content: center !important;
   }
 
-  body, table, td, th, div, span, p, h1, h2, h3, strong {
-    text-transform: uppercase !important;
+  /* Comprovante de Venda Térmico e A4 */
+  .sale-print-container {
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
   }
 }
 

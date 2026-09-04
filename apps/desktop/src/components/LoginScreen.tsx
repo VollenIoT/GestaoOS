@@ -7,14 +7,54 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
-  const [users, setUsers] = useState<Array<{ id: string; username: string; name: string; role: string }>>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [users, setUsers] = useState<Array<{ id: string; username: string; name: string; role: string }>>(() => {
+    try {
+      const saved = localStorage.getItem('vollen_users');
+      if (saved) {
+        const parsedUsers = JSON.parse(saved);
+        if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
+          return parsedUsers.map((u: any) => ({
+            id: String(u.id),
+            username: u.username || u.name || 'ADMIN',
+            name: u.name || u.username || 'ADMINISTRADOR',
+            role: u.role || 'Admin',
+          }));
+        }
+      }
+    } catch (err) {}
+    // Padrão inicial caso não haja usuários salvos ainda
+    const defaultInit = [
+      { id: '1', username: 'admin', name: 'Administrador', role: 'Admin' },
+    ];
+    try {
+      localStorage.setItem('vollen_users', JSON.stringify([
+        { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' }
+      ]));
+    } catch (e) {}
+    return defaultInit;
+  });
+
+  const [selectedUserId, setSelectedUserId] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('vollen_users');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const admin = parsed.find((u: any) => (u.username || '').toLowerCase() === 'admin' || (u.name && u.name.includes('Administrador'))) || parsed[0];
+          return String(admin.id);
+        }
+      }
+    } catch (err) {}
+    return '1';
+  });
+
   const [password, setPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [closed, setClosed] = useState<boolean>(false);
 
   useEffect(() => {
+    // Sincroniza usuários do localStorage ou Firestore
     let localUsers: any[] = [];
     try {
       const saved = localStorage.getItem('vollen_users');
@@ -23,28 +63,53 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
           localUsers = parsedUsers.map((u: any) => ({
             id: String(u.id),
-            username: u.username || u.name,
-            name: u.name || u.username,
-            role: u.role,
+            username: u.username || u.name || 'ADMIN',
+            name: u.name || u.username || 'ADMINISTRADOR',
+            role: u.role || 'Admin',
           }));
         }
       }
     } catch (err) { }
 
-    if (localUsers.length > 0) {
-      setUsers(localUsers);
-      const adminUser = localUsers.find((u: any) => u.username === 'admin' || (u.name && u.name.includes('Administrador'))) || localUsers[0];
-      setSelectedUserId(String(adminUser.id));
-    } else {
-      const initialUsers = [
-        { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' },
-      ];
+    if (localUsers.length === 0) {
+      localUsers = [{ id: '1', username: 'admin', name: 'Administrador', role: 'Admin' }];
       try {
-        localStorage.setItem('vollen_users', JSON.stringify(initialUsers));
-      } catch (err) {}
-      setUsers(initialUsers);
-      setSelectedUserId('1');
+        localStorage.setItem('vollen_users', JSON.stringify([
+          { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' }
+        ]));
+      } catch (e) {}
     }
+
+    setUsers(localUsers);
+    const adminUser = localUsers.find((u: any) => (u.username || '').toLowerCase() === 'admin' || (u.name && u.name.includes('Administrador'))) || localUsers[0];
+    if (adminUser) {
+      setSelectedUserId(String(adminUser.id));
+    }
+
+    // Busca usuários atualizados na nuvem Firestore
+    import('../services/firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ collection, getDocs }) => {
+        getDocs(collection(db, 'users'))
+          .then((snap) => {
+            if (!snap.empty) {
+              const cloudUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+              try {
+                localStorage.setItem('vollen_users', JSON.stringify(cloudUsers));
+              } catch (e) {}
+              const formatted = cloudUsers.map((u: any) => ({
+                id: String(u.id),
+                username: u.username || u.name || 'ADMIN',
+                name: u.name || u.username || 'ADMINISTRADOR',
+                role: u.role || 'Admin',
+              }));
+              setUsers(formatted);
+              const adminUserCloud = formatted.find((u: any) => (u.username || '').toLowerCase() === 'admin' || (u.name && u.name.includes('Administrador'))) || formatted[0];
+              if (adminUserCloud) setSelectedUserId(String(adminUserCloud.id));
+            }
+          })
+          .catch(() => {});
+      });
+    });
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -81,16 +146,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
 
     // Se o usuário tem senha cadastrada, valida a correspondência exata
-    const registeredPassword = matchedUser.password;
-    if (registeredPassword !== undefined && registeredPassword !== null && registeredPassword !== '') {
-      if (registeredPassword !== password) {
+    const registeredPassword = matchedUser.password !== undefined && matchedUser.password !== null
+      ? String(matchedUser.password).trim()
+      : '';
+    const inputPassword = String(password).trim();
+
+    if (registeredPassword !== '') {
+      if (registeredPassword !== inputPassword) {
         setLoading(false);
         setErrorMsg('Senha incorreta! Digite a senha cadastrada para este usuário.');
         return;
       }
     } else {
       // Se não há senha gravada ainda (ex: usuário padrão inicial), aceita '1234' ou 'admin'
-      if (password !== '1234' && password !== 'admin') {
+      if (inputPassword !== '1234' && inputPassword !== 'admin') {
         setLoading(false);
         setErrorMsg('Senha incorreta! Digite a senha cadastrada.');
         return;
@@ -128,27 +197,75 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     });
   };
 
+  useEffect(() => {
+    // Garante que o aplicativo inicie maximizado
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        if (appWindow) {
+          await appWindow.maximize();
+        }
+      } catch {}
+    })();
+  }, []);
+
   const handleClose = async () => {
+    // 1. Encerramento oficial do aplicativo no Tauri v2 via @tauri-apps/plugin-process
     try {
-      // Se estiver rodando dentro do aplicativo nativo Tauri Desktop
+      const { exit } = await import('@tauri-apps/plugin-process');
+      await exit(0);
+      return;
+    } catch (e) {
+      console.warn('Erro ao chamar plugin-process exit:', e);
+    }
+
+    // 2. Tenta fechar ou destruir a janela atual do Tauri
+    try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
       const appWindow = getCurrentWindow();
-      await appWindow.close();
-    } catch {
-      // Fallback para navegador web
-      setClosed(true);
-      window.close();
+      if (appWindow) {
+        try {
+          await appWindow.destroy();
+          return;
+        } catch {
+          await appWindow.close();
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Não foi possível fechar via Tauri window API:', err);
     }
+
+    // 3. Fallback invocando IPC direto do Tauri
+    try {
+      if ((window as any).__TAURI_INTERNALS__) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        try {
+          await invoke('plugin:process|exit', { code: 0 });
+          return;
+        } catch {
+          await invoke('plugin:window|close');
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // 4. Fallback caso esteja rodando diretamente no navegador web
+    setClosed(true);
+    try {
+      window.close();
+    } catch {}
   };
 
   if (closed) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
-        <div className="text-center bg-white border border-slate-200 p-8 rounded-2xl max-w-sm shadow-xl">
-          <Power className="w-12 h-12 text-red-500 mx-auto mb-4 animate-bounce" />
+      <div className="fixed inset-0 z-[99999] bg-slate-900 flex items-center justify-center p-4">
+        <div className="text-center bg-white border border-slate-200 p-8 rounded-3xl max-w-sm shadow-2xl">
+          <Power className="w-12 h-12 text-red-500 mx-auto mb-4 animate-pulse" />
           <h2 className="text-xl font-bold text-slate-800 mb-2">Aplicação Encerrada</h2>
-          <p className="text-sm text-slate-500">
-            Você encerrou a sessão. Pode fechar esta aba ou janela com segurança.
+          <p className="text-sm text-slate-500 font-medium leading-relaxed">
+            Você encerrou a sessão do sistema. A janela do aplicativo foi fechada.
           </p>
         </div>
       </div>

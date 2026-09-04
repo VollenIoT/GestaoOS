@@ -32,13 +32,13 @@ ${StrLoc}
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 !define MANUFACTURER "vollen"
-!define PRODUCTNAME "Vollen OS"
-!define VERSION "1.0.0"
-!define VERSIONWITHBUILD "1.0.0.0"
+!define PRODUCTNAME "Vollen - Gestão de Ordens de Serviço"
+!define VERSION "3.0.0"
+!define VERSIONWITHBUILD "3.0.0.0"
 !define HOMEPAGE ""
-!define INSTALLMODE "currentUser"
-!define LICENSE ""
-!define INSTALLERICON ""
+!define INSTALLMODE "perMachine"
+!define LICENSE "D:\SistemaOS\apps\desktop\src-tauri\target\release\nsis\x64\license_file"
+!define INSTALLERICON "D:\SistemaOS\apps\desktop\src-tauri\icons\icon.ico"
 !define SIDEBARIMAGE ""
 !define HEADERIMAGE ""
 !define UNINSTALLERICON ""
@@ -61,7 +61,7 @@ ${StrLoc}
 !define MANUKEY "Software\${MANUFACTURER}"
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND ""
-!define ESTIMATEDSIZE "7790"
+!define ESTIMATEDSIZE "13911"
 !define STARTMENUFOLDER ""
 
 Var PassiveMode
@@ -460,9 +460,9 @@ FunctionEnd
 !insertmacro MUI_UNPAGE_INSTFILES
 
 ;Languages
-!insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "Portuguese"
 !insertmacro MUI_RESERVEFILE_LANGDLL
-  !include "D:\SistemaOS\apps\desktop\src-tauri\target\release\nsis\x64\English.nsh"
+  !include "D:\SistemaOS\apps\desktop\src-tauri\target\release\nsis\x64\Portuguese.nsh"
 
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode

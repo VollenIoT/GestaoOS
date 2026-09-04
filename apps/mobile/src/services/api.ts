@@ -1,4 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  onSnapshot,
+  runTransaction,
+} from 'firebase/firestore';
+import { getMasterFirestore, getActiveMobileFirestore } from './firebase';
+
+// Utilitário para evitar que promises do Firestore fiquem travadas indefinidamente quando o celular estiver sem conexão
+export async function withTimeout<T>(promise: Promise<T>, timeoutMs = 2500): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('TIMEOUT_OFFLINE')), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
 
 const DEFAULT_SERVER_URL = 'http://192.168.1.100:3333/api';
 
@@ -24,16 +44,292 @@ export async function getLinkedCompanyMobile(): Promise<any | null> {
 }
 
 export async function linkCompanyMobile(payload: any): Promise<void> {
+  // 1. Se não for modo de teste, valida a ApiKey no Catálogo Central (Master) e busca o Firebase da empresa
+  if (!payload.isTestMode && payload.apiKey) {
+    const cleanApiKey = payload.apiKey.replace(/[\s-]/g, '').toUpperCase();
+    const { getMasterFirestore, getActiveMobileFirestore } = await import('./firebase');
+
+    const masterFirestore = getMasterFirestore();
+    const apiKeyDocRef = doc(masterFirestore, 'mobile_apikeys', cleanApiKey);
+    const snap = await getDoc(apiKeyDocRef);
+
+    if (!snap.exists()) {
+      throw new Error(`ApiKey "${payload.apiKey}" não foi encontrada no servidor.\n\nVerifique se o código foi digitado corretamente e se o computador gerou a chave.`);
+    }
+
+    const cloudData = snap.data();
+    if (!cloudData.firebaseConfig || !cloudData.firebaseConfig.projectId) {
+      throw new Error('Esta ApiKey existe mas não possui credenciais de banco válidas associadas.');
+    }
+
+    payload.companyName = cloudData.companyName || payload.companyName || 'Empresa Vinculada';
+    payload.firebaseConfig = cloudData.firebaseConfig;
+    payload.serial = cloudData.serial;
+    await setLocalData('mobile_tenant_firebase_config', cloudData.firebaseConfig);
+
+    // Conecta imediatamente ao banco do cliente e baixa os dados da empresa e usuários
+    try {
+      const tenantFirestore = await getActiveMobileFirestore();
+      const [compSnap, usersSnap, techsSnap, ordersSnap, clientsSnap, partsSnap, servicesSnap, equipsSnap, statusesSnap] = await Promise.all([
+        getDoc(doc(tenantFirestore, 'system_config', 'company_data')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'users')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'technicians')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'orders')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'clients')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'parts')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'services')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'equipments')).catch(() => null),
+        getDocs(collection(tenantFirestore, 'os_statuses')).catch(() => null),
+      ]);
+
+      if (compSnap && compSnap.exists()) {
+        const compData = compSnap.data();
+        await setLocalData('mobile_company_data', compData);
+        if (compData.tradingName || compData.name) {
+          payload.companyName = compData.tradingName || compData.name;
+        }
+      }
+
+      const combinedUsers: any[] = [];
+      const seen = new Set<string>();
+
+      if (usersSnap && !usersSnap.empty) {
+        usersSnap.docs.forEach((d) => {
+          const data = d.data();
+          const role = (data.role || '').toUpperCase();
+          const isAdmin = Boolean(data.isAdmin || role === 'ADMIN' || (data.username || '').toLowerCase() === 'admin');
+          const isTech = Boolean(data.isTechnician || role === 'TECNICO' || role === 'TÉCNICO');
+          if (isAdmin || isTech) {
+            const key = (data.username || data.name || d.id).toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              combinedUsers.push({ id: d.id, ...data });
+            }
+          }
+        });
+      }
+
+      if (techsSnap && !techsSnap.empty) {
+        techsSnap.docs.forEach((d) => {
+          const data = d.data();
+          const key = (data.username || data.name || d.id).toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            combinedUsers.push({ id: d.id, ...data, role: data.role || 'Técnico' });
+          }
+        });
+      }
+
+      if (combinedUsers.length > 0) {
+        await setLocalData('mobile_users', combinedUsers);
+      }
+
+      // Baixa todas as Ordens de Serviço
+      if (ordersSnap && !ordersSnap.empty) {
+        const cloudOrders = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_orders', cloudOrders);
+      }
+
+      // Baixa todos os Clientes
+      if (clientsSnap && !clientsSnap.empty) {
+        const cloudClients = clientsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_clients', cloudClients);
+      }
+
+      // Baixa Peças, Serviços, Equipamentos e Status
+      if (partsSnap && !partsSnap.empty) {
+        const cloudParts = partsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_parts', cloudParts);
+      }
+
+      if (servicesSnap && !servicesSnap.empty) {
+        const cloudServices = servicesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_services', cloudServices);
+      }
+
+      if (equipsSnap && !equipsSnap.empty) {
+        const cloudEquips = equipsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_equipments', cloudEquips);
+      }
+
+      if (statusesSnap && !statusesSnap.empty) {
+        const cloudStatuses = statusesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_os_statuses', cloudStatuses);
+      }
+    } catch (dbErr) {
+      console.warn('Aviso ao sincronizar dados iniciais do tenant:', dbErr);
+    }
+  }
+
   await setLocalData('mobile_linked_company', payload);
   if (payload.companyName) {
+    const existingComp = await getLocalData<any>('mobile_company_data', {});
     await setLocalData('mobile_company_data', {
+      ...existingComp,
       name: payload.companyName,
       tradingName: payload.companyName,
-      cnpj: payload.cnpj || '',
-      phone: payload.phone || '',
-      logoUrl: payload.logoUrl || '',
+      cnpj: payload.cnpj || existingComp.cnpj || '',
+      phone: payload.phone || existingComp.phone || '',
+      logoUrl: payload.logoUrl || existingComp.logoUrl || '',
     });
   }
+}
+
+// Verifica silenciosamente se a ApiKey vinculada ainda é válida no Firestore
+export async function verifyAndSyncApiKeyMobile(): Promise<{ valid: boolean; reason?: 'KEY_CHANGED' | 'KEY_NOT_FOUND' }> {
+  const linked = await getLinkedCompanyMobile();
+  if (!linked) return { valid: false, reason: 'KEY_NOT_FOUND' };
+  if (linked.isTestMode) return { valid: true };
+
+  try {
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const docRef = doc(activeDb, 'system_config', 'company_apikey');
+    const snap = await getDoc(docRef).catch(() => null);
+    
+    // Se o snap veio do servidor e existe, valida se a chave bate
+    if (snap && snap.exists()) {
+      const serverApiKey = (snap.data()?.apiKey || '').trim();
+      const localApiKey = (linked.apiKey || '').trim();
+      if (serverApiKey && localApiKey && serverApiKey !== localApiKey) {
+        await unlinkCompanyMobile();
+        return { valid: false, reason: 'KEY_CHANGED' };
+      }
+      return { valid: true };
+    }
+
+    // Se snap for nulo (sem rede) ou se está em cache/iniciando, NÃO desvincula no modo offline!
+    if (!snap) {
+      return { valid: true };
+    }
+
+    // Se o documento no tenant ainda não existe, verifica no Master apenas se houver resposta válida
+    const masterDb = getMasterFirestore();
+    const cleanApiKey = (linked.apiKey || '').replace(/[\s-]/g, '').toUpperCase();
+    if (!cleanApiKey) return { valid: false, reason: 'KEY_NOT_FOUND' };
+    
+    const masterSnap = await getDoc(doc(masterDb, 'mobile_apikeys', cleanApiKey)).catch(() => null);
+    // Só desvincula se o master respondeu explicitamente que o documento NÃO existe (snap recebido com sucesso e exists === false)
+    if (masterSnap && !masterSnap.exists() && !masterSnap.metadata.fromCache) {
+      await unlinkCompanyMobile();
+      return { valid: false, reason: 'KEY_NOT_FOUND' };
+    }
+
+    return { valid: true };
+  } catch (err) {
+    // Em caso de falha de conexão de rede ou timeout, mantém a sessão se tiver chave
+    return { valid: true };
+  }
+}
+
+export function subscribeSecurityValidationMobile(callbacks: {
+  onApiKeyInvalidated: () => void;
+  onUserInvalidated: () => void;
+}) {
+  let unsubKey = () => {};
+  let unsubUsers = () => {};
+  let unsubTechs = () => {};
+
+  getLinkedCompanyMobile().then(async (linked) => {
+    // Se não há empresa vinculada ainda ou se está em modo de teste, não escuta invalidação
+    if (!linked || linked.isTestMode || !linked.apiKey) return;
+
+    try {
+      const { getActiveMobileFirestore } = await import('./firebase');
+      const activeDb = await getActiveMobileFirestore();
+
+      // 1. Escuta em tempo real se a ApiKey do sistema foi alterada no computador
+      const apiKeyDocRef = doc(activeDb, 'system_config', 'company_apikey');
+      unsubKey = onSnapshot(apiKeyDocRef, (snap) => {
+        // Ignora eventos que não vieram do servidor com dados concretos (ex: perda de rede / snapshot vazio offline)
+        if (snap.metadata.fromCache && !snap.exists()) return;
+
+        getLinkedCompanyMobile().then((currentLinked) => {
+          if (!currentLinked || currentLinked.isTestMode || !currentLinked.apiKey) return;
+
+          // Só invalida se o servidor confirmou que o documento realmente não existe mais
+          if (!snap.exists() && !snap.metadata.fromCache) {
+            unlinkCompanyMobile().then(() => callbacks.onApiKeyInvalidated());
+            return;
+          }
+
+          if (snap.exists()) {
+            const serverKey = (snap.data()?.apiKey || '').trim();
+            const localKey = (currentLinked.apiKey || '').trim();
+            if (serverKey && localKey && serverKey !== localKey) {
+              unlinkCompanyMobile().then(() => callbacks.onApiKeyInvalidated());
+            }
+          }
+        });
+      }, (err) => {
+        // Em caso de erro de rede, apenas ignora
+        console.warn('Listener de segurança de ApiKey offline:', err);
+      });
+
+      // 2. Escuta em tempo real se o usuário logado atualmente foi excluído do sistema
+      const usersColRef = collection(activeDb, 'users');
+      const techsColRef = collection(activeDb, 'technicians');
+
+      const validateCurrentUser = (usersDocs: any[], techsDocs: any[]) => {
+        // Se as listas estiverem vazias por falta de conexão, NÃO desloga o usuário!
+        if (usersDocs.length === 0 && techsDocs.length === 0) return;
+
+        getCurrentUserMobile().then((currentUser) => {
+          if (!currentUser) return;
+          const currentId = String(currentUser.id || '').trim();
+          const currentUsername = String(currentUser.username || '').toLowerCase().trim();
+
+          const existsInUsers = usersDocs.some((d) => {
+            const data = d.data ? d.data() : d;
+            return d.id === currentId || (data.username && String(data.username).toLowerCase().trim() === currentUsername);
+          });
+
+          const existsInTechs = techsDocs.some((d) => {
+            const data = d.data ? d.data() : d;
+            return d.id === currentId || (data.name && String(data.name).toLowerCase().trim() === currentUsername);
+          });
+
+          // Se o usuário não existir mais nem na coleção de usuários nem na de técnicos (e temos docs válidos)
+          if (!existsInUsers && !existsInTechs && currentUsername !== 'admin-demo' && currentUsername !== 'admin') {
+            logoutUserMobile().then(() => {
+              callbacks.onUserInvalidated();
+            });
+          }
+        });
+      };
+
+      let latestUsersSnap: any[] = [];
+      let latestTechsSnap: any[] = [];
+      let initialCheckDone = false;
+
+      unsubUsers = onSnapshot(usersColRef, (snap) => {
+        if (!snap.empty) {
+          latestUsersSnap = snap.docs;
+          if (initialCheckDone) validateCurrentUser(latestUsersSnap, latestTechsSnap);
+        }
+      }, (err) => {
+        console.warn('Listener de usuários offline:', err);
+      });
+
+      unsubTechs = onSnapshot(techsColRef, (snap) => {
+        if (!snap.empty) {
+          latestTechsSnap = snap.docs;
+        }
+        initialCheckDone = true;
+        if (latestUsersSnap.length > 0 || latestTechsSnap.length > 0) {
+          validateCurrentUser(latestUsersSnap, latestTechsSnap);
+        }
+      }, (err) => {
+        console.warn('Listener de técnicos offline:', err);
+      });
+    } catch {}
+  });
+
+  return () => {
+    unsubKey();
+    unsubUsers();
+    unsubTechs();
+  };
 }
 
 export async function isTestModeMobile(): Promise<boolean> {
@@ -61,7 +357,7 @@ export async function setTestModeMobile(): Promise<any> {
   };
 
   await setLocalData('mobile_linked_company', testPayload);
-  await setLocalData('mobile_auth_user', testUser);
+  await AsyncStorage.removeItem('mobile_auth_user');
   await setLocalData('mobile_orders', []);      // OS limpa
   await setLocalData('mobile_clients', []);     // Clientes limpos
   await setLocalData('mobile_parts', []);       // Peças limpas — usa DEFAULT_PARTS_PC da memória
@@ -113,18 +409,6 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
-import { db } from './firebase';
-import {
-  collection,
-  getDocs,
-  getDoc,
-  doc,
-  setDoc,
-  deleteDoc,
-  onSnapshot,
-  runTransaction,
-} from 'firebase/firestore';
-
 // 0. AUTENTICAÇÃO E USUÁRIOS
 export const TEST_MODE_USERS = [
   { id: 'admin-demo', username: 'admin', name: 'Administrador (Demo)', role: 'Admin', isAdmin: true, password: '1234' },
@@ -137,9 +421,11 @@ export async function fetchUsersMobile(): Promise<any[]> {
   }
 
   try {
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
     const [usersSnap, techsSnap] = await Promise.all([
-      getDocs(collection(db, 'users')).catch(() => null),
-      getDocs(collection(db, 'technicians')).catch(() => null),
+      getDocs(collection(activeDb, 'users')).catch(() => null),
+      getDocs(collection(activeDb, 'technicians')).catch(() => null),
     ]);
 
     const combined: any[] = [];
@@ -263,7 +549,6 @@ export const TEST_MODE_COMPANY = {
 };
 
 export async function fetchCompanyDataMobile(): Promise<any> {
-  // Em modo de teste, retorna dados neutros sem consultar o Firestore
   const isTest = await isTestModeMobile();
   if (isTest) {
     return TEST_MODE_COMPANY;
@@ -271,25 +556,24 @@ export async function fetchCompanyDataMobile(): Promise<any> {
 
   const local = await getLocalData<any>('mobile_company_data', DEFAULT_COMPANY_MOBILE);
   try {
-    const compRef = doc(db, 'system_config', 'company_data');
-    const snap = await getDoc(compRef);
-    if (snap.exists()) {
+    const activeDb = await getActiveMobileFirestore();
+    const compRef = doc(activeDb, 'system_config', 'company_data');
+    const snap = await withTimeout(getDoc(compRef), 1500).catch(() => null);
+    if (snap && snap.exists()) {
       const data = snap.data();
       await setLocalData('mobile_company_data', data);
       return data;
     }
-  } catch (err) {
-    console.warn('Erro ao buscar dados da empresa no Firestore mobile:', err);
-  }
+  } catch {}
   return local;
 }
 
 export function subscribeCompanyDataMobile(callback: (company: any) => void) {
-  // Em modo de teste, não se inscreve no Firestore da empresa
-  isTestModeMobile().then((isTest) => {
+  isTestModeMobile().then(async (isTest) => {
     if (isTest) return;
     try {
-      const compRef = doc(db, 'system_config', 'company_data');
+      const activeDb = await getActiveMobileFirestore();
+      const compRef = doc(activeDb, 'system_config', 'company_data');
       onSnapshot(compRef, (snap) => {
         if (snap.exists()) {
           const data = snap.data();
@@ -297,9 +581,7 @@ export function subscribeCompanyDataMobile(callback: (company: any) => void) {
           callback(data);
         }
       });
-    } catch {
-      // silencioso
-    }
+    } catch {}
   });
   return () => {};
 }
@@ -307,37 +589,66 @@ export function subscribeCompanyDataMobile(callback: (company: any) => void) {
 // 1. ORDENS DE SERVIÇO (OS)
 export async function fetchOrdersMobile(): Promise<any[]> {
   const local = await getLocalData<any[]>('mobile_orders', []);
+  const pendingQueue = await getLocalData<any[]>('mobile_pending_orders_queue', []);
   const testMode = await isTestModeMobile();
   if (testMode) {
     return local;
   }
 
   try {
-    const colRef = collection(db, 'orders');
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'orders');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       const serverOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      await setLocalData('mobile_orders', serverOrders);
-      return serverOrders;
+      const mergedMap = new Map<string, any>();
+      serverOrders.forEach((o) => mergedMap.set(o.id, o));
+      // Sempre mantém as ordens da fila de espera local
+      pendingQueue.forEach((o) => mergedMap.set(o.id, o));
+      local.filter((o) => o.isPendingSync || String(o.code).includes('Aguardando')).forEach((o) => mergedMap.set(o.id, o));
+      
+      const finalOrders = Array.from(mergedMap.values());
+      await setLocalData('mobile_orders', finalOrders);
+      return finalOrders;
+    } else if (!snap.metadata.fromCache) {
+      const mergedMap = new Map<string, any>();
+      pendingQueue.forEach((o) => mergedMap.set(o.id, o));
+      const finalOrders = Array.from(mergedMap.values());
+      await setLocalData('mobile_orders', finalOrders);
+      return finalOrders;
     }
   } catch (err) {
-    console.warn('Erro ao buscar ordens no Firestore mobile:', err);
+    console.warn('Erro ao buscar ordens no Firestore mobile (usando cache):', err);
   }
   return local;
 }
 
 export function subscribeOrdersMobile(callback: (orders: any[]) => void) {
-  getLocalData<any | null>('mobile_linked_company', null).then((linked) => {
+  getLocalData<any | null>('mobile_linked_company', null).then(async (linked) => {
     if (linked?.isTestMode) {
       // Modo de teste não escuta o Firestore da empresa
       return () => {};
     }
     try {
-      const colRef = collection(db, 'orders');
-      return onSnapshot(colRef, (snap) => {
-        const orders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setLocalData('mobile_orders', orders);
-        callback(orders);
+      const { getActiveMobileFirestore } = await import('./firebase');
+      const activeDb = await getActiveMobileFirestore();
+      const colRef = collection(activeDb, 'orders');
+      return onSnapshot(colRef, async (snap) => {
+        if (snap.metadata.fromCache && snap.empty) return;
+
+        const serverOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const pendingQueue = await getLocalData<any[]>('mobile_pending_orders_queue', []);
+        const local = await getLocalData<any[]>('mobile_orders', []);
+
+        const mergedMap = new Map<string, any>();
+        serverOrders.forEach((o) => mergedMap.set(o.id, o));
+        pendingQueue.forEach((o) => mergedMap.set(o.id, o));
+        local.filter((o) => o.isPendingSync || String(o.code).includes('Aguardando')).forEach((o) => mergedMap.set(o.id, o));
+
+        const finalOrders = Array.from(mergedMap.values());
+        await setLocalData('mobile_orders', finalOrders);
+        callback(finalOrders);
       });
     } catch {
       return () => {};
@@ -348,45 +659,73 @@ export function subscribeOrdersMobile(callback: (orders: any[]) => void) {
 
 export async function saveOrderMobile(orderData: any): Promise<any> {
   const local = await getLocalData<any[]>('mobile_orders', []);
+  const pendingQueue = await getLocalData<any[]>('mobile_pending_orders_queue', []);
   const orderId = orderData.id || `MOB-OS-${Date.now()}`;
   
   let orderCode = orderData.code;
 
-  // Se já tem código definitivo (ex: OS-0005), mantém
-  const isPendingCode = !orderCode || orderCode === 'Aguardando Rede...' || orderCode.startsWith('PENDENTE');
+  // Se já tem código definitivo oficial (ex: OS-0005), mantém
+  const isPendingCode = !orderCode || orderCode === 'Aguardando Rede...' || orderCode.includes('Aguardando') || orderCode.startsWith('PENDENTE');
   const isTestMode = await isTestModeMobile();
+  
+  let hasObtainedOfficialCode = false;
+
   if (isTestMode) {
     if (isPendingCode) {
       orderCode = `OS-TEST-${String(local.length + 1).padStart(4, '0')}`;
+      hasObtainedOfficialCode = true;
     }
   } else if (isPendingCode) {
     try {
-      // Obtenção sequencial e reserva do número de OS sincronizada com o PC
-      const counterRef = doc(db, 'system_config', 'order_counter');
-      const counterSnap = await getDoc(counterRef);
-      let nextNumber = 1;
+      // Tenta obter o próximo número oficial no Firestore (apenas com conexão real do servidor)
+      const { getActiveMobileFirestore } = await import('./firebase');
+      const activeDb = await getActiveMobileFirestore();
+      const counterRef = doc(activeDb, 'system_config', 'order_counter');
+      
+      const [counterSnap, ordersSnap] = await withTimeout(
+        Promise.all([
+          getDoc(counterRef),
+          getDocs(collection(activeDb, 'orders')),
+        ]),
+        1500
+      );
 
-      if (counterSnap.exists()) {
-        const currentCount = counterSnap.data().lastOrderNumber || 0;
-        nextNumber = currentCount + 1;
-      } else {
-        const ordersSnap = await getDocs(collection(db, 'orders'));
-        let maxFound = 0;
-        ordersSnap.docs.forEach((d) => {
-          const c = d.data().code;
-          if (c) {
+      // Se veio do cache local por estar sem internet, NÃO atribui número agora para evitar conflito!
+      const isFromCache = Boolean(counterSnap?.metadata?.fromCache || ordersSnap?.metadata?.fromCache);
+      if (isFromCache) {
+        throw new Error('OFFLINE_CACHE_RESPONSE');
+      }
+
+      let maxFound = 0;
+
+      // 1. Números em todas as ordens reais na nuvem
+      if (ordersSnap && !ordersSnap.empty) {
+        ordersSnap.docs.forEach((d: any) => {
+          const c = d.data()?.code;
+          if (c && !String(c).includes('Aguardando') && !String(c).includes('PENDENTE')) {
             const num = parseInt(String(c).replace(/\D/g, ''), 10);
             if (!isNaN(num) && num > maxFound) maxFound = num;
           }
         });
-        nextNumber = maxFound + 1;
       }
 
-      await setDoc(counterRef, { lastOrderNumber: nextNumber }, { merge: true });
+      // 2. Números nas ordens locais do celular
+      local.forEach((o) => {
+        if (o?.code && !String(o.code).includes('Aguardando') && !String(o.code).includes('PENDENTE')) {
+          const num = parseInt(String(o.code).replace(/\D/g, ''), 10);
+          if (!isNaN(num) && num > maxFound) maxFound = num;
+        }
+      });
+
+      const nextNumber = maxFound + 1;
+      setDoc(counterRef, { lastOrderNumber: nextNumber, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
       orderCode = `OS-${String(nextNumber).padStart(4, '0')}`;
+      hasObtainedOfficialCode = true;
     } catch (netErr) {
-      console.warn('Dispositivo sem rede ou falha de conexão. OS salva localmente aguardando conexão:', netErr);
+      // Sem internet: a OS é salva localmente com código 'Aguardando Rede...' (sem inventar número local)
+      console.log('Dispositivo sem rede/internet. OS salva em modo de espera aguardando conexão.');
       orderCode = 'Aguardando Rede...';
+      hasObtainedOfficialCode = false;
     }
   }
 
@@ -394,41 +733,149 @@ export async function saveOrderMobile(orderData: any): Promise<any> {
     ...orderData,
     id: orderId,
     code: orderCode,
-    isPendingSync: !isTestMode && orderCode === 'Aguardando Rede...',
+    isPendingSync: !hasObtainedOfficialCode && !isTestMode,
     updatedAt: new Date().toISOString(),
     createdAt: orderData.createdAt || new Date().toISOString(),
   };
 
+  // 1. SALVAMENTO LOCAL IMEDIATO
   const updatedList = [finalOrder, ...local.filter((o) => o.id !== orderId)];
   await setLocalData('mobile_orders', updatedList);
 
-  // Se tiver conexão e NÃO for modo de teste, salva e sincroniza na nuvem
-  if (!isTestMode && !finalOrder.isPendingSync) {
-    try {
-      // Sanitiza campos undefined para evitar erros de serialização do Firestore
-      const sanitizedOrder = JSON.parse(JSON.stringify(finalOrder));
-      await setDoc(doc(db, 'orders', orderId), sanitizedOrder, { merge: true });
-    } catch (err) {
-      console.warn('Erro ao sincronizar OS no Firestore mobile:', err);
-    }
+  // 2. SE FOR PENDENTE DE SINCRONIZAÇÃO OFFLINE, GUARDA NA FILA DEDICADA
+  if (!hasObtainedOfficialCode && !isTestMode) {
+    const updatedQueue = [finalOrder, ...pendingQueue.filter((o) => o.id !== orderId)];
+    await setLocalData('mobile_pending_orders_queue', updatedQueue);
+  }
+
+  // 3. SE CONSEGUIU O CÓDIGO OFICIAL, SOBE PARA A NUVEM EM BACKGROUND
+  if (hasObtainedOfficialCode && !isTestMode) {
+    (async () => {
+      try {
+        const activeDb = await getActiveMobileFirestore();
+        const sanitizedOrder = JSON.parse(JSON.stringify(finalOrder));
+        await withTimeout(setDoc(doc(activeDb, 'orders', orderId), sanitizedOrder, { merge: true }), 3000);
+      } catch (err) {
+        console.warn('OS salva localmente, sincronização remota será feita em segundo plano:', err);
+      }
+    })();
   }
 
   return finalOrder;
 }
 
-// Sincronizador automático de OS pendentes quando a rede voltar
+let isSyncingPendingOrders = false;
+
+// Sincronizador automático de OS pendentes quando a rede/internet voltar
 export async function syncPendingOrdersMobile(): Promise<void> {
-  const local = await getLocalData<any[]>('mobile_orders', []);
-  const pending = local.filter((o) => o.isPendingSync || o.code === 'Aguardando Rede...' || !o.code);
+  const isTest = await isTestModeMobile();
+  if (isTest) return;
 
-  if (pending.length === 0) return;
+  if (isSyncingPendingOrders) return;
+  isSyncingPendingOrders = true;
 
-  for (const pOrder of pending) {
-    try {
-      await saveOrderMobile({ ...pOrder, code: undefined });
-    } catch (err) {
-      console.warn('Tentativa de sincronizar OS pendente falhou (ainda sem rede):', err);
+  try {
+    const pendingQueue = await getLocalData<any[]>('mobile_pending_orders_queue', []);
+    const local = await getLocalData<any[]>('mobile_orders', []);
+
+    // Pega todas as ordens marcadas como pendentes ou na fila
+    const map = new Map<string, any>();
+    pendingQueue.forEach((o) => map.set(o.id, o));
+    local.filter((o) => o.isPendingSync || !o.code || String(o.code).includes('Aguardando')).forEach((o) => map.set(o.id, o));
+    const pending = Array.from(map.values());
+
+    if (pending.length === 0) return;
+
+    const activeDb = await getActiveMobileFirestore();
+    const counterRef = doc(activeDb, 'system_config', 'order_counter');
+
+    // 1. Processa cada OS pendente garantindo atomicidade estrita
+    while (true) {
+      const currentQueue = await getLocalData<any[]>('mobile_pending_orders_queue', []);
+      const currentLocal = await getLocalData<any[]>('mobile_orders', []);
+
+      const pendingMap = new Map<string, any>();
+      currentQueue.forEach((o) => pendingMap.set(o.id, o));
+      currentLocal
+        .filter((o) => o.isPendingSync || !o.code || String(o.code).includes('Aguardando'))
+        .forEach((o) => pendingMap.set(o.id, o));
+
+      const pendingList = Array.from(pendingMap.values());
+      if (pendingList.length === 0) break;
+
+      const pOrder = pendingList[0];
+
+      try {
+        // Consulta o Firestore para buscar todas as ordens existentes
+        const ordersSnap = await withTimeout(getDocs(collection(activeDb, 'orders')), 5000);
+        if (!ordersSnap || ordersSnap.metadata?.fromCache) {
+          // Sem resposta real do servidor, interrompe o loop e aguarda conexão estável
+          break;
+        }
+
+        let maxFound = 0;
+
+        // Maior número entre todas as ordens existentes na nuvem (Firestore)
+        if (!ordersSnap.empty) {
+          ordersSnap.docs.forEach((d: any) => {
+            const c = d.data()?.code;
+            if (c && !String(c).includes('Aguardando') && !String(c).includes('PENDENTE')) {
+              const num = parseInt(String(c).replace(/\D/g, ''), 10);
+              if (!isNaN(num) && num > maxFound) maxFound = num;
+            }
+          });
+        }
+
+        // Maior número entre as ordens no celular (exceto a ordem sendo sincronizada)
+        const localNow = await getLocalData<any[]>('mobile_orders', []);
+        localNow.forEach((o) => {
+          if (o?.id !== pOrder.id && o?.code && !String(o.code).includes('Aguardando') && !String(o.code).includes('PENDENTE')) {
+            const num = parseInt(String(o.code).replace(/\D/g, ''), 10);
+            if (!isNaN(num) && num > maxFound) maxFound = num;
+          }
+        });
+
+        const nextNumber = maxFound + 1;
+        const officialCode = `OS-${String(nextNumber).padStart(4, '0')}`;
+
+        // 1. Atualiza contador atômico na nuvem
+        await setDoc(counterRef, { lastOrderNumber: nextNumber, updatedAt: new Date().toISOString() }, { merge: true });
+
+        const syncedOrder = {
+          ...pOrder,
+          code: officialCode,
+          isPendingSync: false,
+          updatedAt: new Date().toISOString(),
+        };
+
+        // 2. Salva a OS sincronizada no Firestore
+        const sanitized = JSON.parse(JSON.stringify(syncedOrder));
+        await setDoc(doc(activeDb, 'orders', pOrder.id), sanitized, { merge: true });
+
+        // 3. Remove imediatamente da fila de pendentes isolada
+        const qAfter = await getLocalData<any[]>('mobile_pending_orders_queue', []);
+        await setLocalData(
+          'mobile_pending_orders_queue',
+          qAfter.filter((o) => o.id !== pOrder.id)
+        );
+
+        // 4. Atualiza a lista local do celular
+        const lAfter = await getLocalData<any[]>('mobile_orders', []);
+        const updatedLocal = lAfter.map((o) => (o.id === pOrder.id ? syncedOrder : o));
+        if (!updatedLocal.find((o) => o.id === pOrder.id)) {
+          updatedLocal.unshift(syncedOrder);
+        }
+        await setLocalData('mobile_orders', updatedLocal);
+        console.log(`[Sync] OS em espera sincronizada com sucesso com o número oficial: ${officialCode}`);
+      } catch (loopErr) {
+        console.warn('Erro ao processar OS pendente no loop:', loopErr);
+        break;
+      }
     }
+  } catch (err) {
+    console.warn('Sync pending orders falhou:', err);
+  } finally {
+    isSyncingPendingOrders = false;
   }
 }
 
@@ -441,30 +888,48 @@ export async function fetchClientsMobile(): Promise<any[]> {
   }
 
   try {
-    const colRef = collection(db, 'clients');
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'clients');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       const serverClients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       await setLocalData('mobile_clients', serverClients);
       return serverClients;
+    } else if (!snap.metadata.fromCache) {
+      // Se o servidor online respondeu e está realmente vazio (ex: padrão de fábrica)
+      await setLocalData('mobile_clients', []);
+      return [];
     }
   } catch (err) {
-    console.warn('Erro ao buscar clientes no Firestore mobile:', err);
+    console.warn('Erro ao buscar clientes no Firestore mobile (usando cache):', err);
   }
   return local;
 }
 
 export function subscribeClientsMobile(callback: (clients: any[]) => void) {
-  getLocalData<any | null>('mobile_linked_company', null).then((linked) => {
+  getLocalData<any | null>('mobile_linked_company', null).then(async (linked) => {
     if (linked?.isTestMode) {
       return () => {};
     }
     try {
-      const colRef = collection(db, 'clients');
-      return onSnapshot(colRef, (snap) => {
-        const clients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setLocalData('mobile_clients', clients);
-        callback(clients);
+      const { getActiveMobileFirestore } = await import('./firebase');
+      const activeDb = await getActiveMobileFirestore();
+      const colRef = collection(activeDb, 'clients');
+      return onSnapshot(colRef, async (snap) => {
+        // Se veio do cache offline vazio, não limpa
+        if (snap.metadata.fromCache && snap.empty) return;
+
+        if (snap.empty && !snap.metadata.fromCache) {
+          // Servidor online confirmou que a lista de clientes foi resetada
+          await setLocalData('mobile_clients', []);
+          callback([]);
+          return;
+        }
+
+        const serverClients = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        await setLocalData('mobile_clients', serverClients);
+        callback(serverClients);
       });
     } catch {
       return () => {};
@@ -521,14 +986,19 @@ export async function saveClientMobile(clientData: any): Promise<any> {
 
     if (hasOrderUpdated) {
       await setLocalData('mobile_orders', updatedOrders);
-      // Se não for teste, atualiza também as OS modificadas no Firestore
+      // Se não for teste, atualiza também as OS modificadas no Firestore em background
       const isTest = await isTestModeMobile();
       if (!isTest) {
-        for (const ord of updatedOrders) {
-          if (ord.clientId === clientId || ord.client?.id === clientId) {
-            setDoc(doc(db, 'orders', ord.id), ord, { merge: true }).catch(() => {});
-          }
-        }
+        (async () => {
+          try {
+            const activeDb = await getActiveMobileFirestore();
+            for (const ord of updatedOrders) {
+              if (ord.clientId === clientId || ord.client?.id === clientId) {
+                setDoc(doc(activeDb, 'orders', ord.id), ord, { merge: true }).catch(() => {});
+              }
+            }
+          } catch {}
+        })();
       }
     }
   } catch (syncErr) {
@@ -537,14 +1007,38 @@ export async function saveClientMobile(clientData: any): Promise<any> {
 
   const isTest = await isTestModeMobile();
   if (!isTest) {
-    try {
-      await setDoc(doc(db, 'clients', clientId), finalClient, { merge: true });
-    } catch (err) {
-      console.warn('Erro ao salvar cliente no Firestore mobile:', err);
-    }
+    // Sincroniza com a nuvem em background sem travar caso o dispositivo esteja offline
+    (async () => {
+      try {
+        const activeDb = await getActiveMobileFirestore();
+        await withTimeout(setDoc(doc(activeDb, 'clients', clientId), finalClient, { merge: true }), 3000);
+      } catch (err) {
+        // Silencioso se offline: o dado já está persistido no storage local do aparelho
+      }
+    })();
   }
 
   return finalClient;
+}
+
+export async function deleteClientMobile(clientId: string): Promise<boolean> {
+  const local = await getLocalData<any[]>('mobile_clients', []);
+  const updatedList = local.filter((c) => c.id !== clientId);
+  await setLocalData('mobile_clients', updatedList);
+
+  const isTest = await isTestModeMobile();
+  if (!isTest) {
+    (async () => {
+      try {
+        const activeDb = await getActiveMobileFirestore();
+        await withTimeout(deleteDoc(doc(activeDb, 'clients', clientId)), 3000);
+      } catch (err) {
+        // Silencioso se offline
+      }
+    })();
+  }
+
+  return true;
 }
 
 // 3. ORÇAMENTOS
@@ -560,7 +1054,9 @@ export async function saveEstimateMobile(estimate: any): Promise<any> {
   const updated = [finalEst, ...local.filter((e) => e.id !== id)];
   await setLocalData('mobile_estimates', updated);
   try {
-    await setDoc(doc(db, 'estimates', id), finalEst, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'estimates', id), finalEst, { merge: true });
   } catch {}
   return finalEst;
 }
@@ -578,18 +1074,22 @@ export async function fetchEquipmentsMobile(): Promise<any[]> {
     return getLocalData<any[]>('mobile_equipments', DEFAULT_EQUIPMENTS_PC);
   }
 
+  const local = await getLocalData<any[]>('mobile_equipments', DEFAULT_EQUIPMENTS_PC);
   try {
-    const colRef = collection(db, 'equipments');
-    const snap = await getDocs(colRef);
-    if (!snap.empty) {
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'equipments');
+    const snap = await withTimeout(getDocs(colRef), 2000).catch(() => null);
+    if (snap && !snap.empty) {
       const serverEquips = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       await setLocalData('mobile_equipments', serverEquips);
       return serverEquips;
+    } else if (snap && !snap.metadata.fromCache) {
+      // Se a nuvem está vazia (ex: após restaurar padrões de fábrica), limpa o cache local
+      await setLocalData('mobile_equipments', []);
+      return [];
     }
-  } catch (err) {
-    console.warn('Erro ao buscar equipamentos do Firestore:', err);
-  }
-  return getLocalData<any[]>('mobile_equipments', DEFAULT_EQUIPMENTS_PC);
+  } catch {}
+  return local;
 }
 
 export async function fetchPartsMobile(): Promise<any[]> {
@@ -598,18 +1098,22 @@ export async function fetchPartsMobile(): Promise<any[]> {
     return getLocalData<any[]>('mobile_parts', DEFAULT_PARTS_PC);
   }
 
+  const local = await getLocalData<any[]>('mobile_parts', DEFAULT_PARTS_PC);
   try {
-    const colRef = collection(db, 'parts');
-    const snap = await getDocs(colRef);
-    if (!snap.empty) {
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'parts');
+    const snap = await withTimeout(getDocs(colRef), 2000).catch(() => null);
+    if (snap && !snap.empty) {
       const serverParts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       await setLocalData('mobile_parts', serverParts);
       return serverParts;
+    } else if (snap && !snap.metadata.fromCache) {
+      // Se a nuvem está vazia (ex: após restaurar padrões de fábrica), limpa o cache local
+      await setLocalData('mobile_parts', []);
+      return [];
     }
-  } catch (err) {
-    console.warn('Erro ao buscar peças do Firestore:', err);
-  }
-  return getLocalData<any[]>('mobile_parts', DEFAULT_PARTS_PC);
+  } catch {}
+  return local;
 }
 
 export async function fetchServicesMobile(): Promise<any[]> {
@@ -618,18 +1122,22 @@ export async function fetchServicesMobile(): Promise<any[]> {
     return getLocalData<any[]>('mobile_services', DEFAULT_SERVICES_PC);
   }
 
+  const local = await getLocalData<any[]>('mobile_services', DEFAULT_SERVICES_PC);
   try {
-    const colRef = collection(db, 'services');
-    const snap = await getDocs(colRef);
-    if (!snap.empty) {
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'services');
+    const snap = await withTimeout(getDocs(colRef), 2000).catch(() => null);
+    if (snap && !snap.empty) {
       const serverServices = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       await setLocalData('mobile_services', serverServices);
       return serverServices;
+    } else if (snap && !snap.metadata.fromCache) {
+      // Se a nuvem está vazia (ex: após restaurar padrões de fábrica), limpa o cache local
+      await setLocalData('mobile_services', []);
+      return [];
     }
-  } catch (err) {
-    console.warn('Erro ao buscar serviços do Firestore:', err);
-  }
-  return getLocalData<any[]>('mobile_services', DEFAULT_SERVICES_PC);
+  } catch {}
+  return local;
 }
 
 export async function fetchTechniciansMobile(): Promise<any[]> {
@@ -641,7 +1149,9 @@ export async function fetchTechniciansMobile(): Promise<any[]> {
   }
 
   try {
-    const colRef = collection(db, 'users');
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'users');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       const serverUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -672,7 +1182,9 @@ export async function fetchStatusesMobile(): Promise<any[]> {
   }
 
   try {
-    const colRef = collection(db, 'os_statuses');
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'os_statuses');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       const serverStatuses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -685,7 +1197,6 @@ export async function fetchStatusesMobile(): Promise<any[]> {
   return getLocalData<any[]>('mobile_os_statuses', DEFAULT_STATUSES_MOBILE);
 }
 
-
 // 5. BAIXA/DEVOLUÇÃO DE ESTOQUE BASEADA NO STATUS DA OS
 
 /** Dá baixa nas peças — permite estoque negativo. Retorna lista de peças com estoque insuficiente. */
@@ -693,6 +1204,8 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
   const insufficient: string[] = [];
   if (!parts || parts.length === 0) return insufficient;
   try {
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
     const currentParts = await fetchPartsMobile();
     for (const item of parts) {
       const matched = currentParts.find(
@@ -709,12 +1222,12 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
           insufficient.push(`${item.name || item.code} (estoque: ${currentStock}, reservado: ${qtyToDeduct})`);
         }
         matched.stockQuantity = newStock;
-        await setDoc(doc(db, 'parts', String(matched.id)), { stockQuantity: newStock }, { merge: true });
+        setDoc(doc(activeDb, 'parts', String(matched.id)), { stockQuantity: newStock }, { merge: true }).catch(() => {});
       }
     }
     await setLocalData('mobile_parts', currentParts);
   } catch (err) {
-    console.warn('Erro ao dar baixa no estoque:', err);
+    console.warn('Erro ao dar baixa no estoque local:', err);
   }
   return insufficient;
 }
@@ -723,6 +1236,8 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
 export async function restoreStockForOrder(parts: any[]): Promise<void> {
   if (!parts || parts.length === 0) return;
   try {
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
     const currentParts = await fetchPartsMobile();
     for (const item of parts) {
       const matched = currentParts.find(
@@ -734,12 +1249,12 @@ export async function restoreStockForOrder(parts: any[]): Promise<void> {
       if (matched) {
         const qtyToRestore = Number(item.quantity || item.qty || 1);
         matched.stockQuantity = (Number(matched.stockQuantity) || 0) + qtyToRestore;
-        await setDoc(doc(db, 'parts', String(matched.id)), { stockQuantity: matched.stockQuantity }, { merge: true });
+        setDoc(doc(activeDb, 'parts', String(matched.id)), { stockQuantity: matched.stockQuantity }, { merge: true }).catch(() => {});
       }
     }
     await setLocalData('mobile_parts', currentParts);
   } catch (err) {
-    console.warn('Erro ao restaurar estoque:', err);
+    console.warn('Erro ao restaurar estoque local:', err);
   }
 }
 
@@ -823,7 +1338,9 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
 
   let serverVisits: any[] = [];
   try {
-    const colRef = collection(db, 'visits');
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    const colRef = collection(activeDb, 'visits');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       serverVisits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -832,8 +1349,9 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
     console.warn('Erro ao buscar visitas diretas no Firestore:', err);
   }
 
-  // Agrupa ordens com tipo AGENDAMENTO ou status VISITA_TECNICA
+  // Agrupa ordens com tipo AGENDAMENTO ou status VISITA_TECNICA (ignora OS excluídas)
   const scheduleOrders = orders.filter((o) => {
+    if (o.status === 'EXCLUIDA' || o.isDeleted) return false;
     const isScheduleType = (o.type || '').toUpperCase() === 'AGENDAMENTO' || (o.status || '').toUpperCase() === 'VISITA_TECNICA';
     return isScheduleType;
   });
@@ -841,14 +1359,26 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
   // Mapeia todas as visitas sincronizadas
   const allVisitsMap = new Map<string, any>();
 
-  // 1. Prioriza visitas da coleção 'visits'
+  // 1. Prioriza visitas da coleção 'visits' (apenas se a OS correspondente existir e não estiver excluída)
   serverVisits.forEach((v) => {
+    // Se a visita tem vínculo com orderId/orderCode, verifica se a ordem ainda existe
+    const hasOrderLink = Boolean(v.orderId || v.orderCode);
     const matchingOrder = orders.find((o) => o.id === v.orderId || o.code === v.orderId || o.code === v.orderCode);
+    
+    // Se a visita foi criada vinculada a uma OS e essa OS foi excluída (não existe mais em orders), ignora a visita
+    if (hasOrderLink && !matchingOrder) {
+      return;
+    }
+    if (matchingOrder && (matchingOrder.status === 'EXCLUIDA' || matchingOrder.isDeleted)) {
+      return;
+    }
+
     const key = v.id || v.orderId || matchingOrder?.id;
     if (!key) return;
 
+    const orderObs = matchingOrder?.orderObservations || matchingOrder?.observations || matchingOrder?.generalNotes || '';
     const assignedTech = (v.technicianName || v.technician || matchingOrder?.technician || matchingOrder?.technicianName || '').trim();
-    const effectiveDate = v.date || v.scheduledDate || matchingOrder?.scheduledDate || (matchingOrder?.createdAt ? matchingOrder.createdAt.split('T')[0] : '');
+    const effectiveDate = v.date || v.scheduledDate || matchingOrder?.scheduledDate || (matchingOrder?.entryDate ? matchingOrder.entryDate.split('T')[0] : '') || (matchingOrder?.createdAt ? matchingOrder.createdAt.split('T')[0] : '');
 
     allVisitsMap.set(key, {
       id: v.id || matchingOrder?.id,
@@ -866,15 +1396,16 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
       deviceBrand: matchingOrder?.equipment?.brand || v.deviceBrand || '',
       problemReported: matchingOrder?.problemDescription || v.problemReported || '',
       technicalReport: matchingOrder?.technicalReport || v.technicalReport || '',
+      orderObservations: orderObs || v.orderObservations || '',
       servicePerformed: matchingOrder?.servicePerformed || matchingOrder?.executedService || v.servicePerformed || '',
       services: matchingOrder?.services || matchingOrder?.servicesExecuted || v.services || [],
       parts: matchingOrder?.parts || matchingOrder?.partsUsed || v.parts || [],
       status: v.status || matchingOrder?.status || 'AGENDADA',
-      period: v.period || matchingOrder?.period || 'MANHA',
+      period: v.period !== undefined ? v.period : (matchingOrder?.period || ''),
       date: effectiveDate,
       scheduledDate: effectiveDate,
       technicianName: assignedTech,
-      notes: v.notes || matchingOrder?.technicalReport || '',
+      notes: v.notes || orderObs || matchingOrder?.technicalReport || '',
     });
   });
 
@@ -883,6 +1414,7 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
     // Verifica se a ordem já está no mapa (tanto pela chave = o.id quanto por orderId dentro dos valores)
     const alreadyInMap = allVisitsMap.has(o.id) || Array.from(allVisitsMap.values()).some((v) => v.orderId === o.id);
     if (!alreadyInMap) {
+      const orderObs = o.orderObservations || o.observations || o.generalNotes || '';
       const assignedTech = (o.technician || o.technicianName || '').trim();
       const effectiveDate = o.scheduledDate || o.entryDate || (o.createdAt ? o.createdAt.split('T')[0] : '');
       allVisitsMap.set(o.id, {
@@ -899,15 +1431,16 @@ export async function fetchVisitsByTechnician(technicianName: string, dateStr?: 
         deviceBrand: o.equipment?.brand || '',
         problemReported: o.problemDescription || '',
         technicalReport: o.technicalReport || '',
+        orderObservations: orderObs,
         servicePerformed: o.servicePerformed || o.executedService || '',
         services: o.services || o.servicesExecuted || [],
         parts: o.parts || o.partsUsed || [],
         status: o.status || 'AGENDADA',
-        period: o.period || 'MANHA',
+        period: o.period || '',
         date: effectiveDate,
         scheduledDate: effectiveDate,
         technicianName: assignedTech,
-        notes: o.technicalReport || '',
+        notes: o.technicalReport || orderObs || '',
       });
     }
   });
@@ -951,7 +1484,9 @@ export async function savePartMobile(partData: any): Promise<any> {
   const updated = [finalPart, ...parts.filter((p) => p.id !== partId)];
   await setLocalData('mobile_parts', updated);
   try {
-    await setDoc(doc(db, 'parts', partId), finalPart, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'parts', partId), finalPart, { merge: true });
   } catch (e) {}
   return finalPart;
 }
@@ -961,7 +1496,9 @@ export async function deletePartMobile(partId: string): Promise<void> {
   const updated = parts.filter((p) => p.id !== partId);
   await setLocalData('mobile_parts', updated);
   try {
-    await setDoc(doc(db, 'parts', partId), { isDeleted: true }, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'parts', partId), { isDeleted: true }, { merge: true });
   } catch (e) {}
 }
 
@@ -978,7 +1515,9 @@ export async function saveEquipmentMobile(equipmentData: any): Promise<any> {
   const updated = [finalEq, ...equips.filter((e) => e.id !== eqId)];
   await setLocalData('mobile_equipments', updated);
   try {
-    await setDoc(doc(db, 'equipments', eqId), finalEq, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'equipments', eqId), finalEq, { merge: true });
   } catch (e) {}
   return finalEq;
 }
@@ -988,7 +1527,9 @@ export async function deleteEquipmentMobile(eqId: string): Promise<void> {
   const updated = equips.filter((e) => e.id !== eqId);
   await setLocalData('mobile_equipments', updated);
   try {
-    await setDoc(doc(db, 'equipments', eqId), { isDeleted: true }, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'equipments', eqId), { isDeleted: true }, { merge: true });
   } catch (e) {}
 }
 
@@ -1005,7 +1546,9 @@ export async function saveServiceMobile(serviceData: any): Promise<any> {
   const updated = [finalSrv, ...srvs.filter((s) => s.id !== srvId)];
   await setLocalData('mobile_services', updated);
   try {
-    await setDoc(doc(db, 'services', srvId), finalSrv, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'services', srvId), finalSrv, { merge: true });
   } catch (e) {}
   return finalSrv;
 }
@@ -1015,7 +1558,9 @@ export async function deleteServiceMobile(srvId: string): Promise<void> {
   const updated = srvs.filter((s) => s.id !== srvId);
   await setLocalData('mobile_services', updated);
   try {
-    await setDoc(doc(db, 'services', srvId), { isDeleted: true }, { merge: true });
+    const { getActiveMobileFirestore } = await import('./firebase');
+    const activeDb = await getActiveMobileFirestore();
+    await setDoc(doc(activeDb, 'services', srvId), { isDeleted: true }, { merge: true });
   } catch (e) {}
 }
 
@@ -1053,34 +1598,91 @@ export async function updateVisitStatus(orderId: string, payload: any): Promise<
 
 // 6. MODELOS E PREFERÊNCIAS GERAIS DE OS (SINCRONIZADOS EM TEMPO REAL)
 export async function fetchOSPreferencesMobile(): Promise<any> {
+  const local = await getLocalData<any>('mobile_os_preferences', {
+    entryReceiptTemplate: 'DEFAULT_2VIAS',
+    exitReceiptTemplate: 'MODERN_DETAILED',
+  });
   try {
-    const docRef = doc(db, 'system_config', 'os_preferences');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
+    const activeDb = await getActiveMobileFirestore();
+    const docRef = doc(activeDb, 'system_config', 'os_preferences');
+    const snap = await withTimeout(getDoc(docRef), 1500).catch(() => null);
+    if (snap && snap.exists()) {
       const data = snap.data();
       await setLocalData('mobile_os_preferences', data);
       return data;
     }
-  } catch (err) {
-    console.warn('Erro ao carregar preferências de OS no mobile:', err);
-  }
-  return getLocalData<any>('mobile_os_preferences', {
-    entryReceiptTemplate: 'DEFAULT_2VIAS',
-    exitReceiptTemplate: 'MODERN_DETAILED',
-  });
+  } catch {}
+  return local;
 }
 
 export function subscribeOSPreferencesMobile(callback: (data: any) => void) {
-  try {
-    const docRef = doc(db, 'system_config', 'os_preferences');
-    return onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setLocalData('mobile_os_preferences', data);
-        callback(data);
-      }
-    });
-  } catch (err) {
-    return () => {};
-  }
+  isTestModeMobile().then(async (isTest) => {
+    if (isTest) return;
+    try {
+      const activeDb = await getActiveMobileFirestore();
+      const docRef = doc(activeDb, 'system_config', 'os_preferences');
+      return onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setLocalData('mobile_os_preferences', data);
+          callback(data);
+        }
+      });
+    } catch {
+      return () => {};
+    }
+  });
+  return () => {};
 }
+
+// 7. TERMOS DOS COMPROVANTES (ENTRADA, ORÇAMENTO, SAÍDA & GARANTIA)
+export const DEFAULT_WARRANTY_CONFIG_MOBILE = {
+  defaultDays: '90',
+  defaultTerms: 'A garantia cobre exclusivamente os serviços executados e as peças substituídas identificadas neste documento pelo período estabelecido. Não cobre danos causados por mau uso, quedas, oscilações elétricas, umidade ou intervenção de terceiros.',
+  defaultCoverage: 'PECAS_E_MAO_DE_OBRA',
+  defaultEntryTerms: 'O cliente autoriza a realização da avaliação e diagnóstico técnico no equipamento descrito neste comprovante. Equipamentos não retirados em até 90 dias após notificação de conclusão/orçamento estarão sujeitos a taxas de guarda/armazenamento ou descarte conforme a legislação vigente.',
+  defaultEstimateTerms: 'O orçamento possui validade de 10 dias úteis a contar da data de emissão. Os serviços e peças discriminados estão sujeitos à aprovação prévia do cliente.',
+  defaultExitTerms: 'A garantia cobre exclusivamente os serviços executados e as peças substituídas identificadas neste documento pelo período estabelecido. Não cobre danos causados por mau uso, quedas, oscilações elétricas, umidade ou intervenção de terceiros.',
+};
+
+export async function fetchWarrantyConfigMobile(): Promise<any> {
+  const isTest = await isTestModeMobile();
+  if (isTest) {
+    return DEFAULT_WARRANTY_CONFIG_MOBILE;
+  }
+
+  const local = await getLocalData<any>('mobile_warranty_config', DEFAULT_WARRANTY_CONFIG_MOBILE);
+  try {
+    const activeDb = await getActiveMobileFirestore();
+    const docRef = doc(activeDb, 'system_config', 'warranty_config');
+    const snap = await withTimeout(getDoc(docRef), 1500).catch(() => null);
+    if (snap && snap.exists()) {
+      const data = snap.data();
+      await setLocalData('mobile_warranty_config', data);
+      return data;
+    }
+  } catch {}
+  return local;
+}
+
+export function subscribeWarrantyConfigMobile(callback: (data: any) => void) {
+  isTestModeMobile().then(async (isTest) => {
+    if (isTest) return;
+    try {
+      const { getActiveMobileFirestore } = await import('./firebase');
+      const activeDb = await getActiveMobileFirestore();
+      const docRef = doc(activeDb, 'system_config', 'warranty_config');
+      return onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setLocalData('mobile_warranty_config', data);
+          callback(data);
+        }
+      });
+    } catch {
+      return () => {};
+    }
+  });
+  return () => {};
+}
+

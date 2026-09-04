@@ -50,8 +50,15 @@ import { collection, onSnapshot, doc, setDoc, getDocs, deleteDoc } from 'firebas
 import { EstimatesModal } from './components/EstimatesModal';
 import { CreateEstimateModal, Estimate } from './components/CreateEstimateModal';
 import { OrderSequenceModal } from './components/OrderSequenceModal';
+import { UpdateSystemModal } from './components/UpdateSystemModal';
+import { CashRegisterModal } from './components/CashRegisterModal';
+import { SalesModal } from './components/SalesModal';
+import { SerialLicenseModal } from './components/SerialLicenseModal';
+
+import { useDialog } from './components/DialogContext';
 
 export default function App() {
+  const { confirm: dlgConfirm } = useDialog();
   const [currentUser, setCurrentUser] = useState<any | null>(() => {
     try {
       const saved = sessionStorage.getItem('vollen_current_user');
@@ -66,10 +73,27 @@ export default function App() {
   // ESTADO DO CAPS LOCK (Ativo por padrão: transforma toda digitação em maiúscula)
   const [isCapsLockActive, setIsCapsLockActive] = useState<boolean>(true);
 
+  // Garante que o aplicativo inicie maximizado no desktop
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const appWindow = getCurrentWindow();
+        if (appWindow) {
+          await appWindow.maximize();
+        }
+      } catch {}
+    })();
+  }, []);
+
   // ESTADO DA BARRA DE STATUS DO RODAPÉ
-  const [statusMessage, setStatusMessage] = useState<string>(
-    'Vollen - Gestão de OS pronto e operando normalmente.'
-  );
+  const [statusMessage, setStatusMessage] = useState<string>(() => {
+    if (sessionStorage.getItem('backup_restored_success_msg')) {
+      sessionStorage.removeItem('backup_restored_success_msg');
+      return 'Backup restaurado com sucesso! Todos os dados e cadastros foram recarregados no sistema.';
+    }
+    return 'Vollen - Gestão de OS pronto e operando normalmente.';
+  });
 
   // ESTADO DA LISTA DE PEÇAS COM ESTOQUE PERSISTIDO
   const [allParts, setAllParts] = useState<any[]>(() => {
@@ -87,8 +111,10 @@ export default function App() {
     setAllParts(newParts);
     try {
       localStorage.setItem('vollen_parts_stock', JSON.stringify(newParts));
-      for (const p of newParts) {
-        await setDoc(doc(db, 'parts', String(p.id)), p, { merge: true });
+      if (db) {
+        for (const p of newParts) {
+          await setDoc(doc(db, 'parts', String(p.id)), p, { merge: true });
+        }
       }
     } catch (err) {
       console.warn('Erro ao salvar peças no Firestore:', err);
@@ -111,8 +137,10 @@ export default function App() {
     setAllServices(newServices);
     try {
       localStorage.setItem('vollen_services', JSON.stringify(newServices));
-      for (const s of newServices) {
-        await setDoc(doc(db, 'services', String(s.id)), s, { merge: true });
+      if (db) {
+        for (const s of newServices) {
+          await setDoc(doc(db, 'services', String(s.id)), s, { merge: true });
+        }
       }
     } catch (err) {
       console.warn('Erro ao salvar serviços no Firestore:', err);
@@ -135,8 +163,10 @@ export default function App() {
     setAllEquipments(newEquipments);
     try {
       localStorage.setItem('vollen_equipments', JSON.stringify(newEquipments));
-      for (const eq of newEquipments) {
-        await setDoc(doc(db, 'equipments', String(eq.id)), eq, { merge: true });
+      if (db) {
+        for (const eq of newEquipments) {
+          await setDoc(doc(db, 'equipments', String(eq.id)), eq, { merge: true });
+        }
       }
     } catch (err) {
       console.warn('Erro ao salvar equipamentos no Firestore:', err);
@@ -180,6 +210,11 @@ export default function App() {
   const [isFactoryResetModalOpen, setIsFactoryResetModalOpen] = useState<boolean>(false);
   const [isOSGeneralConfigModalOpen, setIsOSGeneralConfigModalOpen] = useState<boolean>(false);
   const [isPrinterConfigModalOpen, setIsPrinterConfigModalOpen] = useState<boolean>(false);
+  const [isUpdateSystemModalOpen, setIsUpdateSystemModalOpen] = useState<boolean>(false);
+  const [isCashRegisterModalOpen, setIsCashRegisterModalOpen] = useState<boolean>(false);
+  const [isSalesModalOpen, setIsSalesModalOpen] = useState<boolean>(false);
+  const [isSerialLicenseModalOpen, setIsSerialLicenseModalOpen] = useState<boolean>(false);
+  const [selectedPartForSales, setSelectedPartForSales] = useState<any | null>(null);
 
   // Estados de Orçamentos
   const [estimates, setEstimates] = useState<Estimate[]>(() => {
@@ -192,6 +227,7 @@ export default function App() {
   const [isEstimatesModalOpen, setIsEstimatesModalOpen] = useState<boolean>(false);
   const [isCreateEstimateModalOpen, setIsCreateEstimateModalOpen] = useState<boolean>(false);
   const [estimateToEdit, setEstimateToEdit] = useState<Estimate | null>(null);
+  const [pendingEstimateForReturn, setPendingEstimateForReturn] = useState<Estimate | null>(null);
   const [estimateToConvertToOS, setEstimateToConvertToOS] = useState<string | null>(null);
 
   const [allOrdersWithDeleted, setAllOrdersWithDeleted] = useState<any[]>([]);
@@ -218,11 +254,31 @@ export default function App() {
   });
 
   const [companyInfoState, setCompanyInfoState] = useState<CompanyData>(() => {
+    let baseData = defaultCompanyData;
     try {
       const saved = localStorage.getItem('vollen_company_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) baseData = { ...defaultCompanyData, ...JSON.parse(saved) };
     } catch (err) { }
-    return defaultCompanyData;
+
+    // Aplica o nome protegido da licença ativa, se houver
+    try {
+      const savedTenantInfo = localStorage.getItem('system_tenant_info');
+      if (savedTenantInfo) {
+        const parsed = JSON.parse(savedTenantInfo);
+        if (parsed.tradeName || parsed.companyName) {
+          baseData.tradingName = parsed.tradeName || parsed.companyName;
+        }
+        if (parsed.legalName || parsed.companyName) {
+          baseData.name = parsed.legalName || parsed.companyName;
+        }
+      } else {
+        // Modo Local sem serial: fixa no nome padrão do app
+        baseData.tradingName = 'Vollen Assistência Técnica';
+        baseData.name = 'Vollen Assistência Técnica';
+      }
+    } catch {}
+
+    return baseData;
   });
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState<boolean>(false);
   const [isLinkMobileModalOpen, setIsLinkMobileModalOpen] = useState<boolean>(false);
@@ -415,23 +471,30 @@ export default function App() {
           getDocs(collection(db, 'parts')).catch(() => null),
           getDocs(collection(db, 'services')).catch(() => null),
           getDocs(collection(db, 'equipments')).catch(() => null),
-        ]).then(([partsSnap, srvSnap, eqSnap]) => {
-          if (srvSnap) {
+          getDocs(collection(db, 'estimates')).catch(() => null),
+        ]).then(([partsSnap, srvSnap, eqSnap, estSnap]) => {
+          if (srvSnap && !srvSnap.empty) {
             const sList = srvSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setAllServices(sList);
             localStorage.setItem('vollen_services', JSON.stringify(sList));
           }
 
-          if (partsSnap) {
+          if (partsSnap && !partsSnap.empty) {
             const pList = partsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setAllParts(pList);
             localStorage.setItem('vollen_parts_stock', JSON.stringify(pList));
           }
 
-          if (eqSnap) {
+          if (eqSnap && !eqSnap.empty) {
             const eList = eqSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setAllEquipments(eList);
             localStorage.setItem('vollen_equipments', JSON.stringify(eList));
+          }
+
+          if (estSnap && !estSnap.empty) {
+            const estList = estSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Estimate));
+            setEstimates(estList);
+            localStorage.setItem('vollen_estimates', JSON.stringify(estList));
           }
         }).catch(() => {});
       } catch (err) {
@@ -462,6 +525,7 @@ export default function App() {
     let unsubParts = () => {};
     let unsubServices = () => {};
     let unsubEquipments = () => {};
+    let unsubEstimates = () => {};
     let unsubCompany = () => {};
     let unsubStatuses = () => {};
     let unsubConfig = () => {};
@@ -483,6 +547,14 @@ export default function App() {
         const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setAllEquipments(list);
         try { localStorage.setItem('vollen_equipments', JSON.stringify(list)); } catch (e) {}
+      });
+
+      unsubEstimates = onSnapshot(collection(db, 'estimates'), (snap) => {
+        if (!snap.empty) {
+          const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Estimate));
+          setEstimates(list);
+          try { localStorage.setItem('vollen_estimates', JSON.stringify(list)); } catch (e) {}
+        }
       });
 
       unsubCompany = onSnapshot(doc(db, 'system_config', 'company_data'), (snap) => {
@@ -511,6 +583,84 @@ export default function App() {
           } catch (e) {}
         }
       });
+      onSnapshot(doc(db, 'system_config', 'warranty_config'), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          setDefaultWarrantyConfig((prev: any) => ({ ...prev, ...data }));
+          try {
+            localStorage.setItem('vollen_os_config', JSON.stringify(data));
+          } catch (e) {}
+        }
+      });
+
+      // Registra/sincroniza a ApiKey da empresa para permitir conexão imediata pelo APK
+      // Prioridade: Firestore > localStorage > gera nova chave
+      import('./services/licenseService').then(async ({ getMasterFirestore, getSavedTenantFirebaseConfig, MASTER_CATALOG_FIREBASE_CONFIG }) => {
+        try {
+          const { getDoc, setDoc, doc: fsDoc } = await import('firebase/firestore');
+
+          // 1. Tenta ler a chave salva no Firestore da empresa (fonte autoritativa)
+          let finalApiKey = '';
+          try {
+            const firestoreSnap = await getDoc(fsDoc(db, 'system_config', 'company_apikey'));
+            if (firestoreSnap.exists() && firestoreSnap.data()?.apiKey) {
+              finalApiKey = firestoreSnap.data().apiKey;
+            }
+          } catch {}
+
+          // 2. Se não encontrou no Firestore, usa o localStorage
+          if (!finalApiKey) {
+            finalApiKey = localStorage.getItem('vollen_company_apikey') || '';
+          }
+
+          // 3. Só gera uma nova chave se absolutamente não houver nenhuma registrada
+          if (!finalApiKey) {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            const block = (n: number) => Array.from({ length: n }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+            finalApiKey = `${block(5)}-${block(5)}-${block(5)}`;
+          }
+
+          // Persiste localmente e no Firestore
+          try { localStorage.setItem('vollen_company_apikey', finalApiKey); } catch {}
+
+          // 4. Busca nome da empresa direto do Firestore (companyInfoState pode ainda não ter carregado)
+          let resolvedCompanyName = '';
+          try {
+            const compSnap = await getDoc(fsDoc(db, 'system_config', 'company_data'));
+            if (compSnap.exists()) {
+              const d = compSnap.data() as any;
+              resolvedCompanyName = d.tradingName || d.name || d.companyName || '';
+            }
+          } catch {}
+          // Fallback para o localStorage se o Firestore não retornar
+          if (!resolvedCompanyName) {
+            try {
+              const localComp = JSON.parse(localStorage.getItem('vollen_company_data') || '{}');
+              resolvedCompanyName = localComp.tradingName || localComp.name || '';
+            } catch {}
+          }
+
+          const tenantCfg = getSavedTenantFirebaseConfig() || MASTER_CATALOG_FIREBASE_CONFIG;
+          const cleanApiKey = finalApiKey.replace(/[\s-]/g, '').toUpperCase();
+          const masterDb = getMasterFirestore();
+
+          // Grava/atualiza no Catálogo Central (para o APK resolver o banco)
+          setDoc(fsDoc(masterDb, 'mobile_apikeys', cleanApiKey), {
+            apiKeyFormatted: finalApiKey,
+            companyName: resolvedCompanyName || 'Empresa Vinculada',
+            firebaseConfig: tenantCfg,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true }).catch(() => {});
+
+          // Grava/atualiza no Firestore da empresa (para outros PCs e o APK verificarem)
+          setDoc(fsDoc(db, 'system_config', 'company_apikey'), {
+            apiKey: finalApiKey,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true }).catch(() => {});
+        } catch (err) {
+          console.warn('Erro ao sincronizar ApiKey:', err);
+        }
+      });
     } catch (err) {
       console.warn('Erro ao conectar listeners de catálogo:', err);
     }
@@ -524,6 +674,7 @@ export default function App() {
       unsubCompany();
       unsubStatuses();
       unsubConfig();
+      unsubEstimates();
     };
   }, [selectedDate]);
 
@@ -602,6 +753,57 @@ export default function App() {
       document.removeEventListener('input', handleInputUppercase, true);
     };
   }, [isCapsLockActive]);
+
+  // Intercepta a tentativa de fechar o aplicativo no botão "X" da janela (Tauri)
+  useEffect(() => {
+    let unlistenClose: (() => void) | undefined;
+    let isExiting = false;
+
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      const appWindow = getCurrentWindow();
+      if (!appWindow) return;
+
+      appWindow.onCloseRequested(async (event) => {
+        if (isExiting) return;
+
+        // No Tauri 2, event.preventDefault() precisa ser chamado sincronicamente antes do await
+        event.preventDefault();
+
+        const ok = await dlgConfirm({
+          title: 'Fechar Sistema OS',
+          message: 'Tem certeza de que deseja fechar todo o sistema?',
+          variant: 'warning',
+          confirmText: 'Sim, Fechar',
+          cancelText: 'Cancelar',
+        });
+
+        if (ok) {
+          isExiting = true;
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('close_app');
+          } catch {
+            try {
+              const { exit } = await import('@tauri-apps/plugin-process');
+              await exit(0);
+            } catch {
+              try {
+                await appWindow.destroy();
+              } catch {
+                await appWindow.close();
+              }
+            }
+          }
+        }
+      }).then((unlisten) => {
+        unlistenClose = unlisten;
+      }).catch(() => {});
+    }).catch(() => {});
+
+    return () => {
+      if (unlistenClose) unlistenClose();
+    };
+  }, [dlgConfirm]);
 
   // Navegação Global com Tecla Enter entre Campos de Formulário (e Salvar no Último Campo)
   useEffect(() => {
@@ -701,7 +903,8 @@ export default function App() {
     isCompanyModalOpen ||
     isLinkMobileModalOpen ||
     isSearchOSModalOpen ||
-    isScheduleModalOpen
+    isScheduleModalOpen ||
+    isSalesModalOpen
   );
 
   // O CAPS LOCK é uma funcionalidade VIRTUAL interna do sistema
@@ -759,6 +962,9 @@ export default function App() {
       } else if (e.key === 'F8') {
         e.preventDefault();
         setIsPartsModalOpen(true);
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        setIsSalesModalOpen(true);
       }
     };
 
@@ -784,6 +990,12 @@ export default function App() {
       }
       return updated;
     });
+
+    // Salva na nuvem Firestore
+    try {
+      setDoc(doc(db, 'estimates', estimate.id), estimate, { merge: true }).catch(() => {});
+    } catch (e) {}
+
     setStatusMessage(`Orçamento #${estimate.code} salvo com sucesso.`);
   };
 
@@ -797,6 +1009,12 @@ export default function App() {
       }
       return updated;
     });
+
+    // Deleta na nuvem Firestore
+    try {
+      deleteDoc(doc(db, 'estimates', estimateId)).catch(() => {});
+    } catch (e) {}
+
     setStatusMessage('Orçamento excluído com sucesso.');
   };
 
@@ -841,8 +1059,11 @@ export default function App() {
     };
 
     setEstimateToConvertToOS(estimate.id);
+    setPendingEstimateForReturn(estimate);
     setSelectedClientForNewOS(null);
     setOrderToEdit(prefilledOrder as any);
+    setIsCreateEstimateModalOpen(false);
+    setIsEstimatesModalOpen(false);
     setIsModalOpen(true);
     setStatusMessage(`Gerando Ordem de Serviço a partir do Orçamento #${estimate.code}...`);
   };
@@ -926,6 +1147,11 @@ export default function App() {
         onOpenTechnicianOrdersReportModal={() => {
           setIsTechnicianReportModalOpen(true);
         }}
+        onOpenUpdateSystemModal={() => setIsUpdateSystemModalOpen(true)}
+        onOpenCashRegisterModal={() => setIsCashRegisterModalOpen(true)}
+        onOpenSalesModal={() => setIsSalesModalOpen(true)}
+        onOpenSerialLicenseModal={() => setIsSerialLicenseModalOpen(true)}
+        currentUser={currentUser}
       />
 
       {/* Papel de Parede Personalizado do Sistema com Overlay Suave */}
@@ -958,6 +1184,7 @@ export default function App() {
             onOpenSchedule={() => setIsScheduleModalOpen(true)}
             onOpenClients={() => setIsClientsModalOpen(true)}
             onOpenEstimates={() => setIsEstimatesModalOpen(true)}
+            onOpenSales={() => setIsSalesModalOpen(true)}
           />
         )}
 
@@ -992,7 +1219,11 @@ export default function App() {
           setOrderToEdit(null);
           setEstimateToConvertToOS(null);
 
-          if (cameFromFinishedOrders) {
+          if (pendingEstimateForReturn) {
+            setEstimateToEdit(pendingEstimateForReturn);
+            setIsCreateEstimateModalOpen(true);
+            setPendingEstimateForReturn(null);
+          } else if (cameFromFinishedOrders) {
             setCameFromFinishedOrders(false);
             setIsFinishedOrdersModalOpen(true);
           } else if (cameFromOpenOrders) {
@@ -1047,6 +1278,7 @@ export default function App() {
         }}
         onDeleteOrder={(deletedId) => {
           setAllOrders((prev) => prev.filter((o) => o.id !== deletedId));
+          setVisits((prev) => prev.filter((v) => v.orderId !== deletedId && v.order?.id !== deletedId));
           setStatusMessage('Ordem de Serviço excluída definitivamente.');
         }}
         onUpdatePartsStock={saveParts}
@@ -1071,17 +1303,27 @@ export default function App() {
         }}
         onSuccess={async (savedOrder?: any) => {
           if (estimateToConvertToOS) {
+            const osIdToLink = savedOrder?.id || 'simulated-os';
             setEstimates((prev) => {
-              const updated = prev.filter((e) => e.id !== estimateToConvertToOS);
+              const updated = prev.map((e) =>
+                e.id === estimateToConvertToOS ? { ...e, status: 'APROVADO' as const, convertedToOSId: osIdToLink } : e
+              );
               try {
                 localStorage.setItem('vollen_estimates', JSON.stringify(updated));
               } catch (err) {
-                console.error('Erro ao remover orçamento convertido:', err);
+                console.error('Erro ao atualizar orçamento para aprovado:', err);
               }
               return updated;
             });
+
+            // Atualiza também na nuvem Firestore
+            try {
+              setDoc(doc(db, 'estimates', estimateToConvertToOS), { status: 'APROVADO', convertedToOSId: osIdToLink }, { merge: true }).catch(() => {});
+            } catch (e) {}
+
             setEstimateToConvertToOS(null);
           }
+          setPendingEstimateForReturn(null);
 
           if (savedOrder) {
             setOrderToEdit(savedOrder);
@@ -1093,14 +1335,23 @@ export default function App() {
         onFinalizeSuccess={async () => {
           if (estimateToConvertToOS) {
             setEstimates((prev) => {
-              const updated = prev.filter((e) => e.id !== estimateToConvertToOS);
+              const updated = prev.map((e) =>
+                e.id === estimateToConvertToOS ? { ...e, status: 'APROVADO' as const, convertedToOSId: 'finalized-os' } : e
+              );
               try {
                 localStorage.setItem('vollen_estimates', JSON.stringify(updated));
               } catch (err) { }
               return updated;
             });
+
+            // Atualiza também na nuvem Firestore
+            try {
+              setDoc(doc(db, 'estimates', estimateToConvertToOS), { status: 'APROVADO', convertedToOSId: 'finalized-os' }, { merge: true }).catch(() => {});
+            } catch (e) {}
+
             setEstimateToConvertToOS(null);
           }
+          setPendingEstimateForReturn(null);
           setStatusMessage('Ordem de Serviço finalizada com sucesso!');
           await loadData();
           setIsModalOpen(false);
@@ -1572,6 +1823,12 @@ export default function App() {
           }
           setStatusMessage('Peça excluída com sucesso.');
         }}
+        onAddToSales={(part) => {
+          setIsPartsModalOpen(false);
+          setSelectedPartForSales(part);
+          setIsSalesModalOpen(true);
+          setTimeout(() => setSelectedPartForSales(null), 300);
+        }}
       />
 
       {/* Central de Serviços Cadastrados */}
@@ -1586,7 +1843,9 @@ export default function App() {
         onSelectService={
           serviceSelectCallback
             ? (service) => {
-              serviceSelectCallback(service);
+              if (serviceSelectCallback) {
+                serviceSelectCallback(service);
+              }
               setServiceSelectCallback(null);
               setIsServicesModalOpen(false);
             }
@@ -1618,6 +1877,12 @@ export default function App() {
       <BackupModal
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
+        parts={allParts}
+        services={allServices}
+        equipments={allEquipments}
+        clients={allClients}
+        orders={allOrders}
+        estimates={estimates}
       />
 
       {/* Modal de Configuração de OS > Termos dos Comprovantes Padrão */}
@@ -1800,11 +2065,12 @@ export default function App() {
         }}
       />
 
-      {/* Modal de Vinculação com Celular (QR Code) */}
+      {/* Modal de Vinculação com Celular (ApiKey) */}
       <LinkMobileModal
         isOpen={isLinkMobileModalOpen}
         companyInfo={companyInfoState}
         onClose={() => setIsLinkMobileModalOpen(false)}
+        onOpenSerialModal={() => setIsSerialLicenseModalOpen(true)}
       />
 
       {/* Modal de Restauração de Padrão de Fábrica */}
@@ -1821,6 +2087,8 @@ export default function App() {
           setAllOrders([]);
           setAllOrdersWithDeleted([]);
           setAllClients([]);
+          setAllServices([]);
+          setAllParts([]);
           setVisits([]);
           setEstimates([]);
           setMaxEverOrderCode(0);
@@ -1847,10 +2115,26 @@ export default function App() {
         }}
       />
 
+      {/* Modal de Verificação e Atualização do Sistema */}
+      <UpdateSystemModal
+        isOpen={isUpdateSystemModalOpen}
+        currentUser={currentUser}
+        onClose={() => setIsUpdateSystemModalOpen(false)}
+      />
+
+      {/* Modal de Controle de Caixa e Fluxo Financeiro */}
+      <CashRegisterModal
+        isOpen={isCashRegisterModalOpen}
+        currentUser={currentUser}
+        companyInfo={companyInfoState}
+        onClose={() => setIsCashRegisterModalOpen(false)}
+      />
+
       {/* NÍVEL 1: Central de Orçamentos */}
       <EstimatesModal
         isOpen={isEstimatesModalOpen}
         estimates={estimates}
+        clientsList={allClients}
         onClose={() => setIsEstimatesModalOpen(false)}
         onOpenCreateEstimate={() => {
           setEstimateToEdit(null);
@@ -1865,6 +2149,12 @@ export default function App() {
         onPrintEstimate={(estimate) => {
           setEstimateToEdit(estimate);
           setIsCreateEstimateModalOpen(true);
+        }}
+        onOpenClientsModal={() => {
+          setClientSelectCallback(() => (client: any) => {
+            setSelectedClientForNewOS(client);
+          });
+          setIsClientsModalOpen(true);
         }}
       />
 
@@ -1881,14 +2171,26 @@ export default function App() {
         selectedClient={selectedClientForNewOS}
         selectedPart={selectedPartForOS}
         selectedService={selectedServiceForOS}
+        currentUser={currentUser}
         onClose={() => {
           setIsCreateEstimateModalOpen(false);
           setEstimateToEdit(null);
           setSelectedClientForNewOS(null);
+          setPendingEstimateForReturn(null);
         }}
         onSaveEstimate={handleSaveEstimate}
         onDeleteEstimate={handleDeleteEstimate}
         onGenerateOSFromEstimate={handleGenerateOSFromEstimate}
+        onOpenSalesModal={(estimateDraft) => {
+          if (estimateDraft) {
+            setPendingEstimateForReturn(estimateDraft);
+          } else if (estimateToEdit) {
+            setPendingEstimateForReturn(estimateToEdit);
+          }
+          setIsCreateEstimateModalOpen(false);
+          setIsEstimatesModalOpen(false);
+          setIsSalesModalOpen(true);
+        }}
         onOpenClientsModal={() => {
           setClientSelectCallback(() => (client: any) => {
             setSelectedClientForNewOS(client);
@@ -1920,12 +2222,53 @@ export default function App() {
         }}
       />
 
+      {/* Módulo de Vendas de Peças (Balcão) */}
+      <SalesModal
+        isOpen={isSalesModalOpen}
+        onClose={() => {
+          setIsSalesModalOpen(false);
+          if (pendingEstimateForReturn) {
+            setEstimateToEdit(pendingEstimateForReturn);
+            setIsCreateEstimateModalOpen(true);
+            setPendingEstimateForReturn(null);
+          }
+        }}
+        onSaleCompleted={() => {
+          setPendingEstimateForReturn(null);
+          try {
+            const saved = localStorage.getItem('vollen_estimates');
+            if (saved) setEstimates(JSON.parse(saved));
+          } catch {}
+        }}
+        parts={allParts}
+        clients={allClients}
+        currentUser={currentUser}
+        companyInfo={companyInfoState}
+        onUpdatePartsStock={(updatedParts) => {
+          setAllParts(updatedParts);
+        }}
+        onOpenPartsModal={() => setIsPartsModalOpen(true)}
+        selectedPartToAdd={selectedPartForSales}
+      />
+
+      {/* Modal de Gestão de Chave Serial & Conexão em Nuvem */}
+      <SerialLicenseModal
+        isOpen={isSerialLicenseModalOpen}
+        onClose={() => setIsSerialLicenseModalOpen(false)}
+        onLicenseChanged={() => {
+          loadData();
+        }}
+        currentUser={currentUser}
+      />
+
       {/* BARRA INFERIOR DE STATUS DO PROGRAMA (Fina, acima da barra do Windows) */}
       <StatusBar
         statusMessage={statusMessage}
         isCapsLockActive={isCapsLockActive}
         onToggleCapsLock={() => setIsCapsLockActive(!isCapsLockActive)}
         onOpenBackupModal={() => setIsBackupModalOpen(true)}
+        onOpenSerialLicenseModal={() => setIsSerialLicenseModalOpen(true)}
+        currentUser={currentUser}
       />
     </div>
   );

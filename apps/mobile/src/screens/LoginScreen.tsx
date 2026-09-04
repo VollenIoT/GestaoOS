@@ -14,7 +14,6 @@ import {
   FlatList,
 } from 'react-native';
 import { Wrench, Lock, User, Eye, EyeOff, Building2, ChevronDown, Check } from 'lucide-react-native';
-import { db } from '../services/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { loginUserMobile, fetchCompanyDataMobile, subscribeCompanyDataMobile, fetchUsersMobile } from '../services/api';
 
@@ -33,10 +32,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onUnli
   const [companyInfo, setCompanyInfo] = useState<any>(null);
 
   useEffect(() => {
+    let isMounted = true;
+    let unsubUsers = () => {};
+
     // Carrega usuários cadastrados
     const loadUsers = () => {
       fetchUsersMobile().then((users) => {
-        if (users && users.length > 0) {
+        if (isMounted && users && users.length > 0) {
           setUsersList(users);
           setSelectedUser((prev: any) => {
             if (!prev) return users[0];
@@ -49,19 +51,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onUnli
 
     loadUsers();
 
-    // Sincronização em tempo real caso algum usuário seja excluído ou criado no PC
-    const unsubUsers = onSnapshot(collection(db, 'users'), () => {
-      loadUsers();
+    // Sincronização em tempo real com o banco de dados dinâmico da empresa
+    import('../services/firebase').then(async ({ getActiveMobileFirestore }) => {
+      try {
+        const activeDb = await getActiveMobileFirestore();
+        if (isMounted) {
+          unsubUsers = onSnapshot(collection(activeDb, 'users'), () => {
+            loadUsers();
+          });
+        }
+      } catch {}
     });
 
     fetchCompanyDataMobile().then((data) => {
-      if (data) setCompanyInfo(data);
+      if (isMounted && data) setCompanyInfo(data);
     });
     const unsubCompany = subscribeCompanyDataMobile((data) => {
-      if (data) setCompanyInfo(data);
+      if (isMounted && data) setCompanyInfo(data);
     });
 
     return () => {
+      isMounted = false;
       unsubUsers();
       unsubCompany();
     };

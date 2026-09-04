@@ -182,24 +182,9 @@ if (typeof window !== 'undefined') {
     }
   };
 
+  // window.confirm deve manter o comportamento nativo síncrono ou ser chamado assincronamente via useDialog().confirm(...)
   window.confirm = (message?: any): boolean => {
-    const globalCtx = (window as any).__vollenDialogContext__;
-    const msgStr = typeof message === 'object' ? JSON.stringify(message, null, 2) : String(message ?? '');
-    
-    let title = 'Confirmar Ação';
-    let variant: Variant = 'warning';
-    const lower = msgStr.toLowerCase();
-    if (lower.includes('excluir') || lower.includes('apagar') || lower.includes('remover') || lower.includes('deletar')) {
-      title = 'Confirmar Exclusão';
-      variant = 'danger';
-    }
-
-    if (globalCtx && globalCtx.confirm) {
-      // Como o ConfirmModal trabalha de forma bonita, chamamos o modal do sistema
-      globalCtx.confirm({ title, message: msgStr, variant });
-      return true;
-    }
-    return (window as any).__nativeConfirm__(msgStr);
+    return (window as any).__nativeConfirm__(message);
   };
 }
 

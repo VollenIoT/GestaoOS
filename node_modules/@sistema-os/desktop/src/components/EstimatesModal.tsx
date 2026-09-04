@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Calculator,
@@ -17,41 +17,59 @@ import {
 } from 'lucide-react';
 import { Estimate } from './CreateEstimateModal';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 interface EstimatesModalProps {
   isOpen: boolean;
   estimates: Estimate[];
+  clientsList?: any[];
   onClose: () => void;
   onOpenCreateEstimate: () => void;
   onOpenEditEstimate: (estimate: Estimate) => void;
   onDeleteEstimate: (estimateId: string) => void;
   onGenerateOSFromEstimate: (estimate: Estimate) => void;
   onPrintEstimate: (estimate: Estimate) => void;
+  onOpenClientsModal?: () => void;
 }
 
 export const EstimatesModal: React.FC<EstimatesModalProps> = ({
   isOpen,
   estimates = [],
+  clientsList = [],
   onClose,
   onOpenCreateEstimate,
   onOpenEditEstimate,
   onDeleteEstimate,
   onGenerateOSFromEstimate,
   onPrintEstimate,
+  onOpenClientsModal,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [phoneSearch, setPhoneSearch] = useState('');
   const [selectedEstimateId, setSelectedEstimateId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 60);
+    d.setDate(d.getDate() - 30);
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Atalhos Globais no Modal (F2: Novo, Esc: Fechar)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('EstimatesModal', () => onCloseRef.current?.());
+      return () => modalStack.unregister('EstimatesModal');
+    }
+  }, [isOpen]);
+
+  // Atalhos Globais no Modal (F2: Novo)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -59,15 +77,12 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
       if (e.key === 'F2') {
         e.preventDefault();
         onOpenCreateEstimate();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onOpenCreateEstimate]);
 
   if (!isOpen) return null;
 
@@ -122,12 +137,14 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
 
   // Exportar Listagem para Excel/CSV
   const handleExportCSV = () => {
-    if (filteredEstimates.length === 0) {
-      return alert('Nenhum orçamento para exportar.');
+    const dataToExport = selectedEstimate ? [selectedEstimate] : filteredEstimates;
+
+    if (dataToExport.length === 0) {
+      return alert('Nenhum orçamento selecionado ou visível para exportar.');
     }
 
     const headers = ['Código', 'Data', 'Cliente', 'Telefone', 'WhatsApp', 'Equipamento', 'Marca', 'Modelo', 'Defeito', 'Valor Total (R$)', 'Status'];
-    const rows = filteredEstimates.map((e) => [
+    const rows = dataToExport.map((e) => [
       `"${e.code || ''}"`,
       `"${e.createdAt ? e.createdAt.split('T')[0] : ''}"`,
       `"${(e.client?.name || '').replace(/"/g, '""')}"`,
@@ -141,14 +158,17 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
       `"${e.status || 'PENDENTE'}"`,
     ]);
 
-    const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\r\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const csvString = '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvString);
     const link = document.createElement('a');
-    link.href = url;
-    link.download = `relatorio_orcamentos_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('href', csvContent);
+    const filename = selectedEstimate && selectedEstimate.code
+      ? `orcamento_${selectedEstimate.code}.csv`
+      : `relatorio_orcamentos_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(link);
   };
 
   // Contadores por Status
@@ -423,9 +443,44 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
             <button
               type="button"
               disabled={!selectedEstimateId}
-              onClick={() => {
+              onClick={async () => {
                 if (selectedEstimate) {
-                  onGenerateOSFromEstimate(selectedEstimate);
+                  if (selectedEstimate.status === 'APROVADO') {
+                    await dlgAlert({
+                      title: 'Orçamento Já Convertido',
+                      message: `O orçamento #${selectedEstimate.code} já foi aprovado e convertido em Ordem de Serviço anteriormente.\n\nNão é possível gerar outra OS a partir deste mesmo orçamento.`,
+                      variant: 'warning',
+                    });
+                    return;
+                  }
+
+                  let matchedClientId = selectedEstimate.client?.id;
+                  if (!matchedClientId && selectedEstimate.client?.name?.trim()) {
+                    const searchName = selectedEstimate.client.name.trim().toLowerCase();
+                    const existingClient = (clientsList || []).find(
+                      (c: any) => c && c.name && c.name.trim().toLowerCase() === searchName
+                    );
+                    if (existingClient && existingClient.id) {
+                      matchedClientId = existingClient.id;
+                    }
+                  }
+
+                  if (!matchedClientId) {
+                    await dlgAlert({
+                      title: 'Cliente Não Cadastrado',
+                      message: 'Para gerar uma Ordem de Serviço a partir deste orçamento, o cliente deve estar cadastrado no sistema.\n\nPor favor, cadastre ou selecione um cliente existente na Central de Clientes.',
+                      variant: 'warning',
+                    });
+                    if (onOpenClientsModal) {
+                      onOpenClientsModal();
+                    }
+                    return;
+                  }
+
+                  onGenerateOSFromEstimate({
+                    ...selectedEstimate,
+                    client: { ...selectedEstimate.client, id: matchedClientId }
+                  });
                   onClose();
                 }
               }}
@@ -437,24 +492,19 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
               <ArrowRight className="w-4 h-4" />
             </button>
 
-            {/* Exportar Excel / CSV */}
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="h-8 bg-emerald-700 hover:bg-emerald-800 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
-              title="Exportar todos os orçamentos visíveis para planilha Excel / CSV"
-            >
-              <FileText className="w-4 h-4 text-emerald-200" />
-              Excel / CSV
-            </button>
-
             {/* Excluir Orçamento */}
             <button
               type="button"
               disabled={!selectedEstimateId}
-              onClick={() => {
+              onClick={async () => {
                 if (!selectedEstimate) return;
-                if (confirm(`Deseja realmente EXCLUIR o orçamento #${selectedEstimate.code}?`)) {
+                const ok = await dlgConfirm({
+                  title: 'Excluir Orçamento',
+                  message: `Deseja realmente EXCLUIR o orçamento #${selectedEstimate.code}?`,
+                  variant: 'danger',
+                  confirmText: 'Excluir',
+                });
+                if (ok) {
                   onDeleteEstimate(selectedEstimate.id);
                   setSelectedEstimateId(null);
                 }

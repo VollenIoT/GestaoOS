@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Search, Loader2, Save, MapPin, Wrench, User, FileText, Package, Cpu, Plus, Trash2, Ban, Trash, History, Calendar, ShieldCheck, Edit3, CheckCircle2, Printer, ChevronDown, FolderOpen } from 'lucide-react';
-import { fetchAddressByCep, createClient, createOrder, updateOrder, deleteOrder, createVisit } from '../services/api';
+import { X, Search, Loader2, Save, MapPin, Wrench, User, FileText, Package, Cpu, Plus, Trash2, Ban, Trash, History, Calendar, ShieldCheck, Edit3, CheckCircle2, Printer, ChevronDown, FolderOpen, MessageSquare, Phone } from 'lucide-react';
+import { fetchAddressByCep, createClient, createOrder, updateOrder, deleteOrder, createVisit, reserveNextOrderNumber } from '../services/api';
 import { ConfirmModal } from './ConfirmModal';
 import { CompanyData, defaultCompanyData } from './CompanyModal';
+import { registerCashEntryFromOS } from './CashRegisterModal';
+import { modalStack } from '../utils/modalStack';
 
 interface CreateOrderModalProps {
   isOpen: boolean;
@@ -81,13 +83,20 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   // Aba ativa da OS
   const [activeTab, setActiveTab] = useState<'EQUIPMENT' | 'INFO' | 'SERVICES_PARTS' | 'AGENDAMENTO' | 'DATA' | 'WARRANTY'>('EQUIPMENT');
 
-  // Form State - Termos e Opções de Garantia
-  const [warrantyTermsData, setWarrantyTermsData] = useState({
-    periodDays: '90',
-    startDate: new Date().toISOString().split('T')[0],
-    coverageType: 'PECAS_E_MAO_DE_OBRA',
-    termsText: 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado. Não cobre danos causados por mau uso, oscilações na rede elétrica, umidade ou intervenções de terceiros.',
-    printTerms: true,
+  // Form State - Termos e Opções de Garantia com Memória
+  const [warrantyTermsData, setWarrantyTermsData] = useState(() => {
+    let printTerms = true;
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_warranty_terms');
+      if (saved !== null) printTerms = saved === 'true';
+    } catch {}
+    return {
+      periodDays: '90',
+      startDate: new Date().toISOString().split('T')[0],
+      coverageType: 'PECAS_E_MAO_DE_OBRA',
+      termsText: 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado. Não cobre danos causados por mau uso, oscilações na rede elétrica, umidade ou intervenções de terceiros.',
+      printTerms,
+    };
   });
 
   // Form State - Dados da Nota Fiscal (Garantia de Fábrica)
@@ -133,10 +142,20 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   // Form State - Tipo de Garantia
   const [warrantyType, setWarrantyType] = useState<'GARANTIA_LOJA' | 'GARANTIA_FABRICA' | 'NAO_SE_APLICA'>('NAO_SE_APLICA');
 
-  // Form State - Informações / Laudo & Agendamento
+  // Form State - Informações / Laudo & Agendamento com Memória de Preferências de Impressão
   const [problemDescription, setProblemDescription] = useState('');
-  const [printProblemDescription, setPrintProblemDescription] = useState(true);
-  const [printEquipmentObservations, setPrintEquipmentObservations] = useState(true);
+  const [printProblemDescription, setPrintProblemDescription] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_problem');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
+  const [printEquipmentObservations, setPrintEquipmentObservations] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_equipment_obs');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
   const [technicalReport, setTechnicalReport] = useState('');
   const [executedService, setExecutedService] = useState('');
   const [originalExecutedService, setOriginalExecutedService] = useState('');
@@ -149,9 +168,24 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   const [originalOsCode, setOriginalOsCode] = useState<string>('');
   const [warrantyReturnOsCode, setWarrantyReturnOsCode] = useState<string>('');
   const [orderObservations, setOrderObservations] = useState('');
-  const [printTechnicalReport, setPrintTechnicalReport] = useState(true);
-  const [printServicesList, setPrintServicesList] = useState(true);
-  const [printPartsList, setPrintPartsList] = useState(true);
+  const [printTechnicalReport, setPrintTechnicalReport] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_tech_report');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
+  const [printServicesList, setPrintServicesList] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_services');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
+  const [printPartsList, setPrintPartsList] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vollen_print_pref_parts');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
   const [printMode, setPrintMode] = useState<'ENTRY_RECEIPT' | 'EXIT_RECEIPT' | 'ESTIMATE'>('ENTRY_RECEIPT');
   const [entryDate, setEntryDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [exitDate, setExitDate] = useState<string>('');
@@ -180,6 +214,94 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     return Boolean(orderToEdit?.isPartsReserved || orderToEdit?.status === 'ORCAMENTO_APROVADO' || orderToEdit?.status === 'APROVADO');
   });
   const [isLocalClientHistoryModalOpen, setIsLocalClientHistoryModalOpen] = useState(false);
+  const [whatsappDropdownOpen, setWhatsappDropdownOpen] = useState(false);
+
+  const handleSendWhatsApp = (type: 'custom' | 'ready') => {
+    setWhatsappDropdownOpen(false);
+    const rawNumber = clientData.whatsapp || clientData.phone || '';
+    const cleanDigits = rawNumber.replace(/\D/g, '');
+    if (!cleanDigits) {
+      return alert('⚠️ Este cliente não possui número de WhatsApp ou Celular preenchido.');
+    }
+
+    // Garante código do país (55 para Brasil se tiver 10 ou 11 dígitos)
+    const phoneWithCountry = cleanDigits.length <= 11 && !cleanDigits.startsWith('55')
+      ? `55${cleanDigits}`
+      : cleanDigits;
+
+    let targetUrl = `https://wa.me/${phoneWithCountry}`;
+
+    if (type === 'ready') {
+      const clientName = clientData.name ? clientData.name.trim().split(' ')[0] : 'Cliente';
+      const osCode = orderToEdit?.code || 'OS';
+      const equipInfo = [equipmentData.type, equipmentData.brand, equipmentData.model].filter(Boolean).join(' ') || 'Equipamento';
+      
+      const st = (orderStatus || 'ABERTA').toUpperCase();
+      const statusLabels: Record<string, string> = {
+        ABERTA: 'Aberta',
+        ORCAMENTO_APROVADO: 'Orçamento Aprovado',
+        EM_ATENDIMENTO: 'Em Atendimento',
+        APROVADO: 'Aprovado',
+        AGUARDANDO_PECA: 'Aguardando Peça',
+        AGUARDANDO_APROVACAO: 'Aguardando Aprovação',
+        RETORNO_GARANTIA: 'Retorno em Garantia',
+        APARELHO_LIBERADO: 'Aparelho Liberado',
+        FINALIZADA: 'Finalizada',
+        CONCLUIDA: 'Concluída',
+        CANCELADA: 'Cancelada',
+      };
+      const statusLabel = statusLabels[st] || orderStatus.replace(/_/g, ' ');
+
+      const totalValFormatted = `R$ ${grandTotalVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      // Carrega modelos customizados se configurados
+      let savedGeneralTpl = '';
+      let savedLiberadoTpl = '';
+      try {
+        const savedGeneral = localStorage.getItem('vollen_os_general_config');
+        if (savedGeneral) {
+          const parsed = JSON.parse(savedGeneral);
+          if (parsed.whatsappMessageStatusGeneral) savedGeneralTpl = parsed.whatsappMessageStatusGeneral;
+          if (parsed.whatsappMessageStatusLiberado) savedLiberadoTpl = parsed.whatsappMessageStatusLiberado;
+        }
+      } catch {}
+
+      const defaultGeneral = `Olá, *{cliente}*! Tudo bem?\n\nInformamos que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) teve o status atualizado para: *{status}*.\n\n💰 *Valor Total:* {valor_total}\n\nQualquer dúvida estamos à disposição!`;
+      const defaultLiberado = `Olá, *{cliente}*! Tudo bem?\n\nPassando para informar que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) está com status *APARELHO LIBERADO* e o aparelho já se encontra pronto e disponível para retirada!\n\n💰 *Valor Total:* {valor_total}\n\nFicamos à disposição!`;
+
+      let template = st === 'APARELHO_LIBERADO'
+        ? (savedLiberadoTpl || defaultLiberado)
+        : (savedGeneralTpl || defaultGeneral);
+
+      const message = template
+        .replace(/\{cliente\}/gi, clientName)
+        .replace(/\{numero_os\}/gi, osCode)
+        .replace(/\{equipamento\}/gi, equipInfo)
+        .replace(/\{status\}/gi, statusLabel)
+        .replace(/\{valor_total\}/gi, totalValFormatted);
+
+      targetUrl = `https://wa.me/${phoneWithCountry}?text=${encodeURIComponent(message)}`;
+    }
+
+    // Suporte tanto para navegador padrão quanto para Electron desktop
+    try {
+      const electron = (window as any).require ? (window as any).require('electron') : null;
+      if (electron?.shell) {
+        electron.shell.openExternal(targetUrl);
+      } else {
+        const link = document.createElement('a');
+        link.href = targetUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   const [visitData, setVisitData] = useState({
     date: '',
     period: '',
@@ -198,6 +320,29 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     (currentUser?.name || '').toLowerCase().includes('admin')
   );
 
+  const canCreateOS = Boolean(
+    isAdmin ||
+    currentUser?.permissions?.createOS === true ||
+    currentUser?.permissions?.createOS === undefined
+  );
+
+  const canEditOS = Boolean(
+    isAdmin ||
+    currentUser?.permissions?.editOS === true ||
+    currentUser?.permissions?.editOS === undefined
+  );
+
+  const canCancelOS = Boolean(
+    isAdmin ||
+    currentUser?.permissions?.cancelOS === true
+  );
+
+  const canFinalizeOS = Boolean(
+    isAdmin ||
+    currentUser?.permissions?.finalizeOS === true ||
+    currentUser?.permissions?.finalizeOS === undefined
+  );
+
   const canReopenOS = Boolean(
     isAdmin ||
     currentUser?.permissions?.reopenOS === true ||
@@ -207,6 +352,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
   const canDeleteOS = Boolean(
     isAdmin ||
     currentUser?.permissions?.deleteOS === true
+  );
+
+  const canPrintOS = Boolean(
+    isAdmin ||
+    currentUser?.permissions?.printOS === true ||
+    currentUser?.permissions?.printOS === undefined
   );
 
   const isCanceledOrder = Boolean(
@@ -314,14 +465,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     const clientNameLower = clientData.name.trim().toLowerCase();
     const clientId = clientData.id;
 
-    // Filtra apenas ordens encerradas deste cliente (FINALIZADA, CONCLUIDA ou CANCELADA)
-    const ordersOfClient = allOrders.filter((o) => {
+    // Filtra todas as ordens deste cliente (abertas, em andamento, finalizadas, etc.)
+    const ordersOfClient = (allOrders || []).filter((o) => {
+      if (!o) return false;
       const matchId = clientId && (o.clientId === clientId || o.client?.id === clientId);
-      const matchName = clientNameLower && o.client?.name?.trim().toLowerCase() === clientNameLower;
-      if (!matchId && !matchName) return false;
-
-      const st = (o.status || '').toUpperCase();
-      return st === 'FINALIZADA' || st === 'CONCLUIDA' || st === 'CANCELADA';
+      const matchName = clientNameLower && (o.client?.name?.trim().toLowerCase() === clientNameLower || o.clientName?.trim().toLowerCase() === clientNameLower);
+      return Boolean(matchId || matchName);
     });
 
     // Extrai aparelhos únicos
@@ -336,6 +485,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       lastOsDate?: string;
     }> = [];
 
+    // 1. Aparelhos que constam nas OSs do cliente
     ordersOfClient.forEach((o) => {
       const eq = o.equipment;
       if (!eq) return;
@@ -366,8 +516,37 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       }
     });
 
+    // 2. Aparelhos salvos diretamente no cadastro do cliente (se houver array client.equipments ou client.equipment)
+    const clientEquipmentsList = (clientData as any)?.equipments;
+    if (Array.isArray(clientEquipmentsList)) {
+      clientEquipmentsList.forEach((eq: any) => {
+        if (!eq) return;
+        const type = (eq.type || '').trim();
+        const brand = (eq.brand || '').trim();
+        const model = (eq.model || '').trim();
+        const serialNumber = (eq.serialNumber || '').trim();
+        if (!type && !brand && !model && !serialNumber) return;
+
+        const key = `${type}|${brand}|${model}|${serialNumber}`.toUpperCase();
+        const alreadyExists = list.some(
+          (item) => `${item.type}|${item.brand}|${item.model}|${item.serialNumber}`.toUpperCase() === key
+        );
+
+        if (!alreadyExists) {
+          list.push({
+            type,
+            brand,
+            model,
+            serialNumber,
+            code: eq.code || '',
+            accessories: eq.accessories || '',
+          });
+        }
+      });
+    }
+
     return list;
-  }, [allOrders, clientData.id, clientData.name]);
+  }, [allOrders, clientData.id, clientData.name, (clientData as any)?.equipments]);
 
   // Form State - Dados da Empresa
   const [companyInfo, setCompanyInfo] = useState<CompanyData>(() => {
@@ -408,6 +587,21 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     return [];
   });
 
+  // Função auxiliar para obter e desduplicar atendentes por case-insensitive
+  const getDeduplicatedAttendants = (users: any[]): string[] => {
+    const map = new Map<string, string>();
+    users.forEach((u: any) => {
+      const name = (u.name || u.username || '').trim();
+      if (name) {
+        const key = name.toUpperCase();
+        if (!map.has(key)) {
+          map.set(key, name);
+        }
+      }
+    });
+    return Array.from(map.values());
+  };
+
   // Lista de Atendentes cadastrados no sistema (sincronizado com Gestão de Usuários)
   const [registeredAttendants, setRegisteredAttendants] = useState<string[]>(() => {
     try {
@@ -415,10 +609,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       if (savedUsers) {
         const parsedUsers = JSON.parse(savedUsers);
         if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
-          const attendants = parsedUsers
-            .map((u: any) => (u.name || u.username || '').trim())
-            .filter(Boolean);
-          if (attendants.length > 0) return Array.from(new Set(attendants));
+          return getDeduplicatedAttendants(parsedUsers);
         }
       }
     } catch (err) { }
@@ -436,10 +627,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         if (savedUsers) {
           const parsedUsers = JSON.parse(savedUsers);
           if (Array.isArray(parsedUsers) && parsedUsers.length > 0) {
-            const attendants = parsedUsers
-              .map((u: any) => (u.name || u.username || '').trim())
-              .filter(Boolean);
-            setRegisteredAttendants(Array.from(new Set(attendants)));
+            setRegisteredAttendants(getDeduplicatedAttendants(parsedUsers));
           }
         }
 
@@ -607,37 +795,29 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
   // Event Listener para tecla ESC com hierarquia de modais
   React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || !isOpen) return;
+    if (!isOpen) return;
 
+    const handleKeyDown = () => {
       // 1. Se o Modal de Histórico de Alterações da OS estiver aberto, fecha apenas ele
       if (isAuditHistoryModalOpen) {
-        e.preventDefault();
-        e.stopPropagation();
         setIsAuditHistoryModalOpen(false);
         return;
       }
 
       // 2. Se o Modal de Histórico de OS do Cliente estiver aberto, fecha apenas ele
       if (isLocalClientHistoryModalOpen) {
-        e.preventDefault();
-        e.stopPropagation();
         setIsLocalClientHistoryModalOpen(false);
         return;
       }
 
       // 3. Se o Modal de Escolha de Aparelhos do Cliente estiver aberto, fecha apenas ele
       if (isClientEquipmentsModalOpen) {
-        e.preventDefault();
-        e.stopPropagation();
         setIsClientEquipmentsModalOpen(false);
         return;
       }
 
       // 4. Se o Modal de Detalhes de Retorno/Reabertura estiver aberto, fecha apenas ele
       if (showReopenHistoryDetails) {
-        e.preventDefault();
-        e.stopPropagation();
         setShowReopenHistoryDetails(false);
         return;
       }
@@ -648,12 +828,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       }
 
       // 6. Caso contrário, solicita o fechamento normal da Ordem de Serviço
-      e.preventDefault();
       handleRequestClose();
     };
 
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
+    modalStack.register('CreateOrderModal', handleKeyDown);
+    return () => modalStack.unregister('CreateOrderModal');
   }, [
     isOpen,
     isDirty,
@@ -663,6 +842,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     showReopenHistoryDetails,
     confirmDialog.isOpen,
     isFinalizeModalOpen,
+    handleRequestClose,
   ]);
 
   // Form State - Menu Dropdown de Impressões
@@ -888,9 +1068,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     setSessionBatchOrders([]);
     setActiveEditingOrder(orderToEdit);
     if (orderToEdit) {
-      // MODO EDIÇÃO: Carrega todos os campos da OS existente
+      // MODO EDIÇÃO: Carrega todos os campos da OS existente com sincronização de cliente
+      const clientNameFromOS = (orderToEdit.client?.name || '').trim().toLowerCase();
       const matchedClient = (clients && Array.isArray(clients))
-        ? clients.find((cl) => cl.id === orderToEdit.clientId || cl.id === orderToEdit.client?.id)
+        ? clients.find(
+            (cl) =>
+              (cl.id && (cl.id === orderToEdit.clientId || cl.id === orderToEdit.client?.id)) ||
+              (clientNameFromOS && cl.name && cl.name.trim().toLowerCase() === clientNameFromOS)
+          )
         : null;
       const c = matchedClient || orderToEdit.client || {};
       const eq = orderToEdit.equipment || {};
@@ -1052,12 +1237,17 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         setAdvancePayment(orderToEdit.advancePayment || '0,00');
         setIsZeroValueWarranty(Boolean(orderToEdit.isZeroValueWarranty));
 
-        if (firstVisit && (firstVisit.id || firstVisit.date)) {
+        const savedVisitDate = firstVisit?.date || orderToEdit.scheduledDate || orderToEdit.visitDate || '';
+        const savedVisitPeriod = firstVisit?.period || orderToEdit.period || orderToEdit.visitPeriod || '';
+        const savedVisitTech = firstVisit?.technicianName || orderToEdit.technician || '';
+        const savedVisitNotes = firstVisit?.notes !== undefined ? firstVisit.notes : (orderToEdit.visitNotes !== undefined ? orderToEdit.visitNotes : (orderToEdit.scheduledNotes || ''));
+
+        if (savedVisitDate || savedVisitPeriod || savedVisitNotes || (firstVisit && firstVisit.id)) {
           setVisitData({
-            date: firstVisit.date ? (firstVisit.date.includes('T') ? firstVisit.date.split('T')[0] : firstVisit.date) : '',
-            period: firstVisit.period || '',
-            technicianName: firstVisit.technicianName || orderToEdit.technician || '',
-            notes: firstVisit.notes || '',
+            date: savedVisitDate ? (savedVisitDate.includes('T') ? savedVisitDate.split('T')[0] : savedVisitDate) : '',
+            period: savedVisitPeriod || '',
+            technicianName: savedVisitTech || '',
+            notes: savedVisitNotes || '',
           });
         } else {
           setVisitData({
@@ -1238,14 +1428,35 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
           guarantor: 'NAO_SE_APLICA',
           additionalNotes: '',
         });
-        setWarrantyTermsData({
-          periodDays: defaultWarrantyConfig?.defaultDays || '90',
-          startDate: new Date().toISOString().split('T')[0],
-          coverageType: defaultWarrantyConfig?.defaultCoverage || 'PECAS_E_MAO_DE_OBRA',
-          termsText: defaultWarrantyConfig?.defaultTerms || 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado.',
-          printTerms: true,
+        setWarrantyTermsData(() => {
+          let printTerms = true;
+          try {
+            const saved = localStorage.getItem('vollen_print_pref_warranty_terms');
+            if (saved !== null) printTerms = saved === 'true';
+          } catch {}
+          return {
+            periodDays: defaultWarrantyConfig?.defaultDays || '90',
+            startDate: new Date().toISOString().split('T')[0],
+            coverageType: defaultWarrantyConfig?.defaultCoverage || 'PECAS_E_MAO_DE_OBRA',
+            termsText: defaultWarrantyConfig?.defaultTerms || 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado.',
+            printTerms,
+          };
         });
-        setAttendantName(currentUser?.name || '');
+        // Preserva preferências salvas de impressão em nova OS
+        try {
+          const pProb = localStorage.getItem('vollen_print_pref_problem');
+          if (pProb !== null) setPrintProblemDescription(pProb === 'true');
+          const pEq = localStorage.getItem('vollen_print_pref_equipment_obs');
+          if (pEq !== null) setPrintEquipmentObservations(pEq === 'true');
+          const pTech = localStorage.getItem('vollen_print_pref_tech_report');
+          if (pTech !== null) setPrintTechnicalReport(pTech === 'true');
+          const pServ = localStorage.getItem('vollen_print_pref_services');
+          if (pServ !== null) setPrintServicesList(pServ === 'true');
+          const pParts = localStorage.getItem('vollen_print_pref_parts');
+          if (pParts !== null) setPrintPartsList(pParts === 'true');
+        } catch {}
+        // Preserva o atendente já selecionado pelo operador em vez de resetar para vazio
+        setAttendantName((prev) => prev || orderToEdit?.attendant || orderToEdit?.attendantName || currentUser?.name || '');
         setTravelCost('0,00');
         setDiscountCost('0,00');
         setAdvancePayment('0,00');
@@ -1415,6 +1626,24 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+
+    // Validação de Permissões de Usuário
+    if (!orderToEdit && !canCreateOS) {
+      alert('Acesso Negado: Seu usuário não possui permissão para criar novas Ordens de Serviço.');
+      return;
+    }
+    if (orderToEdit && !canEditOS) {
+      alert('Acesso Negado: Seu usuário não possui permissão para editar Ordens de Serviço existentes.');
+      return;
+    }
+    if ((orderStatus === 'FINALIZADA' || orderStatus === 'GARANTIA_FINALIZADA') && !canFinalizeOS) {
+      alert('Acesso Negado: Seu usuário não possui permissão para finalizar Ordens de Serviço.');
+      return;
+    }
+    if ((orderStatus === 'CANCELADA' || orderStatus === 'CANCELADO') && !canCancelOS) {
+      alert('Acesso Negado: Seu usuário não possui permissão para cancelar Ordens de Serviço.');
+      return;
+    }
 
     if (!clientData.name.trim()) {
       return alert('Por favor, selecione um cliente ou informe o nome do cliente no topo.');
@@ -1591,7 +1820,9 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
       const responsibleUser = attendantName.trim() || currentUser?.name || 'Atendente';
       const nowFormatted = new Date().toLocaleString('pt-BR');
 
-      if (activeEditingOrder) {
+      const isRealEditingOrder = Boolean(activeEditingOrder && activeEditingOrder.id && !activeEditingOrder.isNewFromEstimate);
+
+      if (isRealEditingOrder) {
         // ATUALIZA OS EXISTENTE (Evita duplicação)
         const origService = originalExecutedService || executedService;
         let finalAdditionalNotes = nfData.additionalNotes || '';
@@ -1740,6 +1971,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
           problemDescription: finalProblem,
           status: orderStatus,
           type: orderType,
+          scheduledDate: visitData.date || '',
+          period: visitData.period || '',
+          visitNotes: visitData.notes || '',
+          scheduledNotes: visitData.notes || '',
           warrantyType: warrantyType,
           travelCost,
           discountCost,
@@ -1817,27 +2052,49 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         finalSavedOrder = updated || { ...activeEditingOrder, ...updatedOrderPayload };
         setAuditHistory(updatedAuditHistory);
 
+        // Se a OS foi finalizada agora, registra automaticamente a entrada no Caixa
+        if (orderStatus === 'FINALIZADA' && activeEditingOrder.status !== 'FINALIZADA') {
+          registerCashEntryFromOS({
+            code: activeEditingOrder.code,
+            totalAmount: grandTotalVal,
+            client: { name: clientData.name },
+            paymentMethod: paymentMethod || 'DINHEIRO',
+            advancePayment: advancePayment,
+            userName: responsibleUser,
+          });
+        }
+
         // Apenas cria/atualiza agendamento se a Data da Visita estiver informada ou tipo da OS for AGENDAMENTO
         if (visitData.date || orderType === 'AGENDAMENTO') {
-          const dateToUse = visitData.date || new Date().toISOString().split('T')[0];
-          const timeToUse = visitData.period || '08:00';
-          const createdVisit = await createVisit({
+          const dateToUse = visitData.date || '';
+          const timeToUse = visitData.period || '';
+          
+          // Localiza se já existe visita para esta OS para evitar duplicações
+          const existingVisits = (activeEditingOrder.visits && activeEditingOrder.visits.length > 0)
+            ? activeEditingOrder.visits
+            : (visits || []).filter((v: any) => v.orderId === activeEditingOrder.id || v.order?.id === activeEditingOrder.id);
+          const existingVisitId = existingVisits[0]?.id;
+
+          const visitPayload: any = {
+            id: existingVisitId,
             orderId: activeEditingOrder.id,
             date: dateToUse,
             period: timeToUse,
-            technicianName: visitData.technicianName || 'Técnico Roberto',
-            notes: visitData.notes || 'Agendamento de visita técnica da OS',
+            technicianName: visitData.technicianName || activeEditingOrder.technician || '',
+            notes: visitData.notes || '',
             status: 'AGENDADA',
-          });
+          };
 
-          if (createdVisit) {
+          const savedVisit = await createVisit(visitPayload);
+
+          if (savedVisit) {
             if (!activeEditingOrder.visits) activeEditingOrder.visits = [];
-            activeEditingOrder.visits = [createdVisit, ...activeEditingOrder.visits.filter((v: any) => v.id !== createdVisit.id)];
+            activeEditingOrder.visits = [savedVisit, ...activeEditingOrder.visits.filter((v: any) => v.id !== savedVisit.id)];
             setVisitData({
               date: dateToUse,
               period: timeToUse,
-              technicianName: createdVisit.technicianName || visitData.technicianName || 'Técnico Roberto',
-              notes: createdVisit.notes || visitData.notes || '',
+              technicianName: savedVisit.technicianName || visitData.technicianName || '',
+              notes: savedVisit.notes !== undefined ? savedVisit.notes : (visitData.notes || ''),
             });
           }
         }
@@ -1883,8 +2140,15 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
         };
         const initialAuditHistory = [initialAuditEntry];
 
+        // Garante reserva de número atômica em tempo real ao salvar
+        let osCodeToUse = suggestedNextCode;
+        try {
+          const reservedCode = await reserveNextOrderNumber();
+          if (reservedCode) osCodeToUse = reservedCode;
+        } catch (e) {}
+
         const order = await createOrder({
-          code: suggestedNextCode,
+          code: osCodeToUse,
           clientId: client.id,
           client: {
             id: client.id,
@@ -1908,6 +2172,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
           problemDescription: finalProblem,
           status: orderStatus,
           type: orderType,
+          scheduledDate: visitData.date || '',
+          period: visitData.period || '',
+          visitNotes: visitData.notes || '',
+          scheduledNotes: visitData.notes || '',
           warrantyType: warrantyType,
           travelCost,
           discountCost,
@@ -1983,14 +2251,14 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
         // Apenas cria agendamento se a Data da Visita estiver informada ou tipo da OS for AGENDAMENTO
         if (visitData.date || orderType === 'AGENDAMENTO') {
-          const dateToUse = visitData.date || new Date().toISOString().split('T')[0];
-          const timeToUse = visitData.period || '08:00';
+          const dateToUse = visitData.date || '';
+          const timeToUse = visitData.period || '';
           const createdVisit = await createVisit({
             orderId: order.id,
             date: dateToUse,
             period: timeToUse,
             technicianName: visitData.technicianName || '',
-            notes: visitData.notes || 'Agendamento de visita técnica da OS',
+            notes: visitData.notes || '',
             status: 'AGENDADA',
           });
 
@@ -1999,7 +2267,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               date: dateToUse,
               period: timeToUse,
               technicianName: createdVisit.technicianName || visitData.technicianName || '',
-              notes: createdVisit.notes || visitData.notes || '',
+              notes: createdVisit.notes !== undefined ? createdVisit.notes : (visitData.notes || ''),
             });
           }
         }
@@ -2193,7 +2461,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                     {att}
                   </option>
                 ))}
-                {attendantName && !registeredAttendants.includes(attendantName) && (
+                {attendantName && !registeredAttendants.some((att) => att.toUpperCase() === attendantName.toUpperCase()) && (
                   <option value={attendantName}>{attendantName}</option>
                 )}
               </select>
@@ -2436,9 +2704,63 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
               />
             </div>
 
-            <div className="flex flex-col justify-between">
+            <div className="flex flex-col justify-between relative">
               <div className="flex items-center justify-between h-5 mb-0.5">
                 <label className="block text-[10px] font-bold text-slate-800">WhatsApp / Celular</label>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setWhatsappDropdownOpen((prev) => !prev)}
+                    className="text-[10px] border px-1.5 py-0.5 rounded flex items-center gap-1 font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                    title="Acessar WhatsApp deste cliente"
+                  >
+                    <MessageSquare className="w-2.5 h-2.5 text-emerald-600" />
+                    <span>WhatsApp</span>
+                    <ChevronDown className="w-2.5 h-2.5 text-emerald-600 ml-0.5" />
+                  </button>
+
+                  {whatsappDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setWhatsappDropdownOpen(false)}
+                      />
+                      <div className="absolute right-0 top-6 z-50 bg-white border border-slate-300 rounded-xl shadow-2xl p-1 text-xs w-56 space-y-0.5 font-sans animate-fadeIn">
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsApp('ready')}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-emerald-50 hover:text-emerald-900 text-slate-700 flex items-start gap-2 transition-colors cursor-pointer group"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                          <div>
+                            <div className="font-bold text-[11px] text-slate-800 group-hover:text-emerald-900">
+                              Mensagem Pronta (Status)
+                            </div>
+                            <div className="text-[9.5px] text-slate-500 leading-tight">
+                              Envia atualização da OS, status e valor total
+                            </div>
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsApp('custom')}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-slate-100 text-slate-700 flex items-start gap-2 transition-colors cursor-pointer group"
+                        >
+                          <MessageSquare className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" />
+                          <div>
+                            <div className="font-bold text-[11px] text-slate-800">
+                              Mensagem Personalizada
+                            </div>
+                            <div className="text-[9.5px] text-slate-500 leading-tight">
+                              Apenas abre a conversa em branco
+                            </div>
+                          </div>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
               <input
                 type="text"
@@ -2687,7 +3009,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         <input
                           type="checkbox"
                           checked={printProblemDescription}
-                          onChange={(e) => setPrintProblemDescription(e.target.checked)}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setPrintProblemDescription(val);
+                            try { localStorage.setItem('vollen_print_pref_problem', String(val)); } catch {}
+                          }}
                           className="w-3.5 h-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                         />
                         <span>Exibir na impressão</span>
@@ -2710,7 +3036,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         <input
                           type="checkbox"
                           checked={printEquipmentObservations}
-                          onChange={(e) => setPrintEquipmentObservations(e.target.checked)}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setPrintEquipmentObservations(val);
+                            try { localStorage.setItem('vollen_print_pref_equipment_obs', String(val)); } catch {}
+                          }}
                           className="w-3.5 h-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                         />
                         <span>Exibir na impressão</span>
@@ -2744,7 +3074,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         <input
                           type="checkbox"
                           checked={printTechnicalReport}
-                          onChange={(e) => setPrintTechnicalReport(e.target.checked)}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setPrintTechnicalReport(val);
+                            try { localStorage.setItem('vollen_print_pref_tech_report', String(val)); } catch {}
+                          }}
                           className="w-3.5 h-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
                         />
                         <span>Exibir na impressão</span>
@@ -3039,7 +3373,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                       <input
                         type="checkbox"
                         checked={warrantyTermsData.printTerms}
-                        onChange={(e) => setWarrantyTermsData({ ...warrantyTermsData, printTerms: e.target.checked })}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setWarrantyTermsData({ ...warrantyTermsData, printTerms: val });
+                          try { localStorage.setItem('vollen_print_pref_warranty_terms', String(val)); } catch {}
+                        }}
                         className="w-3.5 h-3.5 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
                       />
                       <span>Imprimir Termos no Certificado/OS</span>
@@ -3311,7 +3649,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                           <input
                             type="checkbox"
                             checked={printServicesList}
-                            onChange={(e) => setPrintServicesList(e.target.checked)}
+                            onChange={(e) => {
+                              const val = e.target.checked;
+                              setPrintServicesList(val);
+                              try { localStorage.setItem('vollen_print_pref_services', String(val)); } catch {}
+                            }}
                             className="w-3 h-3 text-sky-600 rounded border-slate-300 focus:ring-sky-500 cursor-pointer"
                           />
                           Exibir na Impressão
@@ -3488,7 +3830,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                           <input
                             type="checkbox"
                             checked={printPartsList}
-                            onChange={(e) => setPrintPartsList(e.target.checked)}
+                            onChange={(e) => {
+                              const val = e.target.checked;
+                              setPrintPartsList(val);
+                              try { localStorage.setItem('vollen_print_pref_parts', String(val)); } catch {}
+                            }}
                             className="w-3 h-3 text-sky-600 rounded border-slate-300 focus:ring-sky-500 cursor-pointer"
                           />
                           Exibir na Impressão
@@ -4878,7 +5224,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                             <p className="font-bold text-slate-800 border-b pb-0.5 mb-0.5 text-[8.5px] uppercase">Dados do Cliente</p>
                             <p><strong>Nome:</strong> {cClient.name || ''}</p>
                             <p><strong>Endereço:</strong> {cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : ''}</p>
-                            <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state || ''}` : ''}</p>
+                            <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? <><span> | </span><strong>Cidade/UF:</strong> {`${cClient.city}/${cClient.state || ''}`}</> : ''}</p>
                             {cClient.complement && <p><strong>Complemento:</strong> {cClient.complement}</p>}
                             {cClient.reference && <p><strong>Referência:</strong> {cClient.reference}</p>}
                             <p><strong>Telefone:</strong> {cClient.phone || ''} {cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</p>
@@ -4979,14 +5325,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         </div>
                       </div>
 
-                      {/* ASSINATURAS */}
-                      <div className="grid grid-cols-2 gap-4 pt-1 text-center text-[8.5px]">
-                        <div>
-                          <div className="border-b border-slate-400 w-2/3 mx-auto mb-0.5"></div>
-                          <p className="font-bold">Assinatura da Empresa</p>
-                        </div>
-                        <div>
-                          <div className="border-b border-slate-400 w-2/3 mx-auto mb-0.5"></div>
+                      {/* ASSINATURA - VIA DA EMPRESA (SOMENTE CLIENTE NO CENTRO) */}
+                      <div className="pt-1 text-center text-[8.5px] flex justify-center">
+                        <div className="w-1/2">
+                          <div className="border-b border-slate-400 w-3/4 mx-auto mb-0.5"></div>
                           <p className="font-bold">Assinatura do Cliente</p>
                         </div>
                       </div>
@@ -5044,10 +5386,10 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                             <p className="font-bold text-slate-800 border-b pb-0.5 mb-0.5 text-[8.5px] uppercase">Dados do Cliente</p>
                             <p><strong>Nome:</strong> {cClient.name || ''}</p>
                             <p><strong>Endereço:</strong> {cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : ''}</p>
-                            <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state || ''}` : ''}</p>
+                            <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? <><span> | </span><strong>Cidade/UF:</strong> {`${cClient.city}/${cClient.state || ''}`}</> : ''}</p>
                             {cClient.complement && <p><strong>Complemento:</strong> {cClient.complement}</p>}
                             {cClient.reference && <p><strong>Referência:</strong> {cClient.reference}</p>}
-                            <p><strong>Telefone:</strong> {cClient.phone || ''} {cClient.whatsapp ? `| WhatsApp: {cClient.whatsapp}` : ''}</p>
+                            <p><strong>Telefone:</strong> {cClient.phone || ''} {cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</p>
                           </div>
                           <div className="bg-white p-1.5 rounded border border-slate-200 space-y-0.5">
                             <p className="font-bold text-slate-800 border-b pb-0.5 mb-0.5 text-[8.5px] uppercase">Dados do Aparelho / Equipamento</p>
@@ -5145,15 +5487,11 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         </div>
                       </div>
 
-                      {/* ASSINATURAS */}
-                      <div className="grid grid-cols-2 gap-4 pt-1.5 text-center text-[8.5px]">
-                        <div>
-                          <div className="border-b border-slate-400 w-2/3 mx-auto mb-0.5"></div>
+                      {/* ASSINATURA - VIA DO CLIENTE (SOMENTE EMPRESA NO CENTRO) */}
+                      <div className="pt-1.5 text-center text-[8.5px] flex justify-center">
+                        <div className="w-1/2">
+                          <div className="border-b border-slate-400 w-3/4 mx-auto mb-0.5"></div>
                           <p className="font-bold">Assinatura da Empresa</p>
-                        </div>
-                        <div>
-                          <div className="border-b border-slate-400 w-2/3 mx-auto mb-0.5"></div>
-                          <p className="font-bold">Assinatura do Cliente</p>
                         </div>
                       </div>
                     </div>
@@ -5216,7 +5554,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                         <p className="font-bold text-slate-800 border-b pb-0.5 mb-1 text-[10px] uppercase">Dados do Cliente</p>
                         <p><strong>Nome:</strong> {cClient.name || ''}</p>
                         <p><strong>Endereço:</strong> {cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : ''}</p>
-                        <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state || ''}` : ''}</p>
+                        <p><strong>Bairro:</strong> {cClient.neighborhood || ''} {cClient.city ? <><span> | </span><strong>Cidade/UF:</strong> {`${cClient.city}/${cClient.state || ''}`}</> : ''}</p>
                         {cClient.complement && <p><strong>Complemento:</strong> {cClient.complement}</p>}
                         {cClient.reference && <p><strong>Referência:</strong> {cClient.reference}</p>}
                         <p><strong>Telefone:</strong> {cClient.phone || ''} {cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</p>
@@ -5350,17 +5688,12 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
                           : (cWarrantyTerms?.termsText || defaultWarrantyConfig?.defaultExitTerms || 'Declaramos que o equipamento acima foi entregue devidamente testado e funcionando nas condições especificadas pelo cliente.')}</p>
                     </div>
 
-                    {/* ASSINATURAS */}
-                    <div className="grid grid-cols-2 gap-8 pt-6 text-center text-xs">
-                      <div>
+                    {/* ASSINATURA - SOMENTE EMPRESA NO CENTRO */}
+                    <div className="pt-6 text-center text-xs flex justify-center">
+                      <div className="w-1/2">
                         <div className="border-b border-slate-400 w-3/4 mx-auto mb-1"></div>
                         <p className="font-bold text-slate-800">Assinatura da Empresa / Técnico</p>
                         <p className="text-[10px] text-slate-500">{companyInfo.tradingName || companyInfo.name || 'Vollen - Gestão OS'}</p>
-                      </div>
-                      <div>
-                        <div className="border-b border-slate-400 w-3/4 mx-auto mb-1"></div>
-                        <p className="font-bold text-slate-800">Assinatura do Cliente</p>
-                        <p className="text-[10px] text-slate-500">{cClient.name || 'Cliente'}</p>
                       </div>
                     </div>
                   </div>

@@ -9,3 +9,17 @@ apps/mobile/.expo
 apps/mobile/android/.gradle
 apps/mobile/android/app/build
 apps/mobile/android/build
+
+# Variáveis de ambiente — NUNCA commitar estes arquivos!
+.env
+.env.local
+apps/desktop/.env
+apps/mobile/.env
+apps/server/.env
+
+# Chaves privadas e backups locais
+apps/desktop/src-tauri/updater.key
+backup_completo_*.json
+*.log
+
+

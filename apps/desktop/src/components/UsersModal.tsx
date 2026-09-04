@@ -15,8 +15,14 @@ export interface UserPermissions {
   viewAuditHistory: boolean;
   printOS: boolean;
 
-  // Orçamentos
+  // Orçamentos e Vendas
   manageEstimates: boolean;
+  manageSales: boolean;
+
+  // Fluxo de Caixa e Finanças
+  manageCashRegister: boolean;
+  openCloseCashRegister: boolean;
+  manageManualCashMovement: boolean;
 
   // Cadastros e Centrais
   manageClients: boolean;
@@ -73,6 +79,10 @@ const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
   viewAuditHistory: true,
   printOS: true,
   manageEstimates: true,
+  manageSales: true,
+  manageCashRegister: true,
+  openCloseCashRegister: true,
+  manageManualCashMovement: true,
   manageClients: true,
   manageParts: true,
   manageServices: true,
@@ -105,6 +115,10 @@ const DEFAULT_TECNICO_PERMISSIONS: UserPermissions = {
   viewAuditHistory: true,
   printOS: true,
   manageEstimates: true,
+  manageSales: true,
+  manageCashRegister: false,
+  openCloseCashRegister: false,
+  manageManualCashMovement: false,
   manageClients: true,
   manageParts: true,
   manageServices: true,
@@ -137,6 +151,10 @@ const DEFAULT_ATENDIMENTO_PERMISSIONS: UserPermissions = {
   viewAuditHistory: true,
   printOS: true,
   manageEstimates: true,
+  manageSales: true,
+  manageCashRegister: false,
+  openCloseCashRegister: false,
+  manageManualCashMovement: false,
   manageClients: true,
   manageParts: false,
   manageServices: false,
@@ -224,27 +242,30 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
       // Sincroniza com o Firestore
       import('../services/firebase').then(({ db }) => {
         import('firebase/firestore').then(({ doc, setDoc, deleteDoc }) => {
-          if (deletedUserId) {
-            deleteDoc(doc(db, 'users', deletedUserId)).catch(() => {});
-            deleteDoc(doc(db, 'technicians', deletedUserId)).catch(() => {});
+          if (db) {
+            if (deletedUserId) {
+              deleteDoc(doc(db, 'users', deletedUserId)).catch(() => {});
+              deleteDoc(doc(db, 'technicians', deletedUserId)).catch(() => {});
+            }
+            newUsers.forEach((u: any) => {
+              setDoc(
+                doc(db, 'users', u.id),
+                {
+                  id: u.id,
+                  username: u.username,
+                  name: u.name,
+                  role: u.role,
+                  isAdmin: u.role === 'Admin',
+                  isTechnician: Boolean(u.isTechnician ?? (u.role === 'Técnico' || u.role === 'Admin')),
+                  isAttendant: Boolean(u.isAttendant ?? (u.role === 'Atendimento' || u.role === 'Admin')),
+                  permissions: u.permissions,
+                  password: u.password || '',
+                  updatedAt: new Date().toISOString(),
+                },
+                { merge: true }
+              ).catch(() => {});
+            });
           }
-          newUsers.forEach((u) => {
-            setDoc(
-              doc(db, 'users', u.id),
-              {
-                id: u.id,
-                username: u.username,
-                name: u.name,
-                role: u.role,
-                isAdmin: u.role === 'Admin',
-                isTechnician: Boolean(u.isTechnician ?? (u.role === 'Técnico' || u.role === 'Admin')),
-                isAttendant: Boolean(u.isAttendant ?? (u.role === 'Atendimento' || u.role === 'Admin')),
-                permissions: u.permissions,
-                updatedAt: new Date().toISOString(),
-              },
-              { merge: true }
-            ).catch(() => {});
-          });
         });
       });
     } catch (err) {
@@ -273,6 +294,25 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
       setSelectedUserId(null);
     }
   }, [isOpen]);
+
+  // Tecla ESC para fechar formulário ou fechar modal de Usuários
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isFormOpen) {
+          setIsFormOpen(false);
+          setSelectedUserId(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, isFormOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -686,23 +726,48 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* GRUPO 2: ORÇAMENTOS */}
+                  {/* GRUPO 2: ORÇAMENTOS E VENDAS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-amber-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      2. Orçamentos
+                      2. Orçamentos & Vendas de Peças
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageEstimates')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageEstimates ? 'bg-amber-50 border-amber-300 text-amber-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Gerenciar Orçamentos</span>
                         {formData.permissions?.manageEstimates ? <CheckSquare className="w-4 h-4 text-amber-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
+                      <div onClick={() => togglePermission('manageSales')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageSales ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Módulo de Vendas (Balcão)</span>
+                        {formData.permissions?.manageSales ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
                     </div>
                   </div>
 
-                  {/* GRUPO 3: CADASTROS E CENTRAIS */}
+                  {/* GRUPO 3: FLUXO DE CAIXA & FINANÇAS */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-extrabold text-emerald-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
+                      3. Fluxo de Caixa & Finanças
+                    </span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                      <div onClick={() => togglePermission('manageCashRegister')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageCashRegister ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Acessar Módulo de Caixa</span>
+                        {formData.permissions?.manageCashRegister ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('openCloseCashRegister')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.openCloseCashRegister ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Abrir e Fechar Caixa Diário</span>
+                        {formData.permissions?.openCloseCashRegister ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageManualCashMovement')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageManualCashMovement ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Lançamentos Manuais / Sangrias</span>
+                        {formData.permissions?.manageManualCashMovement ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* GRUPO 4: CADASTROS E CENTRAIS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-indigo-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      3. Cadastros Principais
+                      4. Cadastros Principais
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageClients')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageClients ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -732,10 +797,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* GRUPO 4: CONFIGURAÇÕES E PARÂMETROS */}
+                  {/* GRUPO 5: CONFIGURAÇÕES E PARÂMETROS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-purple-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      4. Parâmetros e Configurações
+                      5. Parâmetros e Configurações
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageOSGeneralConfig')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageOSGeneralConfig ? 'bg-purple-50 border-purple-300 text-purple-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -757,10 +822,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* GRUPO 5: RELATÓRIOS */}
+                  {/* GRUPO 6: RELATÓRIOS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-emerald-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      5. Relatórios & Estatísticas
+                      6. Relatórios & Estatísticas
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('viewGeneralReports')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.viewGeneralReports ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -774,10 +839,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* GRUPO 6: SISTEMA & ADMINISTRAÇÃO */}
+                  {/* GRUPO 7: SISTEMA & ADMINISTRAÇÃO */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-slate-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      6. Sistema & Administração
+                      7. Sistema & Administração
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageCompanyData')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageCompanyData ? 'bg-slate-100 border-slate-300 text-slate-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>

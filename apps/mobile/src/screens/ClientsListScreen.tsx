@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Linking,
   Alert,
+  Modal,
 } from 'react-native';
 import {
   Users,
@@ -18,12 +19,17 @@ import {
   MessageCircle,
   ChevronRight,
   User,
+  Trash2,
+  Edit3,
+  AlertTriangle,
 } from 'lucide-react-native';
+import { deleteClientMobile } from '../services/api';
 
 interface ClientsListScreenProps {
   clients: any[];
   onOpenCreateClient: () => void;
   onEditClient?: (client: any) => void;
+  onDeleteClient?: (client: any) => void;
   onRefresh: () => void;
 }
 
@@ -31,9 +37,13 @@ export const ClientsListScreen: React.FC<ClientsListScreenProps> = ({
   clients,
   onOpenCreateClient,
   onEditClient,
+  onDeleteClient,
   onRefresh,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedClientForModal, setSelectedClientForModal] = useState<any | null>(null);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const filteredClients = clients.filter((c) => {
     const term = searchTerm.toLowerCase().trim();
@@ -80,6 +90,29 @@ export const ClientsListScreen: React.FC<ClientsListScreenProps> = ({
     }
   };
 
+  const handleLongPressClient = (client: any) => {
+    setSelectedClientForModal(client);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedClientForModal) return;
+    setIsDeleting(true);
+    try {
+      if (onDeleteClient) {
+        await onDeleteClient(selectedClientForModal);
+      } else {
+        await deleteClientMobile(selectedClientForModal.id);
+        onRefresh();
+      }
+      setIsConfirmDeleteOpen(false);
+      setSelectedClientForModal(null);
+    } catch {
+      Alert.alert('Erro', 'Não foi possível excluir o cliente.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Barra de Busca Superior */}
@@ -104,70 +137,73 @@ export const ClientsListScreen: React.FC<ClientsListScreenProps> = ({
         data={filteredClients}
         keyExtractor={(item) => item.id || `cli-${Math.random()}`}
         contentContainerStyle={{ padding: 14, paddingBottom: 90 }}
+        refreshing={false}
+        onRefresh={onRefresh}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Users size={42} color="#334155" />
             <Text style={styles.emptyText}>Nenhum cliente cadastrado ou encontrado.</Text>
           </View>
         }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.clientCard}
-            onPress={() => onEditClient && onEditClient(item)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.cardHeader}>
-              <View style={styles.avatarBox}>
-                <User size={18} color="#0284c7" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.clientName}>{item.name || 'Cliente Sem Nome'}</Text>
-                {item.code && <Text style={styles.clientCode}>Cód: #{item.code}</Text>}
-              </View>
-              <ChevronRight size={18} color="#94a3b8" />
-            </View>
+        renderItem={({ item }) => {
+          const phoneDisplay = item.phone || item.whatsapp || '';
+          const addressDisplay = [
+            item.address,
+            item.number ? `Nº ${item.number}` : '',
+            item.neighborhood,
+            item.city ? `${item.city}${item.state ? `/${item.state}` : ''}` : '',
+          ].filter(Boolean).join(' - ');
 
-            <View style={styles.cardBody}>
-              {/* Telefone / WhatsApp */}
-              {(item.phone || item.whatsapp) && (
-                <View style={styles.contactRow}>
-                  {item.phone ? (
-                    <TouchableOpacity
-                      style={styles.actionChip}
-                      onPress={() => handleCallPhone(item.phone)}
-                    >
-                      <Phone size={13} color="#0284c7" />
-                      <Text style={styles.actionChipText}>{item.phone}</Text>
-                    </TouchableOpacity>
-                  ) : null}
-
-                  {item.whatsapp ? (
-                    <TouchableOpacity
-                      style={[styles.actionChip, styles.whatsappChip]}
-                      onPress={() => handleOpenWhatsApp(item.whatsapp, item.name)}
-                    >
-                      <MessageCircle size={13} color="#16a34a" />
-                      <Text style={[styles.actionChipText, { color: '#16a34a' }]}>WhatsApp</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              )}
-
-              {/* Endereço */}
-              {item.address ? (
-                <View style={styles.addressRow}>
-                  <MapPin size={13} color="#94a3b8" style={{ marginTop: 2 }} />
-                  <Text style={styles.addressText} numberOfLines={2}>
-                    {item.address}
-                    {item.number ? `, ${item.number}` : ''}
-                    {item.neighborhood ? ` - ${item.neighborhood}` : ''}
-                    {item.city ? ` (${item.city}/${item.state || 'SP'})` : ''}
+          return (
+            <TouchableOpacity
+              style={styles.clientListItem}
+              onPress={() => onEditClient && onEditClient(item)}
+              onLongPress={() => handleLongPressClient(item)}
+              delayLongPress={400}
+              activeOpacity={0.7}
+            >
+              <View style={styles.clientListContent}>
+                <View style={styles.clientListTopRow}>
+                  <Text style={styles.clientListName} numberOfLines={1}>
+                    {item.name?.toUpperCase() || 'CLIENTE SEM NOME'}
                   </Text>
+                  {item.code ? (
+                    <Text style={styles.clientListCode}>#{item.code}</Text>
+                  ) : null}
                 </View>
-              ) : null}
-            </View>
-          </TouchableOpacity>
-        )}
+
+                {addressDisplay ? (
+                  <View style={styles.clientListInfoRow}>
+                    <MapPin size={12} color="#64748b" style={{ marginTop: 1 }} />
+                    <Text style={styles.clientListAddress} numberOfLines={1}>
+                      {addressDisplay}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {phoneDisplay ? (
+                  <View style={styles.clientListInfoRow}>
+                    <Phone size={12} color="#0284c7" style={{ marginTop: 1 }} />
+                    <Text style={styles.clientListPhone}>
+                      {phoneDisplay}
+                    </Text>
+                    {item.whatsapp && (
+                      <TouchableOpacity
+                        style={styles.whatsAppBadge}
+                        onPress={() => handleOpenWhatsApp(item.whatsapp, item.name)}
+                      >
+                        <MessageCircle size={10} color="#16a34a" />
+                        <Text style={styles.whatsAppBadgeText}>WhatsApp</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ) : null}
+              </View>
+
+              <ChevronRight size={18} color="#cbd5e1" />
+            </TouchableOpacity>
+          );
+        }}
       />
 
       {/* Botão Flutuante Criar Novo Cliente */}
@@ -175,6 +211,116 @@ export const ClientsListScreen: React.FC<ClientsListScreenProps> = ({
         <PlusCircle size={22} color="#ffffff" />
         <Text style={styles.fabText}>NOVO CLIENTE</Text>
       </TouchableOpacity>
+
+      {/* MODAL DE AÇÕES RÁPIDAS AO SEGURAR O CLIENTE */}
+      <Modal visible={Boolean(selectedClientForModal && !isConfirmDeleteOpen)} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.actionModalBox}>
+            <View style={styles.actionModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.actionModalTitle} numberOfLines={1}>
+                  {selectedClientForModal?.name || 'Cliente'}
+                </Text>
+                <Text style={styles.actionModalSubtitle}>
+                  {selectedClientForModal?.code ? `Código #${selectedClientForModal.code}` : 'Opções do Cliente'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.actionButtonsList}>
+              {/* EDITAR CLIENTE */}
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#0284c7' }]}
+                onPress={() => {
+                  const cli = selectedClientForModal;
+                  setSelectedClientForModal(null);
+                  if (onEditClient) onEditClient(cli);
+                }}
+              >
+                <Edit3 size={18} color="#ffffff" />
+                <Text style={styles.actionBtnText}>Editar Dados do Cliente</Text>
+              </TouchableOpacity>
+
+              {/* LIGAR */}
+              {Boolean(selectedClientForModal?.phone) && (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#334155' }]}
+                  onPress={() => {
+                    handleCallPhone(selectedClientForModal?.phone);
+                    setSelectedClientForModal(null);
+                  }}
+                >
+                  <Phone size={18} color="#ffffff" />
+                  <Text style={styles.actionBtnText}>Ligar ({selectedClientForModal?.phone})</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* WHATSAPP */}
+              {Boolean(selectedClientForModal?.whatsapp) && (
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: '#16a34a' }]}
+                  onPress={() => {
+                    handleOpenWhatsApp(selectedClientForModal?.whatsapp, selectedClientForModal?.name);
+                    setSelectedClientForModal(null);
+                  }}
+                >
+                  <MessageCircle size={18} color="#ffffff" />
+                  <Text style={styles.actionBtnText}>Conversar no WhatsApp</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* EXCLUIR CLIENTE */}
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: '#dc2626' }]}
+                onPress={() => setIsConfirmDeleteOpen(true)}
+              >
+                <Trash2 size={18} color="#ffffff" />
+                <Text style={styles.actionBtnText}>Excluir Cliente</Text>
+              </TouchableOpacity>
+
+              {/* BOTAO FECHAR */}
+              <TouchableOpacity
+                style={styles.actionBtnClose}
+                onPress={() => setSelectedClientForModal(null)}
+              >
+                <Text style={styles.actionBtnCloseText}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
+      <Modal visible={isConfirmDeleteOpen} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.actionModalBox, { borderColor: '#ef4444' }]}>
+            <View style={styles.confirmHeader}>
+              <AlertTriangle size={24} color="#ef4444" />
+              <Text style={styles.confirmTitle}>Confirmar Exclusão</Text>
+            </View>
+            <Text style={styles.confirmMessage}>
+              Deseja realmente excluir o cliente <Text style={{ fontWeight: 'bold', color: '#ffffff' }}>{selectedClientForModal?.name || ''}</Text>? Esta ação removerá o cliente do sistema.
+            </Text>
+            <View style={styles.confirmButtonsRow}>
+              <TouchableOpacity
+                style={styles.confirmCancelNo}
+                disabled={isDeleting}
+                onPress={() => setIsConfirmDeleteOpen(false)}
+              >
+                <Text style={styles.confirmBtnNoText}>Voltar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmCancelYes}
+                disabled={isDeleting}
+                onPress={handleConfirmDelete}
+              >
+                <Trash2 size={16} color="#ffffff" />
+                <Text style={styles.confirmBtnYesText}>{isDeleting ? 'Excluindo...' : 'Sim, Excluir'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -218,88 +364,81 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: 'bold',
   },
-  clientCard: {
+  clientListItem: {
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  cardHeader: {
+  clientListContent: {
+    flex: 1,
+    marginRight: 8,
+    gap: 4,
+  },
+  clientListTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-    paddingBottom: 10,
+    justifyContent: 'space-between',
+    gap: 8,
   },
-  avatarBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#f0f9ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#bae6fd',
-  },
-  clientName: {
-    fontSize: 14,
+  clientListName: {
+    flex: 1,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#0f172a',
-    textTransform: 'uppercase',
   },
-  clientCode: {
+  clientListCode: {
     fontSize: 11,
-    color: '#64748b',
+    fontWeight: 'bold',
+    color: '#0284c7',
     fontFamily: 'monospace',
-    marginTop: 1,
+    backgroundColor: '#f0f9ff',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
   },
-  cardBody: {
-    paddingTop: 10,
-    gap: 8,
-  },
-  contactRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  actionChip: {
+  clientListInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: '#f0f9ff',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#bae6fd',
   },
-  whatsappChip: {
-    borderColor: '#bbf7d0',
-    backgroundColor: '#f0fdf4',
-  },
-  actionChipText: {
-    color: '#0284c7',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  addressRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  addressText: {
+  clientListAddress: {
     flex: 1,
+    fontSize: 11,
     color: '#64748b',
-    fontSize: 12,
-    lineHeight: 16,
+  },
+  clientListPhone: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  whatsAppBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#f0fdf4',
+    borderColor: '#bbf7d0',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    marginLeft: 6,
+  },
+  whatsAppBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#16a34a',
   },
   fabButton: {
     position: 'absolute',
@@ -320,4 +459,126 @@ const styles = StyleSheet.create({
   fabText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
   emptyBox: { alignItems: 'center', marginTop: 60, gap: 10 },
   emptyText: { color: '#94a3b8', fontSize: 13 },
+  // ESTILOS DOS MODAIS (PADRAO SISTEMA OS)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  actionModalBox: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#0f172a',
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#334155',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  actionModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+    paddingBottom: 12,
+    marginBottom: 14,
+  },
+  actionModalTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  actionModalSubtitle: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+  actionButtonsList: {
+    gap: 10,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  actionBtnText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  actionBtnClose: {
+    marginTop: 4,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  actionBtnCloseText: {
+    color: '#94a3b8',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  // MODAL DE CONFIRMACAO
+  confirmHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  confirmTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmMessage: {
+    color: '#94a3b8',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 18,
+  },
+  confirmButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  confirmCancelNo: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  confirmBtnNoText: {
+    color: '#cbd5e1',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  confirmCancelYes: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+  },
+  confirmBtnYesText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
 });

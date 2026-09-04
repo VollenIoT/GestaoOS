@@ -3,6 +3,7 @@ import { X, Search, PlusCircle, FolderOpen, Edit3, Trash2, LogOut, Package, Chec
 import { PartViewModal } from './PartViewModal';
 import { matchesSearchTerm } from '../utils/searchUtils';
 import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 export interface Part {
   id: string;
@@ -40,6 +41,7 @@ interface PartsModalProps {
   onOpenCreatePart: () => void;
   onOpenEditPart?: (part: Part) => void;
   onDeletePart?: (partId: string) => void;
+  onAddToSales?: (part: Part) => void;
 }
 
 export const PartsModal: React.FC<PartsModalProps> = ({
@@ -52,6 +54,7 @@ export const PartsModal: React.FC<PartsModalProps> = ({
   onOpenCreatePart,
   onOpenEditPart,
   onDeletePart,
+  onAddToSales,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
@@ -112,6 +115,17 @@ export const PartsModal: React.FC<PartsModalProps> = ({
     }
   }, [isOpen]);
 
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  React.useEffect(() => {
+    if (isOpen) {
+      modalStack.register('PartsModal', () => onCloseRef.current?.());
+      return () => modalStack.unregister('PartsModal');
+    }
+  }, [isOpen]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -119,14 +133,11 @@ export const PartsModal: React.FC<PartsModalProps> = ({
         e.preventDefault();
         onClose();
         onOpenCreatePart();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onOpenCreatePart, onClose]);
 
   // Estado para arraste direto via Mouse
   const [draggingColId, setDraggingColId] = useState<string | null>(null);
@@ -680,6 +691,10 @@ export const PartsModal: React.FC<PartsModalProps> = ({
       onEdit={(p) => {
         setViewingPart(null);
         if (onOpenEditPart) onOpenEditPart(p);
+      }}
+      onAddToSales={(p) => {
+        setViewingPart(null);
+        if (onAddToSales) onAddToSales(p);
       }}
     />
     </>

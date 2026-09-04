@@ -30,6 +30,10 @@ export interface PrinterConfig {
   printQrCode: boolean;
   thermalHeaderTitle: string;
   thermalFooterMessage: string;
+  // Configuração específica para Comprovante de Venda
+  salesReceiptFormat: 'THERMAL_80MM' | 'THERMAL_58MM' | 'A4_FULL' | 'A4_HALF' | 'A5';
+  printSaleWarrantyTerms: boolean;
+  printSaleSignatureLine: boolean;
 }
 
 export const defaultPrinterConfig: PrinterConfig = {
@@ -45,6 +49,9 @@ export const defaultPrinterConfig: PrinterConfig = {
   printQrCode: true,
   thermalHeaderTitle: 'VOLLEN - ASSISTÊNCIA TÉCNICA',
   thermalFooterMessage: 'Obrigado pela preferência! Guarde este cupom.',
+  salesReceiptFormat: 'THERMAL_80MM',
+  printSaleWarrantyTerms: true,
+  printSaleSignatureLine: true,
 };
 
 const SYSTEM_PRINTERS_LIST = [
@@ -87,7 +94,7 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
   const [newPrinterName, setNewPrinterName] = useState('');
   const [isAddingPrinter, setIsAddingPrinter] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<'selecao' | 'papel' | 'cupom'>('selecao');
+  const [activeTab, setActiveTab] = useState<'selecao' | 'papel' | 'cupom' | 'vendas'>('selecao');
 
   useEffect(() => {
     if (isOpen) {
@@ -195,24 +202,18 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 select-none font-sans text-xs"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white border border-slate-300 rounded-2xl w-full max-w-2xl max-h-[92vh] shadow-2xl overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="p-3.5 bg-gradient-to-r from-sky-700 via-sky-800 to-indigo-900 text-white flex items-center justify-between shrink-0">
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 select-none font-sans text-xs">
+      <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-2xl max-h-[92vh] shadow-2xl overflow-hidden flex flex-col">
+        {/* Cabeçalho */}
+        <div className="p-3.5 bg-gradient-to-r from-sky-700 via-indigo-800 to-slate-900 text-white flex items-center justify-between shrink-0 shadow-md">
           <div className="flex items-center gap-2.5">
-            <div className="bg-white/20 p-1.5 rounded-lg">
-              <Printer className="w-5 h-5 text-white" />
+            <div className="bg-white/20 p-2 rounded-xl text-white">
+              <Printer className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-bold leading-tight">Configurações de Impressora & Impressão</h2>
-              <p className="text-[10.5px] text-sky-200">
-                Selecione a impressora padrão do sistema e configure os formatos de impressão de OS
+              <h2 className="text-sm font-bold leading-tight">Configurações de Impressão</h2>
+              <p className="text-[11px] text-sky-200">
+                Preferências de impressora, comprovante de OS, vendas (cupom/A4) e formatos térmicos
               </p>
             </div>
           </div>
@@ -221,16 +222,16 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
             onClick={onClose}
             className="text-white/80 hover:text-white p-1 rounded-lg cursor-pointer"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Abas */}
-        <div className="flex border-b border-slate-200 bg-slate-100 px-4 pt-2 gap-2 shrink-0">
+        <div className="flex items-center bg-slate-100 border-b border-slate-300 px-3 pt-2 gap-1 shrink-0 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('selecao')}
-            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
+            className={`px-3 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
               activeTab === 'selecao'
                 ? 'bg-white text-sky-700 border-t-2 border-sky-600 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
@@ -243,27 +244,40 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('papel')}
-            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
+            className={`px-3 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
               activeTab === 'papel'
                 ? 'bg-white text-sky-700 border-t-2 border-sky-600 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            Formato & Layout (A4)
+            Layout OS (A4)
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('cupom')}
-            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
+            className={`px-3 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
               activeTab === 'cupom'
                 ? 'bg-white text-sky-700 border-t-2 border-sky-600 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
             <Receipt className="w-3.5 h-3.5" />
-            Cupom Térmico (Bobina)
+            Cupom Térmico (OS)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('vendas')}
+            className={`px-3 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
+              activeTab === 'vendas'
+                ? 'bg-white text-emerald-800 border-t-2 border-emerald-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+            Comprovante de Vendas
           </button>
         </div>
 
@@ -273,41 +287,11 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
           {activeTab === 'selecao' && (
             <div className="space-y-3">
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2">
-                <label className="block font-bold text-slate-800 text-[11.5px] flex items-center justify-between">
+                <label className="block font-bold text-slate-800 text-[11.5px]">
                   <span>Selecione a Impressora Padrão:</span>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingPrinter(!isAddingPrinter)}
-                    className="text-[11px] font-bold text-sky-700 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Adicionar Outra Impressora
-                  </button>
                 </label>
 
-                {isAddingPrinter && (
-                  <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-xl space-y-2 mb-2 animate-fadeIn">
-                    <label className="block text-[10.5px] font-bold text-sky-900">
-                      Nome da Impressora / Modelo:
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newPrinterName}
-                        onChange={(e) => setNewPrinterName(e.target.value)}
-                        placeholder="Ex: Epson TM-T20X Térmica..."
-                        className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-900 focus:outline-none focus:border-sky-600"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddPrinter}
-                        className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg font-bold text-xs cursor-pointer shadow-xs"
-                      >
-                        Salvar na Lista
-                      </button>
-                    </div>
-                  </div>
-                )}
+
 
                 {/* Lista de Seleção de Impressoras com Checkmark */}
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -442,15 +426,7 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
                   />
                 </label>
 
-                <label className="flex items-center justify-between p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer">
-                  <span className="font-medium text-slate-700">Imprimir QR Code no comprovante da OS</span>
-                  <input
-                    type="checkbox"
-                    checked={config.printQrCode}
-                    onChange={(e) => setConfig({ ...config, printQrCode: e.target.checked })}
-                    className="w-4 h-4 accent-sky-600 cursor-pointer"
-                  />
-                </label>
+
               </div>
             </div>
           )}
@@ -485,6 +461,126 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
                     onChange={(e) => setConfig({ ...config, thermalFooterMessage: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-medium text-slate-900 focus:bg-white focus:outline-none focus:border-sky-600 text-xs"
                   />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ABA 4: COMPROVANTE DE VENDAS */}
+          {activeTab === 'vendas' && (
+            <div className="space-y-3">
+              <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-emerald-950 text-[11px] leading-tight flex items-start gap-2">
+                <Receipt className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Formato do Comprovante de Venda (PDV/Balcão):</strong> Escolha como o comprovante de venda de peças será emitido e impresso pelo sistema.
+                </div>
+              </div>
+
+              {/* Formato do Comprovante de Vendas */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1.5 text-xs">
+                    Modelo de Impressão da Venda:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, salesReceiptFormat: 'THERMAL_80MM' })}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        config.salesReceiptFormat === 'THERMAL_80MM'
+                          ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20 text-emerald-950 shadow-xs'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center justify-between">
+                        <span>Cupom Térmico 80mm</span>
+                        {config.salesReceiptFormat === 'THERMAL_80MM' && (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Bobina padrão de impressoras não fiscais (Bematech, Elgin, EPSON TM)</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, salesReceiptFormat: 'THERMAL_58MM' })}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        config.salesReceiptFormat === 'THERMAL_58MM'
+                          ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20 text-emerald-950 shadow-xs'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center justify-between">
+                        <span>Cupom Térmico 58mm</span>
+                        {config.salesReceiptFormat === 'THERMAL_58MM' && (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Bobina compacta para mini impressoras térmicas e terminais portáteis</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, salesReceiptFormat: 'A4_FULL' })}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        config.salesReceiptFormat === 'A4_FULL'
+                          ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20 text-emerald-950 shadow-xs'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center justify-between">
+                        <span>Folha A4 Completa</span>
+                        {config.salesReceiptFormat === 'A4_FULL' && (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Documento comercial detalhado em folha inteira A4 padrão</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ ...config, salesReceiptFormat: 'A4_HALF' })}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        config.salesReceiptFormat === 'A4_HALF'
+                          ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20 text-emerald-950 shadow-xs'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center justify-between">
+                        <span>Meia Folha (1/2 A4 / A5)</span>
+                        {config.salesReceiptFormat === 'A4_HALF' && (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1">Economia de papel: cabe 2 comprovantes ou impressão na metade da folha</p>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-200 pt-3 space-y-2">
+                  <span className="font-bold text-slate-800 block text-xs">
+                    Opções Adicionais do Comprovante de Venda:
+                  </span>
+
+                  <label className="flex items-center justify-between p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer">
+                    <span className="font-medium text-slate-700">Imprimir termo de garantia das peças (90 dias)</span>
+                    <input
+                      type="checkbox"
+                      checked={config.printSaleWarrantyTerms}
+                      onChange={(e) => setConfig({ ...config, printSaleWarrantyTerms: e.target.checked })}
+                      className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer">
+                    <span className="font-medium text-slate-700">Imprimir linha de assinatura do responsável / balcão</span>
+                    <input
+                      type="checkbox"
+                      checked={config.printSaleSignatureLine}
+                      onChange={(e) => setConfig({ ...config, printSaleSignatureLine: e.target.checked })}
+                      className="w-4 h-4 accent-emerald-600 cursor-pointer"
+                    />
+                  </label>
                 </div>
               </div>
             </div>

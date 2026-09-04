@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlusCircle, Search, FileText, Calendar, User, Calculator } from 'lucide-react';
+import { PlusCircle, Search, FileText, Calendar, User, Calculator, ShoppingCart } from 'lucide-react';
 import { VollenLogo } from './VollenLogo';
 
 interface DashboardProps {
@@ -9,6 +9,7 @@ interface DashboardProps {
   onOpenSchedule: () => void;
   onOpenClients: () => void;
   onOpenEstimates?: () => void;
+  onOpenSales?: () => void;
   hasCustomWallpaper?: boolean;
 }
 
@@ -19,6 +20,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenSchedule,
   onOpenClients,
   onOpenEstimates,
+  onOpenSales,
   hasCustomWallpaper = false,
 }) => {
   return (
@@ -48,6 +50,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <span className="text-[10px] font-bold text-white text-center leading-tight drop-shadow px-1">
             Menu OS
+          </span>
+        </button>
+
+        {/* Botão Vendas Balcão / PDV */}
+        <button
+          onClick={() => {
+            if (onOpenSales) onOpenSales();
+          }}
+          className="w-20 h-20 bg-gradient-to-br from-emerald-600 to-green-700 hover:from-emerald-500 hover:to-green-600 text-white rounded-2xl flex flex-col items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/25 transition-all hover:scale-105 active:scale-95 group cursor-pointer border border-white/20"
+          title="Vendas de Peças e PDV de Balcão (F9)"
+        >
+          <div className="p-1.5 bg-white/20 rounded-xl group-hover:scale-110 transition-transform">
+            <ShoppingCart className="w-5 h-5 text-white" />
+          </div>
+          <span className="text-[10px] font-bold text-white text-center leading-tight drop-shadow px-1">
+            Vendas
           </span>
         </button>
 

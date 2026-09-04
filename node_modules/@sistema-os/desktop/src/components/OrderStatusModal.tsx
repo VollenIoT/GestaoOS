@@ -13,6 +13,8 @@ import {
   ArrowDown,
   GripVertical,
 } from 'lucide-react';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 export interface OSStatusItem {
   id: string;
@@ -215,21 +217,22 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   const [formReturnStock, setFormReturnStock] = useState(false);
   const [formDescription, setFormDescription] = useState('');
 
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
+    if (isOpen) {
+      const handleClose = () => {
         if (isFormOpen) {
           setIsFormOpen(false);
           setEditingStatus(null);
         } else {
           onClose();
         }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+      };
+      modalStack.register('OrderStatusModal', handleClose);
+      return () => modalStack.unregister('OrderStatusModal');
+    }
   }, [isOpen, isFormOpen, onClose]);
 
   if (!isOpen) return null;
@@ -389,7 +392,14 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
       return alert('Apenas Administradores podem excluir status padrão do sistema.');
     }
 
-    if (confirm(`Deseja realmente EXCLUIR o status "${selectedStatus.name}"?`)) {
+    const ok = await dlgConfirm({
+      title: 'Excluir Status',
+      message: `Deseja realmente EXCLUIR o status "${selectedStatus.name}"?`,
+      variant: 'danger',
+      confirmText: 'Excluir',
+    });
+
+    if (ok) {
       const idToDelete = selectedStatus.id;
       const updated = statuses.filter((s) => s.id !== idToDelete);
       setStatuses(updated);
@@ -407,7 +417,13 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
     if (!isAdmin) {
       return alert('Apenas Administradores podem restaurar os status padrão do sistema.');
     }
-    if (confirm('Deseja restaurar os status padrão do sistema?')) {
+    const ok = await dlgConfirm({
+      title: 'Restaurar Padrões',
+      message: 'Deseja restaurar os status padrão do sistema?',
+      variant: 'warning',
+      confirmText: 'Restaurar',
+    });
+    if (ok) {
       setStatuses(DEFAULT_STATUSES);
       setSelectedStatusId(null);
       await saveStatusesToStorage(DEFAULT_STATUSES);

@@ -4,16 +4,76 @@ import { X, DatabaseBackup, FolderOpen, CheckCircle, HardDrive, Loader2 } from '
 interface BackupModalProps {
   isOpen: boolean;
   onClose: () => void;
+  parts?: any[];
+  services?: any[];
+  equipments?: any[];
+  clients?: any[];
+  orders?: any[];
+  estimates?: any[];
 }
 
-export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => {
-  const [selectedPath, setSelectedPath] = useState('C:\\Backups\\SistemaOS');
+export const BackupModal: React.FC<BackupModalProps> = ({
+  isOpen,
+  onClose,
+  parts = [],
+  services = [],
+  equipments = [],
+  clients = [],
+  orders = [],
+  estimates = [],
+}) => {
+  const [selectedPath, setSelectedPath] = useState(() => {
+    return localStorage.getItem('saved_backup_folder_path') || 'd:\\SistemaOS\\Backups';
+  });
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTaskText, setCurrentTaskText] = useState('');
   const [isBackupDone, setIsBackupDone] = useState(false);
   const [backupFileName, setBackupFileName] = useState('');
   const directoryInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    // Se o usuário já tiver uma pasta personalizada salva no localStorage, mantém ela
+    const saved = localStorage.getItem('saved_backup_folder_path');
+    if (saved) {
+      setSelectedPath(saved);
+      return;
+    }
+
+    // Caso contrário, detecta a pasta Desktop ou Documents do usuário se estiver rodando via Tauri
+    (async () => {
+      try {
+        if ((window as any).__TAURI_INTERNALS__) {
+          const pathApi = await import('@tauri-apps/api/path');
+          const desktop = await pathApi.desktopDir();
+          if (desktop) {
+            const defaultFolder = `${desktop}\\Backups Sistema OS`;
+            setSelectedPath(defaultFolder);
+            localStorage.setItem('saved_backup_folder_path', defaultFolder);
+            return;
+          }
+          const docs = await pathApi.documentDir();
+          if (docs) {
+            const defaultFolder = `${docs}\\Backups Sistema OS`;
+            setSelectedPath(defaultFolder);
+            localStorage.setItem('saved_backup_folder_path', defaultFolder);
+            return;
+          }
+        }
+      } catch {}
+    })();
+  }, []);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      // Sempre que o modal for aberto, reseta o estado para permitir um novo backup
+      setIsBackupDone(false);
+      setIsBackingUp(false);
+      setProgress(0);
+      setCurrentTaskText('');
+      setBackupFileName('');
+    }
+  }, [isOpen]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -31,20 +91,30 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
 
   const handleSelectDirectory = async () => {
     try {
-      if ('showDirectoryPicker' in window) {
-        // @ts-ignore - File System Access API
-        const dirHandle = await window.showDirectoryPicker();
-        if (dirHandle && dirHandle.name) {
-          setSelectedPath(`C:\\Backups\\${dirHandle.name}`);
+      if ((window as any).__TAURI_INTERNALS__) {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          title: 'Selecione a pasta para salvar o backup',
+          defaultPath: selectedPath || undefined,
+        });
+
+        if (selected && typeof selected === 'string') {
+          setSelectedPath(selected);
+          localStorage.setItem('saved_backup_folder_path', selected);
           setIsBackupDone(false);
+          return;
         }
-      } else if (directoryInputRef.current) {
-        directoryInputRef.current.click();
       }
     } catch (err) {
-      if (directoryInputRef.current) {
-        directoryInputRef.current.click();
-      }
+      console.error('Erro ao abrir diálogo nativo:', err);
+    }
+
+    // Fallback caso não esteja rodando via Tauri
+    if (directoryInputRef.current) {
+      directoryInputRef.current.value = '';
+      directoryInputRef.current.click();
     }
   };
 
@@ -55,11 +125,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
       const relativePath = firstFile.webkitRelativePath;
       const folderName = relativePath.split('/')[0] || relativePath.split('\\')[0];
 
-      if (folderName) {
-        setSelectedPath(`C:\\Backups\\${folderName}`);
-      } else {
-        setSelectedPath('C:\\Backups\\PastaSelecionada');
-      }
+      const newPath = folderName ? `C:\\Backups\\${folderName}` : 'C:\\Backups\\PastaSelecionada';
+      setSelectedPath(newPath);
+      localStorage.setItem('saved_backup_folder_path', newPath);
       setIsBackupDone(false);
     }
   };
@@ -76,7 +144,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
     setCurrentTaskText('Iniciando cópia de segurança...');
 
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const fileName = `backup_completo_sistemaos_${dateStr}.sqlite`;
+    const fileName = `backup_completo_vollen_os_${dateStr}.json`;
     setBackupFileName(fileName);
 
     // Simulação progressiva e realística de extração de todas as tabelas (OS, Clientes, Usuários, Configurações, Termos, Contas)
@@ -91,7 +159,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
 
     let currentStageIndex = 0;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (currentStageIndex < stages.length) {
         const stage = stages[currentStageIndex];
         setProgress(stage.pct);
@@ -103,11 +171,26 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
         setIsBackupDone(true);
         localStorage.setItem('last_backup_date', new Date().toISOString());
 
-        // 1. Coleta todas as configurações, cadastros e dados do aplicativo
+        // 1. Coleta 100% de todas as chaves e dados armazenados no sistema
+        const allLocalStorageSnapshot: Record<string, any> = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key) {
+            const raw = localStorage.getItem(key);
+            try {
+              allLocalStorageSnapshot[key] = raw ? JSON.parse(raw) : raw;
+            } catch {
+              allLocalStorageSnapshot[key] = raw;
+            }
+          }
+        }
+
         const fullBackupPayload = {
           system: 'Vollen - Gestão de OS',
-          version: '1.0.0',
-          backupDate: new Date().toISOString(),
+          version: '3.0.0',
+          createdAt: new Date().toISOString(),
+          // Snapshot completo e irrestrito de todo o banco de dados e cadastros do sistema
+          storage: allLocalStorageSnapshot,
           clients: (() => {
             try {
               const saved = localStorage.getItem('vollen_clients');
@@ -139,32 +222,99 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
             } catch { return null; }
           })(),
           estimates: (() => {
+            if (Array.isArray(estimates) && estimates.length > 0) return estimates;
             try {
               const saved = localStorage.getItem('vollen_estimates');
               return saved ? JSON.parse(saved) : [];
             } catch { return []; }
           })(),
           parts: (() => {
-            try {
-              const saved = localStorage.getItem('vollen_parts');
-              return saved ? JSON.parse(saved) : null;
-            } catch { return null; }
+            let list = (Array.isArray(parts) && parts.length > 0) ? parts : null;
+            if (!list) {
+              try {
+                const saved = localStorage.getItem('vollen_parts_stock') || localStorage.getItem('vollen_parts');
+                if (saved) list = JSON.parse(saved);
+              } catch { list = []; }
+            }
+            if (Array.isArray(list)) {
+              return list.map((p: any) => ({
+                ...p,
+                stockQuantity: Number(p.stockQuantity !== undefined ? p.stockQuantity : 0),
+                minStock: Number(p.minStock !== undefined ? p.minStock : 0),
+              }));
+            }
+            return [];
           })(),
           services: (() => {
+            if (Array.isArray(services) && services.length > 0) return services;
             try {
               const saved = localStorage.getItem('vollen_services');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
+          customServices: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_custom_services');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
           equipments: (() => {
             try {
-              const saved = localStorage.getItem('system_equipments');
+              const saved = localStorage.getItem('system_equipments') || localStorage.getItem('vollen_equipments');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
           technicians: (() => {
             try {
               const saved = localStorage.getItem('vollen_technicians');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          osStatuses: (() => {
+            try {
+              const saved = localStorage.getItem('custom_os_statuses_v3') || localStorage.getItem('system_os_statuses');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          cashMovements: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_cash_movements') || localStorage.getItem('cash_transactions');
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })(),
+          currentCashSession: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_current_cash_session') || localStorage.getItem('daily_cash_register_status');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          cashRegistersHistory: (() => {
+            try {
+              const saved = localStorage.getItem('cash_registers_history');
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })(),
+          cashRegisterColumns: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_cash_register_columns');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          salesHistory: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_sales_history');
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })(),
+          savedCarts: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_saved_carts');
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })(),
+          activeCart: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_active_cart') || localStorage.getItem('vollen_local_sales_cart');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
@@ -175,7 +325,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
           wallpaperScale: localStorage.getItem('system_wallpaper_scale') || '100',
           osPreferences: (() => {
             try {
-              const saved = localStorage.getItem('vollen_os_preferences');
+              const saved = localStorage.getItem('vollen_os_preferences') || localStorage.getItem('vollen_os_general_config') || localStorage.getItem('vollen_os_config');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          osGeneralConfig: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_os_general_config') || localStorage.getItem('vollen_os_config');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
@@ -188,22 +344,77 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
           })(),
           warrantyTerms: (() => {
             try {
-              const saved = localStorage.getItem('warranty_config');
+              const saved = localStorage.getItem('warranty_config') || localStorage.getItem('vollen_warranty_terms');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
+          auditLogs: (() => {
+            try {
+              const saved = localStorage.getItem('audit_logs');
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })(),
         };
 
-        // 2. Cria arquivo de download com backup 100% completo (OS, Clientes, Configurações, Orçamentos)
-        const blob = new Blob([JSON.stringify(fullBackupPayload, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `backup_completo_vollen_os_${dateStr}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        // 2. Grava o arquivo fisicamente na pasta de destino escolhida no Windows via comando Tauri Rust
+        const backupJsonString = JSON.stringify(fullBackupPayload, null, 2);
+        let savedDirectly = false;
+        let finalSavedPath = '';
+
+        if ((window as any).__TAURI_INTERNALS__) {
+          try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            
+            // Normaliza separador de pasta do Windows
+            const sep = selectedPath.includes('/') ? '/' : '\\';
+            const cleanPath = selectedPath.endsWith(sep) ? selectedPath.slice(0, -1) : selectedPath;
+            const fullFilePath = `${cleanPath}${sep}backup_completo_vollen_os_${dateStr}.json`;
+
+            await invoke('save_backup_file', {
+              path: fullFilePath,
+              content: backupJsonString,
+            });
+
+            savedDirectly = true;
+            finalSavedPath = fullFilePath;
+          } catch (rustErr) {
+            console.warn('Erro na gravação direta via Rust, abrindo diálogo nativo de Salvar Como:', rustErr);
+            try {
+              const { save } = await import('@tauri-apps/plugin-dialog');
+              const { invoke } = await import('@tauri-apps/api/core');
+              const targetPath = await save({
+                defaultPath: `backup_completo_vollen_os_${dateStr}.json`,
+                filters: [{ name: 'Arquivo de Backup JSON', extensions: ['json'] }],
+                title: 'Salvar Arquivo de Backup Completo',
+              });
+
+              if (targetPath) {
+                await invoke('save_backup_file', {
+                  path: targetPath,
+                  content: backupJsonString,
+                });
+                savedDirectly = true;
+                finalSavedPath = targetPath;
+                setSelectedPath(targetPath);
+              }
+            } catch (dialogErr) {
+              console.warn('Erro ao salvar via diálogo Save:', dialogErr);
+            }
+          }
+        }
+
+        // 3. Fallback web via download pelo navegador se não foi salvo nativamente
+        if (!savedDirectly) {
+          const blob = new Blob([backupJsonString], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `backup_completo_vollen_os_${dateStr}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
       }
     }, 400);
   };
@@ -309,33 +520,45 @@ export const BackupModal: React.FC<BackupModalProps> = ({ isOpen, onClose }) => 
           )}
         </div>
 
-        {/* Rodapé com Botão Criar Backup */}
+        {/* Rodapé com Botão Criar Backup / Fechar */}
         <div className="p-4 bg-slate-200 border-t border-slate-300 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={isBackingUp}
-            className="px-4 py-2 bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-slate-700 font-bold rounded-xl cursor-pointer"
-          >
-            Cancelar
-          </button>
+          {isBackupDone && !isBackingUp ? (
+            <button
+              onClick={onClose}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-8 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer transition-all active:scale-95 text-xs"
+            >
+              <CheckCircle className="w-4.5 h-4.5" />
+              Fechar
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onClose}
+                disabled={isBackingUp}
+                className="px-4 py-2 bg-slate-300 hover:bg-slate-400 disabled:opacity-40 text-slate-700 font-bold rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
 
-          <button
-            onClick={handleExecuteBackup}
-            disabled={isBackingUp}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer transition-all active:scale-95"
-          >
-            {isBackingUp ? (
-              <>
-                <Loader2 className="w-4.5 h-4.5 animate-spin" />
-                Criando Backup ({progress}%)...
-              </>
-            ) : (
-              <>
-                <DatabaseBackup className="w-4.5 h-4.5" />
-                Criar Backup
-              </>
-            )}
-          </button>
+              <button
+                onClick={handleExecuteBackup}
+                disabled={isBackingUp}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer transition-all active:scale-95"
+              >
+                {isBackingUp ? (
+                  <>
+                    <Loader2 className="w-4.5 h-4.5 animate-spin" />
+                    Criando Backup ({progress}%)...
+                  </>
+                ) : (
+                  <>
+                    <DatabaseBackup className="w-4.5 h-4.5" />
+                    Criar Backup
+                  </>
+                )}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

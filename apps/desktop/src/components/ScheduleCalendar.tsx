@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Calendar as CalendarIcon, Clock, MapPin, User, Phone, CheckCircle, ChevronLeft, ChevronRight, X, Edit3, Trash2, ExternalLink } from 'lucide-react';
 import { StatusBadge } from './Dashboard';
 import { ConfirmModal } from './ConfirmModal';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 interface ScheduleCalendarProps {
   isOpen?: boolean;
@@ -31,6 +33,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   const [endDate, setEndDate] = useState<string>('');
   const [editingVisit, setEditingVisit] = useState<any | null>(null);
   const [deletingVisitId, setDeletingVisitId] = useState<string | null>(null);
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
 
   const [editForm, setEditForm] = useState({
     date: '',
@@ -39,22 +42,20 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
     notes: '',
   });
 
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
   React.useEffect(() => {
     if (!isOpen || !onClose) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        if (editingVisit) {
-          setEditingVisit(null);
-        } else if (deletingVisitId) {
-          setDeletingVisitId(null);
-        } else {
-          onClose();
-        }
+    const handleClose = () => {
+      if (editingVisit) {
+        setEditingVisit(null);
+      } else if (deletingVisitId) {
+        setDeletingVisitId(null);
+      } else {
+        onClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    modalStack.register('ScheduleCalendar', handleClose);
+    return () => modalStack.unregister('ScheduleCalendar');
   }, [isOpen, onClose, editingVisit, deletingVisitId]);
 
   // Enriquece cada visita com os dados da OS correspondente caso não venha embutido
@@ -297,8 +298,14 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
                   notes: visit.notes || '',
                 });
               }}
-              onDelete={() => {
-                if (confirm('Deseja realmente excluir este agendamento?')) {
+              onDelete={async () => {
+                const ok = await dlgConfirm({
+                  title: 'Excluir Agendamento',
+                  message: 'Deseja realmente excluir este agendamento?',
+                  variant: 'danger',
+                  confirmText: 'Excluir',
+                });
+                if (ok) {
                   if (onDeleteVisit) onDeleteVisit(visit.id);
                 }
               }}

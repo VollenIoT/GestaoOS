@@ -168,18 +168,20 @@ export const DailyVisitsScreen: React.FC<DailyVisitsScreenProps> = ({
                                 ? item.date || item.scheduledDate
                                 : `${item.date || item.scheduledDate}T12:00:00`
                             ).toLocaleDateString('pt-BR')
-                          : 'Sem data'}
+                          : 'Sem data definida'}
                       </Text>
                     </View>
-                    <Text style={styles.periodText}>
-                      {item.period === 'MANHA'
-                        ? 'Manhã (08h - 12h)'
-                        : item.period === 'TARDE'
-                        ? 'Tarde (13h - 18h)'
-                        : item.period && item.period.includes(':')
-                        ? `${item.period}h`
-                        : item.period || 'Comercial'}
-                    </Text>
+                    {item.period ? (
+                      <Text style={styles.periodText}>
+                        {item.period === 'MANHA'
+                          ? 'Manhã (08h - 12h)'
+                          : item.period === 'TARDE'
+                          ? 'Tarde (13h - 18h)'
+                          : item.period && item.period.includes(':')
+                          ? `${item.period}h`
+                          : item.period}
+                      </Text>
+                    ) : null}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
                     <Text style={[styles.actionText, isUnread && { color: '#0284c7', fontWeight: 'bold' }]}>

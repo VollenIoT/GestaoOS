@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, Edit3, User, Phone, Package, Wrench, Cpu, FileCheck, MessageSquare, FileText, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { fetchAddressByCep } from '../services/api';
 import { ClientOrdersHistoryModal } from './ClientOrdersHistoryModal';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -58,6 +60,27 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     serialNumber: '',
   });
 
+  // Formata números decimais monetários automaticamente (ex: 50 -> 50,00 | 50.5 -> 50,50)
+  const formatCurrencyInput = (val: string): string => {
+    if (!val || !val.trim()) return '';
+    const clean = val.trim().replace('R$', '').trim();
+    if (!clean) return '';
+    // Substitui vírgula por ponto para parse
+    const num = parseFloat(clean.replace(',', '.'));
+    if (isNaN(num)) return val;
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  // Formata percentuais automaticamente (ex: 30 -> 30,00 ou 30)
+  const formatPercentInput = (val: string): string => {
+    if (!val || !val.trim()) return '';
+    const clean = val.trim().replace('%', '').trim();
+    if (!clean) return '';
+    const num = parseFloat(clean.replace(',', '.'));
+    if (isNaN(num)) return val;
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   const [serviceForm, setServiceForm] = useState({
     id: '',
     code: '',
@@ -91,6 +114,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
   const [clientData, setClientData] = useState<{
     id: string;
+    code: string;
     name: string;
     phone: string;
     whatsapp: string;
@@ -106,8 +130,11 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     state: string;
     reference: string;
     email: string;
+    additionalNotes: string;
+    isTechnician: boolean;
   }>({
     id: '',
+    code: '',
     name: '',
     phone: '',
     whatsapp: '',
@@ -123,6 +150,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     state: '',
     reference: '',
     email: '',
+    additionalNotes: '',
+    isTechnician: false,
   });
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -142,10 +171,18 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const submitBtnRef = useRef<HTMLButtonElement>(null);
   const [isDirty, setIsDirty] = useState(false);
 
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
+
   // Manipulador para fechar cadastro com confirmação de alterações
-  const handleRequestClose = () => {
+  const handleRequestClose = async () => {
     if (isDirty) {
-      if (confirm('Você alterou informações deste formulário que ainda não foram salvas. Deseja realmente sair sem salvar?')) {
+      const ok = await dlgConfirm({
+        title: 'Sair sem Salvar?',
+        message: 'Você alterou informações deste formulário que ainda não foram salvas. Deseja realmente sair sem salvar?',
+        variant: 'warning',
+        confirmText: 'Sair sem salvar',
+      });
+      if (ok) {
         setIsDirty(false);
         onClose();
       }
@@ -154,18 +191,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     }
   };
 
-  // Suporte à tecla ESC
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleRequestClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isDirty]);
+    if (isOpen) {
+      modalStack.register('RegisterModal', handleRequestClose);
+      return () => modalStack.unregister('RegisterModal');
+    }
+  }, [isOpen, isDirty, onClose]);
 
   useEffect(() => {
     setIsDirty(false);
@@ -257,6 +289,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     if (clientDataToView) {
       setClientData({
         id: clientDataToView.id || '',
+        code: clientDataToView.code || '',
         name: clientDataToView.name || '',
         phone: clientDataToView.phone || '',
         whatsapp: clientDataToView.whatsapp || '',
@@ -274,11 +307,14 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         state: clientDataToView.state || '',
         reference: clientDataToView.reference || '',
         email: clientDataToView.email || '',
+        additionalNotes: clientDataToView.additionalNotes || clientDataToView.notes || '',
+        isTechnician: Boolean(clientDataToView.isTechnician),
       });
       setIsEditing(!clientDataToView || startInEditMode);
     } else {
       setClientData({
         id: '',
+        code: '',
         name: '',
         phone: '',
         whatsapp: '',
@@ -294,6 +330,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         state: '',
         reference: '',
         email: '',
+        additionalNotes: '',
+        isTechnician: false,
       });
       setIsEditing(true);
     }
@@ -394,7 +432,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     }
 
     const savedClient = {
-      id: clientData.id || String(Date.now()),
+      id: clientData.id || clientDataToView?.id || String(Date.now()),
+      code: clientData.code || clientDataToView?.code || nextClientCode,
       name: clientData.name.trim(),
       phone: clientData.phone.trim(),
       whatsapp: clientData.whatsapp.trim(),
@@ -412,6 +451,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       state: clientData.state.trim(),
       reference: clientData.reference.trim(),
       email: clientData.email.trim(),
+      additionalNotes: clientData.additionalNotes ? clientData.additionalNotes.trim() : '',
+      isTechnician: Boolean(clientData.isTechnician),
     };
 
     if (onSaveClient) {
@@ -530,9 +571,9 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         )}
 
         {/* Formulário do Cliente */}
-        <div className="p-4 overflow-hidden flex-1 bg-slate-50 text-xs flex flex-col justify-between">
+        <div className="p-4 overflow-hidden flex-1 bg-slate-50 text-xs flex flex-col justify-between min-h-0">
           {successMessage && (
-            <div className="mb-2 p-2 bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold rounded-xl flex items-center gap-2 shadow-sm text-xs">
+            <div className="mb-2 p-2 bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold rounded-xl flex items-center gap-2 shadow-sm text-xs shrink-0">
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
               {successMessage}
             </div>
@@ -545,7 +586,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                 handleSubmitClient(e);
               }}
               onChange={() => setIsDirty(true)}
-              className="flex-1 flex flex-col justify-between"
+              className="flex-1 flex flex-col justify-between overflow-hidden"
             >
               <div className="flex items-center justify-between pb-2 border-b border-slate-200 gap-2 shrink-0">
                 <span className="font-bold text-slate-700 flex items-center gap-2">
@@ -591,7 +632,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 my-2">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 my-2 overflow-y-auto pr-1 flex-1 max-h-[60vh]">
                 <div className="col-span-3">
                   <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
                     Nome Completo do Cliente <span className="text-red-500 font-extrabold">*</span>
@@ -885,6 +926,38 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
                   />
                 </div>
+
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Informações Adicionais / Observações</label>
+                  <textarea
+                    rows={2}
+                    disabled={!isEditing}
+                    value={clientData.additionalNotes}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, additionalNotes: e.target.value });
+                      setIsDirty(true);
+                    }}
+                    placeholder="Digite observações sobre o cliente, particularidades, preferências..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-sky-600 resize-none text-xs"
+                  />
+                </div>
+
+                <div className="col-span-3 pt-1 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isTechnicianCheck"
+                    disabled={!isEditing}
+                    checked={clientData.isTechnician}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, isTechnician: e.target.checked });
+                      setIsDirty(true);
+                    }}
+                    className="w-4 h-4 text-sky-600 rounded border-slate-300 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <label htmlFor="isTechnicianCheck" className="font-semibold text-slate-700 text-xs cursor-pointer select-none">
+                    Cliente Técnico / Terceirizado <span className="text-slate-400 font-normal">(Aplica o preço de técnico cadastrado nas Peças ao selecionar este cliente em Vendas)</span>
+                  </label>
+                </div>
               </div>
 
               {isEditing && (
@@ -1038,6 +1111,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                           finalPrice: newFinal,
                         });
                       }}
+                      onBlur={(e) => {
+                        const formatted = formatCurrencyInput(e.target.value);
+                        setPartData((prev) => ({ ...prev, costPrice: formatted }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const formatted = formatCurrencyInput(partData.costPrice);
+                          setPartData((prev) => ({ ...prev, costPrice: formatted }));
+                        }
+                      }}
                       placeholder="0,00"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
                     />
@@ -1066,6 +1149,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                           finalPrice: newFinal,
                         });
                       }}
+                      onBlur={(e) => {
+                        const formatted = formatPercentInput(e.target.value);
+                        setPartData((prev) => ({ ...prev, profitMarginPercent: formatted }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const formatted = formatPercentInput(partData.profitMarginPercent);
+                          setPartData((prev) => ({ ...prev, profitMarginPercent: formatted }));
+                        }
+                      }}
                       placeholder="50%"
                       className="w-full bg-indigo-50 border border-indigo-300 rounded-lg px-2.5 py-1 text-indigo-950 font-bold focus:outline-none focus:border-indigo-600 font-mono text-xs"
                     />
@@ -1078,6 +1171,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                       type="text"
                       value={partData.techPrice}
                       onChange={(e) => setPartData({ ...partData, techPrice: e.target.value })}
+                      onBlur={(e) => {
+                        const formatted = formatCurrencyInput(e.target.value);
+                        setPartData((prev) => ({ ...prev, techPrice: formatted }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const formatted = formatCurrencyInput(partData.techPrice);
+                          setPartData((prev) => ({ ...prev, techPrice: formatted }));
+                        }
+                      }}
                       placeholder="0,00"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
                     />
@@ -1108,6 +1211,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                           finalPrice: newFinal,
                           profitMarginPercent: newPct,
                         });
+                      }}
+                      onBlur={(e) => {
+                        const formatted = formatCurrencyInput(e.target.value);
+                        setPartData((prev) => ({ ...prev, finalPrice: formatted }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const formatted = formatCurrencyInput(partData.finalPrice);
+                          setPartData((prev) => ({ ...prev, finalPrice: formatted }));
+                        }
                       }}
                       placeholder="0,00"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
@@ -1316,6 +1429,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     type="text"
                     value={serviceForm.price}
                     onChange={(e) => setServiceForm({ ...serviceForm, price: e.target.value })}
+                    onBlur={(e) => {
+                      const formatted = formatCurrencyInput(e.target.value);
+                      setServiceForm((prev) => ({ ...prev, price: formatted }));
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const formatted = formatCurrencyInput(serviceForm.price);
+                        setServiceForm((prev) => ({ ...prev, price: formatted }));
+                      }
+                    }}
                     placeholder="R$ 0,00"
                     className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-900 font-bold focus:outline-none focus:border-sky-600 text-xs shadow-xs"
                   />

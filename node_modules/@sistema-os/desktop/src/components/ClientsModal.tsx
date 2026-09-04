@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, Search, PlusCircle, FolderOpen, Edit3, Trash2, LogOut, User, Check } from 'lucide-react';
 
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 interface ColumnConfig {
   id: string;
@@ -81,6 +83,19 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
 
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
+
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  React.useEffect(() => {
+    if (isOpen) {
+      modalStack.register('ClientsModal', () => onCloseRef.current?.());
+      return () => modalStack.unregister('ClientsModal');
+    }
+  }, [isOpen]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -88,14 +103,11 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
         e.preventDefault();
         onClose();
         onOpenCreateClient();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onOpenCreateClient, onClose]);
 
   // Estado para arraste direto via Mouse
   const [draggingColId, setDraggingColId] = useState<string | null>(null);
@@ -271,9 +283,15 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     }
   };
 
-  const handleDeleteClient = () => {
+  const handleDeleteClient = async () => {
     if (!selectedClient) return alert('Por favor, selecione um cliente na tabela.');
-    if (confirm(`Deseja realmente EXCLUIR o cadastro do cliente "${selectedClient.name}"?`)) {
+    const ok = await dlgConfirm({
+      title: 'Excluir Cliente',
+      message: `Deseja realmente EXCLUIR o cadastro do cliente "${selectedClient.name}"?`,
+      variant: 'danger',
+      confirmText: 'Excluir',
+    });
+    if (ok) {
       if (onDeleteClient) {
         onDeleteClient(selectedClient.id);
       }

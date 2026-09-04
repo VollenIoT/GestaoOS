@@ -27,8 +27,10 @@ import {
   AlertTriangle,
   Navigation,
   MapPin,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
-import { getCurrentUserMobile } from '../services/api';
+import { getCurrentUserMobile, fetchOSPreferencesMobile, subscribeOSPreferencesMobile } from '../services/api';
 
 interface OrdersListScreenProps {
   orders: any[];
@@ -49,36 +51,55 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
 }) => {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'ABERTA' | 'FINALIZADA'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<'ABERTA' | 'FINALIZADA' | 'ALL'>('ABERTA');
+  const [showCancelled, setShowCancelled] = useState(false);
   const [routeOrderSelected, setRouteOrderSelected] = useState<any | null>(null);
+  const [osPreferences, setOsPreferences] = useState<any>(null);
 
   useEffect(() => {
     getCurrentUserMobile().then(setCurrentUser);
+    fetchOSPreferencesMobile().then((p) => {
+      if (p) setOsPreferences(p);
+    });
+    const unsub = subscribeOSPreferencesMobile((p) => {
+      if (p) setOsPreferences(p);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
   }, []);
 
+  const roleUpper = (currentUser?.role || '').toUpperCase();
   const isAdmin = Boolean(
-    currentUser?.role === 'Admin' ||
     currentUser?.isAdmin ||
-    currentUser?.username === 'admin'
+    roleUpper === 'ADMIN' ||
+    (currentUser?.username || '').toLowerCase() === 'admin'
   );
 
   const filteredOrders = orders.filter((o) => {
-    // Se não for Admin, restringe a visualização estritamente para as OS com o nome dele
+    // Se não for Admin, restringe a visualização para as OS atribuídas a ele ou sem técnico atribuído
     if (!isAdmin && currentUser) {
-      const orderTech = (o.technician || o.technicianName || '').toLowerCase().trim();
+      const orderTech = (o.technician || o.technicianName || o.assignedTechnician || '').toLowerCase().trim();
       const techId = String(o.technicianId || '').toLowerCase().trim();
       const myName = (currentUser.name || '').toLowerCase().trim();
       const myUser = (currentUser.username || '').toLowerCase().trim();
       const myId = String(currentUser.id || '').toLowerCase().trim();
 
-      if (!orderTech && !techId) return false;
+      if (orderTech || techId) {
+        const isMine =
+          (orderTech && myName && orderTech === myName) ||
+          (orderTech && myUser && orderTech === myUser) ||
+          (techId && myId && techId === myId);
 
-      const isMine =
-        (orderTech && myName && orderTech === myName) ||
-        (orderTech && myUser && orderTech === myUser) ||
-        (techId && myId && techId === myId);
+        if (!isMine) return false;
+      }
+    }
 
-      if (!isMine) return false;
+    const stUpper = (o.status || '').toUpperCase();
+    const isCancelled = stUpper === 'CANCELADA';
+    // Se showCancelled estiver falso, oculta as ordens canceladas em todas as abas
+    if (isCancelled && !showCancelled) {
+      return false;
     }
 
     const term = searchTerm.toLowerCase().trim();
@@ -108,16 +129,21 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
       (o.equipment?.model || '').toLowerCase().includes(term) ||
       (o.technician || o.technicianName || '').toLowerCase().includes(term);
 
-    const isFinished = (o.status || '').toUpperCase() === 'FINALIZADA' || (o.status || '').toUpperCase() === 'CONCLUIDA' || (o.status || '').toUpperCase() === 'GARANTIA_FINALIZADA' || (o.status || '').toUpperCase() === 'GARANTIA/FINALIZADA';
+    const isFinished = stUpper === 'FINALIZADA' || stUpper === 'CONCLUIDA' || stUpper === 'GARANTIA_FINALIZADA' || stUpper === 'GARANTIA/FINALIZADA';
     if (activeFilter === 'ABERTA') {
-      return matchesSearch && !isFinished;
+      return matchesSearch && !isFinished && !isCancelled;
     }
     if (activeFilter === 'FINALIZADA') {
       return matchesSearch && isFinished;
     }
     return matchesSearch;
   }).filter((o, idx, arr) => {
-    // Deduplicação estrita por ID e Código
+    // Deduplicação estrita: se for código temporário de espera (ex: 'Aguardando...'), deduplica APENAS por ID
+    const isTempCode = !o.code || String(o.code).includes('Aguardando');
+    if (isTempCode) {
+      return arr.findIndex((item) => item.id === o.id) === idx;
+    }
+    // Para OS com número oficial definitivo, deduplica por ID ou Código
     return arr.findIndex((item) => (item.id && item.id === o.id) || (item.code && item.code === o.code)) === idx;
   }).sort((a, b) => {
     // Ordenação: a última OS gerada deve aparecer no topo
@@ -149,19 +175,39 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
     }
 
     const clientName = order.client?.name || 'Cliente';
+    const osCode = order.code || 'OS';
+    const equipName = [order.equipment?.type, order.equipment?.brand, order.equipment?.model].filter(Boolean).join(' ') || 'Equipamento';
+    const stName = (order.status || 'Em Andamento').replace(/_/g, ' ');
+    const totalValStr = `R$ ${formatCurrency(order.totalAmount || 0)}`;
+
+    const isLiberado = order.status === 'APARELHO_LIBERADO' || order.status === 'LIBERADO';
+    const templateToUse = isLiberado
+      ? (osPreferences?.whatsappMessageStatusLiberado || `Olá, *{cliente}*! Tudo bem?\n\nPassando para informar que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) está com status *APARELHO LIBERADO* e o aparelho já se encontra pronto e disponível para retirada!\n\n💰 *Valor Total:* {valor_total}\n\nFicamos à disposição!`)
+      : (osPreferences?.whatsappMessageStatusGeneral || `Olá, *{cliente}*! Tudo bem?\n\nInformamos que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) teve o status atualizado para: *{status}*.\n\n💰 *Valor Total:* {valor_total}\n\nQualquer dúvida estamos à disposição!`);
+
+    const readyMessage = templateToUse
+      .replace(/{cliente}/gi, clientName)
+      .replace(/{numero_os}/gi, osCode)
+      .replace(/{equipamento}/gi, equipName)
+      .replace(/{status}/gi, stName)
+      .replace(/{valor_total}/gi, totalValStr);
 
     Alert.alert(
-      `Contato — ${clientName}`,
-      order.client?.whatsapp || order.client?.phone || phone,
+      `WhatsApp — ${clientName}`,
+      'Escolha como deseja abrir a conversa:',
       [
         {
-          text: '📞 Ligar',
-          onPress: () => Linking.openURL(`tel:${phone}`),
+          text: '💬 Mensagem Pronta',
+          onPress: () => {
+            const url = `https://wa.me/55${phone}?text=${encodeURIComponent(readyMessage)}`;
+            Linking.openURL(url).catch(() => {
+              Alert.alert('Erro', 'Não foi possível abrir o WhatsApp.');
+            });
+          },
         },
         {
-          text: '💬 WhatsApp',
+          text: '✉️ Conversa em Branco',
           onPress: () => {
-            // Abre o chat do WhatsApp diretamente sem mensagem pré-definida
             const url = `https://wa.me/55${phone}`;
             Linking.openURL(url).catch(() => {
               Alert.alert('Erro', 'Não foi possível abrir o WhatsApp.');
@@ -256,15 +302,6 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
 
         <View style={styles.filterTabs}>
           <TouchableOpacity
-            style={[styles.filterTab, activeFilter === 'ALL' && styles.filterTabActive]}
-            onPress={() => setActiveFilter('ALL')}
-          >
-            <Text style={[styles.filterTabText, activeFilter === 'ALL' && styles.filterTabTextActive]}>
-              Todas ({orders.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
             style={[styles.filterTab, activeFilter === 'ABERTA' && styles.filterTabActive]}
             onPress={() => setActiveFilter('ABERTA')}
           >
@@ -281,6 +318,38 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
               Finalizadas
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterTab, activeFilter === 'ALL' && styles.filterTabActive]}
+            onPress={() => setActiveFilter('ALL')}
+          >
+            <Text style={[styles.filterTabText, activeFilter === 'ALL' && styles.filterTabTextActive]}>
+              Todas ({orders.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              styles.filterTabCancel,
+              showCancelled && styles.filterTabCancelActive,
+            ]}
+            onPress={() => setShowCancelled(!showCancelled)}
+          >
+            {showCancelled ? (
+              <Eye size={12} color="#ffffff" style={{ marginRight: 4 }} />
+            ) : (
+              <EyeOff size={12} color="#dc2626" style={{ marginRight: 4 }} />
+            )}
+            <Text
+              style={[
+                styles.filterTabText,
+                { color: showCancelled ? '#ffffff' : '#dc2626' },
+              ]}
+            >
+              {showCancelled ? 'Canceladas' : 'Canceladas'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -289,6 +358,8 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
         data={filteredOrders}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 14, paddingBottom: 80 }}
+        refreshing={false}
+        onRefresh={onRefresh}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <FileText size={42} color="#334155" />
@@ -303,7 +374,16 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
             delayLongPress={500}
           >
             <View style={styles.orderCardHeader}>
-              <Text style={styles.orderCode}>{item.code}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.orderCode, String(item.code).includes('Aguardando') && { color: '#f59e0b', fontSize: 13 }]}>
+                  {item.code || 'Aguardando Rede...'}
+                </Text>
+                {String(item.code).includes('Aguardando') && (
+                  <View style={{ backgroundColor: '#fef3c7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#fde68a' }}>
+                    <Text style={{ color: '#b45309', fontSize: 9, fontWeight: 'bold' }}>⏳ MODO ESPERA</Text>
+                  </View>
+                )}
+              </View>
               {(() => {
                 const st = (item.status || 'ABERTA').toUpperCase();
                 const bg =
@@ -633,6 +713,16 @@ const styles = StyleSheet.create({
   filterTabActive: {
     backgroundColor: '#0284c7',
     borderColor: '#0284c7',
+  },
+  filterTabCancel: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  filterTabCancelActive: {
+    backgroundColor: '#dc2626',
+    borderColor: '#dc2626',
   },
   filterTabText: { fontSize: 11, fontWeight: 'bold', color: '#64748b' },
   filterTabTextActive: { color: '#ffffff' },

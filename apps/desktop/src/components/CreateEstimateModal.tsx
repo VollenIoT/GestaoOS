@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Calculator,
@@ -21,8 +21,14 @@ import {
   ArrowRight,
   Sparkles,
   Phone,
+  ChevronDown,
+  History,
+  RefreshCw,
+  ShoppingBag,
 } from 'lucide-react';
 import { CompanyData, defaultCompanyData } from './CompanyModal';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 export interface EstimateItemPart {
   code?: string;
@@ -69,6 +75,8 @@ export interface Estimate {
   totalAmount: number;
   paymentConditions?: string;
   notes?: string;
+  convertedToOSId?: string;
+  auditHistory?: Array<{ date: string; user?: string; changes?: string[]; description?: string }>;
 }
 
 interface CreateEstimateModalProps {
@@ -87,9 +95,11 @@ interface CreateEstimateModalProps {
   onOpenClientsModal?: () => void;
   onOpenPartsModal?: () => void;
   onOpenServicesModal?: () => void;
+  onOpenSalesModal?: (estimateDraft?: Estimate) => void;
   selectedClient?: any;
   selectedPart?: any;
   selectedService?: any;
+  currentUser?: any;
 }
 
 export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
@@ -104,6 +114,7 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   selectedClient,
   selectedPart,
   selectedService,
+  currentUser,
   onClose,
   onSaveEstimate,
   onDeleteEstimate,
@@ -111,6 +122,7 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   onOpenClientsModal,
   onOpenPartsModal,
   onOpenServicesModal,
+  onOpenSalesModal,
 }) => {
   const [clientData, setClientData] = useState({
     id: '',
@@ -139,6 +151,13 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   const [paymentConditions, setPaymentConditions] = useState('À Vista / PIX / Cartão');
   const [notes, setNotes] = useState('');
 
+  // Histórico de Alterações / Auditoria
+  const [auditHistory, setAuditHistory] = useState<Array<{ date: string; user?: string; changes?: string[]; description?: string }>>([]);
+  const [isAuditHistoryModalOpen, setIsAuditHistoryModalOpen] = useState(false);
+  const [showPrintMenu, setShowPrintMenu] = useState(false);
+  const [saveToastVisible, setSaveToastVisible] = useState(false);
+  const printMenuRef = useRef<HTMLDivElement>(null);
+
   // Tabelas de Peças e Serviços
   const [partsList, setPartsList] = useState<EstimateItemPart[]>([]);
   const [servicesList, setServicesList] = useState<EstimateItemService[]>([]);
@@ -148,22 +167,27 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   const [newPartName, setNewPartName] = useState('');
   const [newPartQty, setNewPartQty] = useState<number>(1);
   const [newPartPrice, setNewPartPrice] = useState('');
+  const [showPartDropdown, setShowPartDropdown] = useState(false);
 
   // Inputs para novo serviço
   const [newServiceName, setNewServiceName] = useState('');
   const [newServicePrice, setNewServicePrice] = useState('');
+  const [showServiceDropdown, setShowServiceDropdown] = useState(false);
 
   // Valores financeiros
   const [travelCost, setTravelCost] = useState('0,00');
   const [discountCost, setDiscountCost] = useState('0,00');
 
-  // Helper para formatar moeda brasileira ao perder o foco (blur ou enter)
+  // Helper para formatar moeda brasileira
   const formatCurrencyOnBlur = (val: string): string => {
-    if (!val || val.trim() === '') return '0,00';
-    let clean = val.trim().replace(/\s/g, '').replace('R$', '');
-    if (clean.endsWith(',') || clean.endsWith('.')) clean = clean.slice(0, -1);
-    if (clean.includes(',')) clean = clean.replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(clean);
+    if (!val || String(val).trim() === '') return '0,00';
+    let str = String(val).trim().replace(/\s/g, '').replace('R$', '');
+
+    // Se possui vírgula (formato brasileiro Ex: 1.250,50 ou 50,00)
+    if (str.includes(',')) {
+      str = str.replace(/\./g, '').replace(',', '.');
+    }
+    const num = parseFloat(str);
     if (isNaN(num)) return '0,00';
     return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
@@ -189,6 +213,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (printMenuRef.current && !printMenuRef.current.contains(event.target as Node)) {
+        setShowPrintMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Próximo código sequencial de Orçamento
   const nextEstimateCode = useMemo(() => {
     let maxNum = 0;
@@ -208,16 +242,23 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       if (estimateToEdit) {
+        // Busca os dados atualizados do cliente no cadastro do sistema se existir
+        const currentClient = (clientsList || []).find(
+          (c: any) =>
+            (estimateToEdit.client?.id && c.id === estimateToEdit.client.id) ||
+            (estimateToEdit.client?.name && c.name && c.name.trim().toLowerCase() === estimateToEdit.client.name.trim().toLowerCase())
+        );
+
         setClientData({
-          id: estimateToEdit.client?.id || '',
-          name: estimateToEdit.client?.name || '',
-          phone: estimateToEdit.client?.phone || '',
-          whatsapp: estimateToEdit.client?.whatsapp || '',
-          address: estimateToEdit.client?.address || '',
-          number: estimateToEdit.client?.number || '',
-          neighborhood: estimateToEdit.client?.neighborhood || '',
-          city: estimateToEdit.client?.city || '',
-          state: estimateToEdit.client?.state || '',
+          id: currentClient?.id || estimateToEdit.client?.id || '',
+          name: currentClient?.name || estimateToEdit.client?.name || '',
+          phone: currentClient?.phone || currentClient?.telephone || estimateToEdit.client?.phone || '',
+          whatsapp: currentClient?.whatsapp || currentClient?.phone || estimateToEdit.client?.whatsapp || '',
+          address: currentClient?.address || estimateToEdit.client?.address || '',
+          number: currentClient?.number || estimateToEdit.client?.number || '',
+          neighborhood: currentClient?.neighborhood || estimateToEdit.client?.neighborhood || '',
+          city: currentClient?.city || estimateToEdit.client?.city || '',
+          state: currentClient?.state || estimateToEdit.client?.state || '',
         });
         setEquipmentData({
           type: estimateToEdit.equipment?.type || '',
@@ -236,8 +277,10 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
         setServicesList(estimateToEdit.servicesList || []);
         setTravelCost(estimateToEdit.travelCost || '0,00');
         setDiscountCost(estimateToEdit.discountCost || '0,00');
+        setAuditHistory(estimateToEdit.auditHistory && Array.isArray(estimateToEdit.auditHistory) ? estimateToEdit.auditHistory : []);
       } else {
         // Modo Novo Orçamento
+        setAuditHistory([]);
         setClientData({
           id: '',
           name: '',
@@ -294,36 +337,72 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     if (selectedPart && isOpen) {
       const code = selectedPart.code || '';
       const name = selectedPart.name || '';
-      const rawPrice = selectedPart.salePrice || selectedPart.price || '0,00';
-      const priceStr = typeof rawPrice === 'number' ? rawPrice.toFixed(2).replace('.', ',') : String(rawPrice).replace('R$', '').trim();
-      
-      setPartsList((prev) => [
-        ...prev,
-        {
-          code,
-          name,
-          qty: 1,
-          price: priceStr || '0,00',
-        },
-      ]);
+
+      const currentClient = (clientsList || []).find(
+        (c: any) =>
+          (clientData.id && c.id === clientData.id) ||
+          (clientData.name && c.name && c.name.trim().toLowerCase() === clientData.name.trim().toLowerCase())
+      );
+      const isTech = Boolean(currentClient?.isTechnician);
+
+      const rawPrice = (isTech && selectedPart.techPrice)
+        ? selectedPart.techPrice
+        : (selectedPart.finalPrice || selectedPart.price || selectedPart.salePrice || selectedPart.unitPrice || selectedPart.techPrice || '0,00');
+
+      const priceStr = formatCurrencyOnBlur(String(rawPrice));
+
+      setPartsList((prev) => {
+        const existingIdx = prev.findIndex(
+          (p) =>
+            (code && p.code && p.code.trim().toLowerCase() === code.trim().toLowerCase()) ||
+            (p.name.trim().toLowerCase() === name.trim().toLowerCase())
+        );
+
+        if (existingIdx >= 0) {
+          return prev.map((p, idx) =>
+            idx === existingIdx
+              ? { ...p, qty: (p.qty || 1) + 1, price: priceStr || p.price }
+              : p
+          );
+        }
+
+        return [
+          ...prev,
+          {
+            code,
+            name: name.toUpperCase(),
+            qty: 1,
+            price: priceStr || '0,00',
+          },
+        ];
+      });
       setIsDirty(true);
     }
-  }, [selectedPart, isOpen]);
+  }, [selectedPart, isOpen, clientData.id, clientData.name, clientsList]);
 
   // Se um serviço for selecionado externamente pela Central de Serviços
   useEffect(() => {
     if (selectedService && isOpen) {
-      const name = selectedService.name || '';
+      const name = selectedService.name || selectedService.description || '';
       const rawPrice = selectedService.price || '0,00';
       const priceStr = typeof rawPrice === 'number' ? rawPrice.toFixed(2).replace('.', ',') : String(rawPrice).replace('R$', '').trim();
 
-      setServicesList((prev) => [
-        ...prev,
-        {
-          name,
-          price: priceStr || '0,00',
-        },
-      ]);
+      setServicesList((prev) => {
+        const existingIdx = prev.findIndex(
+          (s) => s.name.trim().toLowerCase() === name.trim().toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          // Já existe na lista: atualiza o preço se necessário sem duplicar linha
+          return prev.map((s, idx) => (idx === existingIdx ? { ...s, price: priceStr || s.price } : s));
+        }
+        return [
+          ...prev,
+          {
+            name,
+            price: priceStr || '0,00',
+          },
+        ];
+      });
       setIsDirty(true);
     }
   }, [selectedService, isOpen]);
@@ -336,58 +415,130 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
 
     const list: Array<{ type: string; brand: string; model: string; serialNumber: string }> = [];
     const safeOrders = Array.isArray(allOrders) ? allOrders : [];
-    safeOrders.forEach((o) => {
-      if (!o) return;
-      const matchId = clientId && (o.clientId === clientId || o.client?.id === clientId);
-      const matchName = clientNameLower && o.client?.name?.trim().toLowerCase() === clientNameLower;
-      if (!matchId && !matchName) return;
 
-      const eq = o.equipment;
-      if (!eq) return;
-      const type = (eq.type || '').trim();
-      const brand = (eq.brand || '').trim();
-      const model = (eq.model || '').trim();
-      const serialNumber = (eq.serialNumber || '').trim();
-      if (!type && !brand && !model) return;
+    safeOrders.forEach((order) => {
+      const ordClientId = order.clientId || (order.client && order.client.id);
+      const ordClientName = (order.clientName || (order.client && order.client.name) || '').trim().toLowerCase();
 
-      const key = `${type}|${brand}|${model}|${serialNumber}`.toUpperCase();
-      if (!list.some((item) => `${item.type}|${item.brand}|${item.model}|${item.serialNumber}`.toUpperCase() === key)) {
-        list.push({ type, brand, model, serialNumber });
+      const match = (clientId && ordClientId === clientId) || (clientNameLower && ordClientName === clientNameLower);
+
+      if (match && order.equipment) {
+        const eq = order.equipment;
+        const exists = list.some(
+          (item) =>
+            item.type === (eq.type || '') &&
+            item.brand === (eq.brand || '') &&
+            item.model === (eq.model || '') &&
+            item.serialNumber === (eq.serialNumber || '')
+        );
+        if (!exists && (eq.type || eq.brand || eq.model || eq.serialNumber)) {
+          list.push({
+            type: eq.type || '',
+            brand: eq.brand || '',
+            model: eq.model || '',
+            serialNumber: eq.serialNumber || '',
+          });
+        }
       }
     });
+
     return list;
-  }, [allOrders, clientData.id, clientData.name]);
+  }, [clientData.id, clientData.name, allOrders]);
 
-  // Cálculos Financeiros
-  const totalPartsVal = partsList.reduce((acc, p) => {
-    const val = parseFloat((p.price || '0').replace('.', '').replace(',', '.')) || 0;
-    return acc + val * (p.qty || 1);
-  }, 0);
-
+  // Totais de Peças e Serviços
   const totalServicesVal = servicesList.reduce((acc, s) => {
     const val = parseFloat((s.price || '0').replace('.', '').replace(',', '.')) || 0;
     return acc + val;
+  }, 0);
+
+  const totalPartsVal = partsList.reduce((acc, p) => {
+    const unitVal = parseFloat((p.price || '0').replace('.', '').replace(',', '.')) || 0;
+    const qty = p.qty || 1;
+    return acc + unitVal * qty;
   }, 0);
 
   const travelVal = parseFloat((travelCost || '0').replace('.', '').replace(',', '.')) || 0;
   const discountVal = parseFloat((discountCost || '0').replace('.', '').replace(',', '.')) || 0;
   const grandTotalVal = Math.max(0, totalPartsVal + totalServicesVal + travelVal - discountVal);
 
-  // Adicionar Peça
-  const handleAddPart = () => {
-    if (!newPartName.trim()) {
-      return alert('Informe o nome ou descrição da peça.');
+  // Adicionar Peça (Apenas Peças Cadastradas)
+  const handleAddPart = (customPrice?: string) => {
+    if (isReadOnly) {
+      dlgAlert({
+        title: 'Orçamento Aprovado',
+        message: 'Não é possível alterar os itens de um orçamento APROVADO.\n\nPara modificar as peças ou serviços, clique em "Reabrir para Edição" no rodapé.',
+        variant: 'warning',
+      });
+      return;
     }
-    const cleanPrice = newPartPrice.trim() || '0,00';
-    setPartsList((prev) => [
-      ...prev,
-      {
-        code: newPartCode.trim(),
-        name: newPartName.trim(),
-        qty: Math.max(1, newPartQty),
-        price: cleanPrice,
-      },
-    ]);
+    if (!newPartName.trim()) {
+      return alert('Por favor, selecione uma peça cadastrada.');
+    }
+
+    const cleanCode = newPartCode.trim().toLowerCase();
+    const cleanName = newPartName.trim().toLowerCase();
+
+    // Verifica se a peça existe no cadastro do sistema (por código ou por nome)
+    const registeredPart = (availableParts || []).find((p) => {
+      if (!p) return false;
+      const cMatch = cleanCode && p.code && String(p.code).trim().toLowerCase() === cleanCode;
+      const nMatch = p.name && String(p.name).trim().toLowerCase() === cleanName;
+      return cMatch || nMatch;
+    });
+
+    if (!registeredPart) {
+      dlgAlert({
+        title: 'Peça Não Cadastrada',
+        message: `A peça "${newPartName}" não está cadastrada no estoque do sistema.\n\nSelecione uma peça cadastrada na lista de busca ou adicione a peça na Central de Peças.`,
+        variant: 'warning',
+      });
+      return;
+    }
+
+    const currentClient = (clientsList || []).find(
+      (c: any) =>
+        (clientData.id && c.id === clientData.id) ||
+        (clientData.name && c.name && c.name.trim().toLowerCase() === clientData.name.trim().toLowerCase())
+    );
+    const isTechClient = Boolean(currentClient?.isTechnician);
+
+    let defaultPartPrice = registeredPart.finalPrice || registeredPart.price || registeredPart.salePrice || registeredPart.unitPrice || '0,00';
+    if (isTechClient && registeredPart.techPrice) {
+      defaultPartPrice = registeredPart.techPrice;
+    }
+
+    const rawPrice = customPrice !== undefined 
+      ? customPrice 
+      : (newPartPrice && newPartPrice !== '0,00' ? newPartPrice : defaultPartPrice);
+    const cleanPrice = formatCurrencyOnBlur(String(rawPrice));
+    const addQty = Math.max(1, newPartQty);
+
+    setPartsList((prev) => {
+      const existingIdx = prev.findIndex(
+        (p) =>
+          (cleanCode && p.code && p.code.trim().toLowerCase() === cleanCode.toLowerCase()) ||
+          (p.name.trim().toLowerCase() === cleanName.toLowerCase())
+      );
+
+      if (existingIdx >= 0) {
+        return prev.map((p, idx) =>
+          idx === existingIdx
+            ? { ...p, qty: (p.qty || 1) + addQty, price: cleanPrice || p.price }
+            : p
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          code: cleanCode,
+          name: cleanName,
+          qty: addQty,
+          price: cleanPrice,
+        },
+      ];
+    });
+
     setNewPartCode('');
     setNewPartName('');
     setNewPartQty(1);
@@ -395,30 +546,118 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     setIsDirty(true);
   };
 
+  const handleSearchPartByCode = (codeToSearch: string) => {
+    const trimmedCode = codeToSearch.trim();
+    if (!trimmedCode || !availableParts || availableParts.length === 0) return;
+
+    const foundPart = availableParts.find(
+      (p) =>
+        (p.code && p.code.toLowerCase() === trimmedCode.toLowerCase()) ||
+        (p.id && String(p.id) === trimmedCode)
+    );
+
+    if (foundPart) {
+      setNewPartCode(foundPart.code || '');
+      setNewPartName(foundPart.name || '');
+      setNewPartPrice(foundPart.finalPrice || foundPart.price || '0,00');
+    }
+  };
+
   // Adicionar Serviço
-  const handleAddService = () => {
+  const handleAddService = (customPrice?: string) => {
+    if (isReadOnly) {
+      dlgAlert({
+        title: 'Orçamento Aprovado',
+        message: 'Não é possível alterar os itens de um orçamento APROVADO.\n\nPara modificar as peças ou serviços, clique em "Reabrir para Edição" no rodapé.',
+        variant: 'warning',
+      });
+      return;
+    }
     if (!newServiceName.trim()) {
       return alert('Informe a descrição do serviço.');
     }
-    const cleanPrice = newServicePrice.trim() || '0,00';
-    setServicesList((prev) => [
-      ...prev,
-      {
-        name: newServiceName.trim(),
-        price: cleanPrice,
-      },
-    ]);
+    const cleanName = newServiceName.trim();
+    const priceToUse = customPrice !== undefined ? customPrice : newServicePrice;
+    const cleanPrice = formatCurrencyOnBlur(priceToUse);
+
+    setServicesList((prev) => {
+      const existingIdx = prev.findIndex(
+        (s) => s.name.trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existingIdx >= 0) {
+        return prev.map((s, idx) =>
+          idx === existingIdx ? { ...s, price: cleanPrice || s.price } : s
+        );
+      }
+      return [
+        ...prev,
+        {
+          name: cleanName,
+          price: cleanPrice,
+        },
+      ];
+    });
+
     setNewServiceName('');
     setNewServicePrice('');
     setIsDirty(true);
   };
 
   // Salvar Orçamento
-  const handleSave = (e?: React.FormEvent) => {
+  const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!clientData.name.trim()) {
       return alert('Por favor, informe o nome do cliente.');
     }
+
+    const nowFormatted = new Date().toLocaleString('pt-BR');
+    const responsibleUser = currentUser?.name || 'Atendente';
+
+    // Monta detalhes da alteração/salvamento para a auditoria
+    const changeSummary: string[] = [];
+    if (!estimateToEdit) {
+      changeSummary.push(`Criação do Orçamento #${activeCode}`);
+      changeSummary.push(`Status Inicial: ${estimateStatus}`);
+      changeSummary.push(`Cliente: ${clientData.name}`);
+      changeSummary.push(`Equipamento: ${equipmentData.type || 'Nenhum'} ${equipmentData.brand || ''}`);
+      if (partsList.length > 0) {
+        const partsDesc = partsList.map((p) => `${p.qty || 1}x ${p.name} (R$ ${p.price})`).join(', ');
+        changeSummary.push(`Peças Iniciais (${partsList.length}): ${partsDesc}`);
+      } else {
+        changeSummary.push(`Peças Iniciais: Nenhuma`);
+      }
+      if (servicesList.length > 0) {
+        const servDesc = servicesList.map((s) => `${s.name} (R$ ${s.price})`).join(', ');
+        changeSummary.push(`Serviços Iniciais (${servicesList.length}): ${servDesc}`);
+      } else {
+        changeSummary.push(`Serviços Iniciais: Nenhum`);
+      }
+      changeSummary.push(`Valor Total: R$ ${grandTotalVal.toFixed(2).replace('.', ',')}`);
+    } else {
+      changeSummary.push(`Edição/Atualização do orçamento #${activeCode}`);
+      changeSummary.push(`Status: ${estimateStatus}`);
+      if (partsList.length > 0) {
+        const partsDesc = partsList.map((p) => `${p.qty || 1}x ${p.name} (R$ ${p.price})`).join(', ');
+        changeSummary.push(`Peças Lançadas (${partsList.length}): ${partsDesc}`);
+      } else {
+        changeSummary.push(`Peças Lançadas: Nenhuma`);
+      }
+      if (servicesList.length > 0) {
+        const servDesc = servicesList.map((s) => `${s.name} (R$ ${s.price})`).join(', ');
+        changeSummary.push(`Serviços Lançados (${servicesList.length}): ${servDesc}`);
+      } else {
+        changeSummary.push(`Serviços Lançados: Nenhum`);
+      }
+      changeSummary.push(`Valor Total: R$ ${grandTotalVal.toFixed(2).replace('.', ',')}`);
+    }
+
+    const newAuditEntry = {
+      date: nowFormatted,
+      user: responsibleUser,
+      changes: changeSummary,
+    };
+
+    const updatedAuditHistory = [newAuditEntry, ...(auditHistory || [])];
 
     const estimateObj: Estimate = {
       id: estimateToEdit?.id || `est-${Date.now()}`,
@@ -437,21 +676,45 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
       totalAmount: grandTotalVal,
       paymentConditions,
       notes,
+      auditHistory: updatedAuditHistory,
     };
 
     onSaveEstimate(estimateObj);
     setIsDirty(false);
-    onClose();
+    setSaveToastVisible(true);
+    setTimeout(() => setSaveToastVisible(false), 3000);
   };
 
-  // Gerar OS a partir deste orçamento
-  const handleGenerateOS = () => {
-    const currentEstimate: Estimate = {
+  // Reabrir orçamento APROVADO para edição
+  const handleReopenEstimate = async () => {
+    const ok = await dlgConfirm({
+      title: 'Reabrir Orçamento para Edição',
+      message: 'Este orçamento está marcado como APROVADO.\n\nPara editá-lo, o status será alterado para PENDENTE. Deseja continuar?',
+      variant: 'warning',
+      confirmText: 'Reabrir para Edição',
+      cancelText: 'Cancelar',
+    });
+
+    if (!ok) return;
+
+    const nowFormatted = new Date().toLocaleString('pt-BR');
+    const responsibleUser = currentUser?.name || 'Atendente';
+    const newAuditEntry = {
+      date: nowFormatted,
+      user: responsibleUser,
+      changes: ['Orçamento APROVADO foi reaberto para edição (Status alterado para PENDENTE)'],
+    };
+
+    const updatedAuditHistory = [newAuditEntry, ...(auditHistory || [])];
+    setEstimateStatus('PENDENTE');
+    setAuditHistory(updatedAuditHistory);
+
+    const updatedEstimate: Estimate = {
       id: estimateToEdit?.id || `est-${Date.now()}`,
       code: activeCode,
       createdAt: estimateToEdit?.createdAt || new Date().toISOString().split('T')[0],
       validityDays,
-      status: 'APROVADO',
+      status: 'PENDENTE',
       client: { ...clientData },
       equipment: { ...equipmentData },
       problemDescription,
@@ -463,6 +726,161 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
       totalAmount: grandTotalVal,
       paymentConditions,
       notes,
+      auditHistory: updatedAuditHistory,
+    };
+
+    onSaveEstimate(updatedEstimate);
+    setIsDirty(false);
+  };
+
+  const isReadOnly = estimateToEdit?.status === 'APROVADO';
+
+  // Gerar Venda a partir das peças do orçamento
+  const handleGenerateSale = async () => {
+    if (!partsList || partsList.length === 0) {
+      await dlgAlert({
+        title: 'Nenhuma Peça no Orçamento',
+        message: 'Este orçamento não possui peças para gerar uma venda no balcão.',
+        variant: 'warning',
+      });
+      return;
+    }
+
+    // Prepara os itens do carrinho de vendas
+    const saleItems = partsList.map((p) => {
+      const unitVal = parseFloat((p.price || '0').replace(/\./g, '').replace(',', '.')) || 0;
+      const qtyVal = p.qty || 1;
+
+      // Procura peça no cadastro se existir para associar partId e dados completos
+      const matchedPart = (availableParts || []).find(
+        (ap: any) =>
+          (p.code && ap.code && String(ap.code).trim().toLowerCase() === String(p.code).trim().toLowerCase()) ||
+          (ap.name && String(ap.name).trim().toLowerCase() === String(p.name).trim().toLowerCase())
+      );
+
+      const partId = matchedPart?.id || `part-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const costPrice = parseFloat(String(matchedPart?.costPrice || '0').replace(',', '.')) || 0;
+
+      return {
+        partId,
+        code: p.code || matchedPart?.code || '',
+        name: (p.name || matchedPart?.name || 'Peça').toUpperCase(),
+        application: matchedPart?.application || matchedPart?.applications || '',
+        unitPrice: unitVal,
+        qty: qtyVal,
+        subtotal: unitVal * qtyVal,
+        costPrice,
+      };
+    });
+
+    try {
+      localStorage.setItem('vollen_local_sales_cart', JSON.stringify(saleItems));
+
+      if (clientData && (clientData.name || clientData.id)) {
+        const matchedClient = (clientsList || []).find(
+          (c: any) =>
+            (clientData.id && c.id === clientData.id) ||
+            (clientData.name && String(c.name).trim().toLowerCase() === String(clientData.name).trim().toLowerCase())
+        );
+
+        const clientToSave = {
+          id: matchedClient?.id || clientData.id || '',
+          name: matchedClient?.name || clientData.name || '',
+          phone: matchedClient?.phone || matchedClient?.telephone || clientData.phone || clientData.whatsapp || '',
+          doc: matchedClient?.document || matchedClient?.cpfCnpj || matchedClient?.doc || matchedClient?.cpf || matchedClient?.cnpj || '',
+        };
+
+        localStorage.setItem('vollen_local_sales_client', JSON.stringify(clientToSave));
+      } else {
+        localStorage.removeItem('vollen_local_sales_client');
+      }
+
+      if (estimateToEdit?.id) {
+        localStorage.setItem('vollen_origin_estimate_id', estimateToEdit.id);
+      } else {
+        localStorage.removeItem('vollen_origin_estimate_id');
+      }
+    } catch (e) {
+      console.error('Erro ao salvar carrinho de vendas:', e);
+    }
+
+    // Prepara o snapshot do orçamento atual caso a venda não seja concluída
+    const currentEstimate: Estimate = {
+      id: estimateToEdit?.id || `est-${Date.now()}`,
+      code: activeCode,
+      createdAt: estimateToEdit?.createdAt || new Date().toISOString().split('T')[0],
+      validityDays,
+      status: estimateToEdit?.status || 'PENDENTE',
+      client: { ...clientData },
+      equipment: { ...equipmentData },
+      problemDescription,
+      technicalReport,
+      partsList: [...partsList],
+      servicesList: [...servicesList],
+      travelCost,
+      discountCost,
+      totalAmount: grandTotalVal,
+      paymentConditions,
+      notes,
+      auditHistory: [...auditHistory],
+    };
+
+    if (onOpenSalesModal) {
+      onOpenSalesModal(currentEstimate);
+    }
+  };
+  const handleGenerateOS = async () => {
+    if (estimateToEdit?.status === 'APROVADO') {
+      await dlgAlert({
+        title: 'Orçamento Já Convertido',
+        message: `O orçamento #${activeCode} já foi aprovado e convertido em Ordem de Serviço anteriormente.\n\nNão é possível gerar outra OS a partir deste mesmo orçamento.`,
+        variant: 'warning',
+      });
+      return;
+    }
+
+    // Validação: Para virar OS, o cliente precisa estar cadastrado no banco de clientes
+    let matchedClientId = clientData.id;
+    if (!matchedClientId && clientData.name?.trim()) {
+      const searchName = clientData.name.trim().toLowerCase();
+      const existingClient = (clientsList || []).find(
+        (c: any) => c && c.name && c.name.trim().toLowerCase() === searchName
+      );
+      if (existingClient && existingClient.id) {
+        matchedClientId = existingClient.id;
+      }
+    }
+
+    if (!matchedClientId) {
+      await dlgAlert({
+        title: 'Cliente Não Cadastrado',
+        message: 'Para gerar uma Ordem de Serviço a partir deste orçamento, o cliente deve estar cadastrado no sistema.\n\nPor favor, cadastre ou selecione um cliente existente na Central de Clientes.',
+        variant: 'warning',
+      });
+      if (onOpenClientsModal) {
+        onOpenClientsModal();
+      }
+      return;
+    }
+
+    const currentEstimate: Estimate = {
+      id: estimateToEdit?.id || `est-${Date.now()}`,
+      code: activeCode,
+      createdAt: estimateToEdit?.createdAt || new Date().toISOString().split('T')[0],
+      validityDays,
+      status: estimateToEdit?.status || 'PENDENTE',
+      client: { ...clientData, id: matchedClientId },
+      equipment: { ...equipmentData },
+      problemDescription,
+      technicalReport,
+      partsList: [...partsList],
+      servicesList: [...servicesList],
+      travelCost,
+      discountCost,
+      totalAmount: grandTotalVal,
+      paymentConditions,
+      notes,
+      auditHistory: [...auditHistory],
     };
 
     onGenerateOSFromEstimate(currentEstimate);
@@ -511,7 +929,35 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     window.open(`https://api.whatsapp.com/send?phone=${phoneWithDDI}&text=${encoded}`, '_blank');
   };
 
-  // Atalhos Globais no Modal (F2: Salvar, Ctrl+P: Imprimir, Esc: Fechar)
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
+
+  const handleSafeClose = async () => {
+    if (isDirty) {
+      const ok = await dlgConfirm({
+        title: 'Descartar Alterações',
+        message: 'Você fez alterações neste orçamento. Deseja realmente sair e descartar as alterações não salvas?',
+        variant: 'warning',
+        confirmText: 'Sair sem Salvar',
+        cancelText: 'Continuar Editando',
+      });
+      if (!ok) return;
+    }
+    setIsDirty(false);
+    onClose();
+  };
+
+  const handleSafeCloseRef = useRef(handleSafeClose);
+  handleSafeCloseRef.current = handleSafeClose;
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('CreateEstimateModal', () => handleSafeCloseRef.current?.());
+      return () => modalStack.unregister('CreateEstimateModal');
+    }
+  }, [isOpen]);
+
+  // Atalhos Globais no Modal (F2: Salvar, Ctrl+P: Imprimir)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -522,9 +968,6 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         handlePrintEstimate('A4');
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
 
@@ -532,272 +975,313 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, clientData, equipmentData, partsList, servicesList, validityDays, estimateStatus, travelCost, discountCost, problemDescription, technicalReport, paymentConditions, notes]);
 
-  // Imprimir Orçamento (A4 ou Térmica 80mm)
+  // Imprimir Orçamento (A4 ou Térmica 80mm) - Suporta window.open e Fallback via iframe invisível (imune a bloqueador de pop-ups)
   const handlePrintEstimate = (layout: 'A4' | 'THERMAL_80MM' = 'A4') => {
-    const printWindow = window.open('', '_blank', 'width=900,height=750');
-    if (!printWindow) {
-      return alert('Não foi possível abrir a janela de impressão. Desbloqueie pop-ups.');
-    }
-
     const todayStr = new Date().toLocaleDateString('pt-BR');
 
-    if (layout === 'THERMAL_80MM') {
-      printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8"/>
-            <title>Orçamento #${activeCode} - Térmica</title>
-            <style>
-              @page { size: 80mm auto; margin: 2mm; }
-              body {
-                font-family: 'Courier New', monospace, sans-serif;
-                font-size: 11px;
-                color: #000;
-                margin: 0;
-                padding: 4px;
-                line-height: 1.25;
-                width: 76mm;
-              }
-              .center { text-align: center; }
-              .bold { font-weight: bold; }
-              .title { font-size: 14px; font-weight: bold; margin: 3px 0; }
-              .divider { border-bottom: 1px dashed #000; margin: 4px 0; }
-              .row { display: flex; justify-content: space-between; }
-              .item-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
-              .item-table th { text-align: left; border-bottom: 1px solid #000; font-size: 10px; }
-              .item-table td { font-size: 10.5px; padding: 2px 0; }
-              .total-box { font-size: 13px; font-weight: bold; margin-top: 6px; text-align: right; }
-              .footer { text-align: center; font-size: 9.5px; margin-top: 10px; }
-            </style>
-          </head>
-          <body>
-            <div class="center bold title">${companyInfo.name || 'ASSISTÊNCIA TÉCNICA'}</div>
-            <div class="center" style="font-size: 10px;">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `| Whats: ${companyInfo.whatsapp}` : ''}</div>
-            <div class="center" style="font-size: 9.5px;">${companyInfo.address || ''}</div>
-            <div class="divider"></div>
+    const generateHtml = () => {
+      if (layout === 'THERMAL_80MM') {
+        return `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8"/>
+              <title>Orçamento #${activeCode} - Térmica</title>
+              <style>
+                @page { size: 80mm auto; margin: 2mm; }
+                body {
+                  font-family: 'Courier New', monospace, sans-serif;
+                  font-size: 11px;
+                  color: #000;
+                  margin: 0;
+                  padding: 4px;
+                  line-height: 1.25;
+                  width: 76mm;
+                }
+                .center { text-align: center; }
+                .bold { font-weight: bold; }
+                .title { font-size: 14px; font-weight: bold; margin: 3px 0; }
+                .divider { border-bottom: 1px dashed #000; margin: 4px 0; }
+                .row { display: flex; justify-content: space-between; }
+                .item-table { width: 100%; border-collapse: collapse; margin: 4px 0; }
+                .item-table th { text-align: left; border-bottom: 1px solid #000; font-size: 10px; }
+                .item-table td { font-size: 10.5px; padding: 2px 0; }
+                .total-box { font-size: 13px; font-weight: bold; margin-top: 6px; text-align: right; }
+                .footer { text-align: center; font-size: 9.5px; margin-top: 10px; }
+              </style>
+            </head>
+            <body>
+              <div class="center bold title">${companyInfo.name || 'ASSISTÊNCIA TÉCNICA'}</div>
+              <div class="center" style="font-size: 10px;">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `| Whats: ${companyInfo.whatsapp}` : ''}</div>
+              <div class="center" style="font-size: 9.5px;">${companyInfo.address || ''}</div>
+              <div class="divider"></div>
 
-            <div class="center bold" style="font-size: 12px;">ORÇAMENTO #${activeCode}</div>
-            <div class="row" style="font-size: 10px;">
-              <span>Emissão: ${todayStr}</span>
-              <span>Validade: ${validityDays} dias</span>
-            </div>
-            <div class="divider"></div>
+              <div class="center bold" style="font-size: 12px;">ORÇAMENTO #${activeCode}</div>
+              <div class="row" style="font-size: 10px;">
+                <span>Emissão: ${todayStr}</span>
+                <span>Validade: ${validityDays} dias</span>
+              </div>
+              <div class="divider"></div>
 
-            <div><strong>CLIENTE:</strong> ${clientData.name}</div>
-            ${clientData.phone ? `<div><strong>Tel:</strong> ${clientData.phone}</div>` : ''}
-            <div><strong>APARELHO:</strong> ${equipmentData.type || ''} ${equipmentData.brand || ''} ${equipmentData.model || ''}</div>
-            ${problemDescription ? `<div><strong>Defeito:</strong> ${problemDescription}</div>` : ''}
-            <div class="divider"></div>
+              <div><strong>CLIENTE:</strong> ${clientData.name}</div>
+              ${clientData.phone ? `<div><strong>Tel:</strong> ${clientData.phone}</div>` : ''}
+              <div><strong>APARELHO:</strong> ${equipmentData.type || ''} ${equipmentData.brand || ''} ${equipmentData.model || ''}</div>
+              ${problemDescription ? `<div><strong>Defeito:</strong> ${problemDescription}</div>` : ''}
+              <div class="divider"></div>
 
-            ${servicesList.length > 0 ? `
-              <div class="bold" style="font-size: 10px;">SERVIÇOS:</div>
-              <table class="item-table">
-                ${servicesList.map(s => `
-                  <tr>
-                    <td>${s.name}</td>
-                    <td style="text-align: right; font-weight: bold;">R$ ${s.price}</td>
-                  </tr>
-                `).join('')}
-              </table>
-            ` : ''}
-
-            ${partsList.length > 0 ? `
-              <div class="bold" style="font-size: 10px;">PEÇAS:</div>
-              <table class="item-table">
-                ${partsList.map(p => {
-                  const uVal = parseFloat((p.price || '0').replace('.', '').replace(',', '.')) || 0;
-                  const tot = uVal * (p.qty || 1);
-                  return `
-                    <tr>
-                      <td>${p.name} (x${p.qty})</td>
-                      <td style="text-align: right; font-weight: bold;">R$ ${tot.toFixed(2).replace('.', ',')}</td>
-                    </tr>
-                  `;
-                }).join('')}
-              </table>
-            ` : ''}
-
-            <div class="divider"></div>
-            <div class="total-box">TOTAL: R$ ${grandTotalVal.toFixed(2).replace('.', ',')}</div>
-            <div style="font-size: 10px; margin-top: 3px;"><strong>Pagamento:</strong> ${paymentConditions || 'À Vista / PIX / Cartão'}</div>
-
-            <div class="footer">
-              <p>Validade de ${validityDays} dias.<br/>Agradecemos a preferência!</p>
-              <br/><br/>
-              ____________________________<br/>
-              Assinatura do Cliente
-            </div>
-
-            <script>
-              window.onload = function() { window.print(); };
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      return;
-    }
-
-    // Layout Padrão A4
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8"/>
-          <title>Orçamento Comercial #${activeCode}</title>
-          <style>
-            @page { size: A4; margin: 10mm; }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-              color: #1e293b;
-              margin: 0;
-              padding: 10px;
-              font-size: 12px;
-              line-height: 1.35;
-            }
-            .header-table { width: 100%; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
-            .company-name { font-size: 18px; font-weight: 900; color: #0f172a; text-transform: uppercase; }
-            .doc-title { font-size: 18px; font-weight: 900; text-align: right; color: #d97706; }
-            .doc-sub { font-size: 11px; text-align: right; color: #64748b; font-weight: bold; }
-            .box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; margin-bottom: 10px; background-color: #f8fafc; }
-            .box-title { font-weight: bold; font-size: 11.5px; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 6px; text-transform: uppercase; }
-            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-            th { background-color: #f1f5f9; border: 1px solid #cbd5e1; padding: 5px 6px; text-align: left; font-size: 10.5px; text-transform: uppercase; color: #334155; }
-            td { border: 1px solid #e2e8f0; padding: 4px 6px; font-size: 11px; }
-            .total-box { display: flex; justify-content: space-between; align-items: center; border: 2px solid #0f172a; padding: 10px 14px; border-radius: 6px; margin-top: 12px; background: #f8fafc; }
-            .total-val { font-size: 18px; font-weight: 900; color: #059669; font-family: monospace; }
-            .footer-terms { font-size: 10px; color: #64748b; margin-top: 14px; border: 1px dashed #cbd5e1; padding: 6px 8px; border-radius: 4px; }
-            .signatures { margin-top: 35px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; text-align: center; }
-            .sig-line { border-top: 1px solid #64748b; padding-top: 4px; font-size: 10px; font-weight: bold; color: #475569; }
-          </style>
-        </head>
-        <body>
-          <table class="header-table">
-            <tr>
-              <td style="border: none; vertical-align: top;">
-                <div class="company-name">${companyInfo.name || 'ASSISTÊNCIA TÉCNICA E SERVIÇOS'}</div>
-                <div style="font-size: 11px; color: #475569;">
-                  ${companyInfo.cnpj ? `CNPJ: ${companyInfo.cnpj} ` : ''}<br/>
-                  ${companyInfo.address ? `${companyInfo.address}, ` : ''}${companyInfo.city || ''} - ${companyInfo.state || ''}<br/>
-                  ${companyInfo.phone ? `Telefone: ${companyInfo.phone} ` : ''}${companyInfo.whatsapp ? `| WhatsApp: ${companyInfo.whatsapp}` : ''}
-                </div>
-              </td>
-              <td style="border: none; vertical-align: top; text-align: right;">
-                <div class="doc-title">ORÇAMENTO #${activeCode}</div>
-                <div class="doc-sub">DATA: ${todayStr}</div>
-                <div class="doc-sub" style="color: #b45309;">VALIDADE: ${validityDays} DIAS</div>
-              </td>
-            </tr>
-          </table>
-
-          <div class="grid-2">
-            <div class="box">
-              <div class="box-title">DADOS DO CLIENTE</div>
-              <div><strong>Nome:</strong> ${clientData.name}</div>
-              <div><strong>Telefone / WhatsApp:</strong> ${clientData.phone || ''} ${clientData.whatsapp ? `/ ${clientData.whatsapp}` : ''}</div>
-              <div><strong>Endereço:</strong> ${clientData.address || ''} ${clientData.number ? `, Nº ${clientData.number}` : ''}</div>
-              <div><strong>Bairro/Cidade:</strong> ${clientData.neighborhood || ''} - ${clientData.city || ''} / ${clientData.state || ''}</div>
-            </div>
-
-            <div class="box">
-              <div class="box-title">EQUIPAMENTO & DIAGNÓSTICO</div>
-              <div><strong>Equipamento:</strong> ${equipmentData.type || '-'} | <strong>Marca:</strong> ${equipmentData.brand || '-'}</div>
-              <div><strong>Modelo:</strong> ${equipmentData.model || '-'}</div>
-              <div><strong>Nº de Série:</strong> ${equipmentData.serialNumber || '-'}</div>
-              <div style="margin-top: 4px;"><strong>Defeito Reclamado:</strong> ${problemDescription || 'Avaliação solicitada pelo cliente'}</div>
-              ${technicalReport ? `<div style="margin-top: 2px;"><strong>Laudo/Diagnóstico:</strong> ${technicalReport}</div>` : ''}
-            </div>
-          </div>
-
-          ${servicesList.length > 0 ? `
-            <div style="margin-bottom: 12px;">
-              <div style="font-weight: bold; color: #0f172a; margin-bottom: 3px; font-size: 11.5px;">SERVIÇOS / MÃO DE OBRA:</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>DESCRIÇÃO DO SERVIÇO</th>
-                    <th style="width: 120px; text-align: right;">VALOR (R$)</th>
-                  </tr>
-                </thead>
-                <tbody>
+              ${servicesList.length > 0 ? `
+                <div class="bold" style="font-size: 10px;">SERVIÇOS:</div>
+                <table class="item-table">
                   ${servicesList.map(s => `
                     <tr>
                       <td>${s.name}</td>
                       <td style="text-align: right; font-weight: bold;">R$ ${s.price}</td>
                     </tr>
                   `).join('')}
-                </tbody>
-              </table>
-            </div>
-          ` : ''}
+                </table>
+              ` : ''}
 
-          ${partsList.length > 0 ? `
-            <div style="margin-bottom: 12px;">
-              <div style="font-weight: bold; color: #0f172a; margin-bottom: 3px; font-size: 11.5px;">PEÇAS E COMPONENTES A SUBSTITUIR:</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width: 80px;">CÓDIGO</th>
-                    <th>DESCRIÇÃO DA PEÇA</th>
-                    <th style="width: 60px; text-align: center;">QTD</th>
-                    <th style="width: 100px; text-align: right;">UNITÁRIO</th>
-                    <th style="width: 100px; text-align: right;">TOTAL</th>
-                  </tr>
-                </thead>
-                <tbody>
+              ${partsList.length > 0 ? `
+                <div class="bold" style="font-size: 10px;">PEÇAS:</div>
+                <table class="item-table">
                   ${partsList.map(p => {
                     const uVal = parseFloat((p.price || '0').replace('.', '').replace(',', '.')) || 0;
                     const tot = uVal * (p.qty || 1);
                     return `
                       <tr>
-                        <td style="font-family: monospace;">${p.code || '-'}</td>
-                        <td>${p.name}</td>
-                        <td style="text-align: center;">${p.qty}</td>
-                        <td style="text-align: right;">R$ ${p.price}</td>
+                        <td>${p.name} (x${p.qty})</td>
                         <td style="text-align: right; font-weight: bold;">R$ ${tot.toFixed(2).replace('.', ',')}</td>
                       </tr>
                     `;
                   }).join('')}
-                </tbody>
-              </table>
-            </div>
-          ` : ''}
+                </table>
+              ` : ''}
 
-          <div class="total-box">
-            <div>
-              <strong>Condições de Pagamento:</strong> ${paymentConditions || 'À Vista / Cartão / PIX'}<br/>
-              ${notes ? `<span style="font-size: 10.5px; color: #64748b;">Obs: ${notes}</span>` : ''}
-            </div>
-            <div style="text-align: right;">
-              <span style="font-size: 12px; color: #64748b;">VALOR TOTAL DO ORÇAMENTO:</span>
-              <div class="total-val">R$ ${grandTotalVal.toFixed(2).replace('.', ',')}</div>
-            </div>
-          </div>
+              <div class="divider"></div>
+              <div class="total-box">TOTAL: R$ ${grandTotalVal.toFixed(2).replace('.', ',')}</div>
+              <div style="font-size: 10px; margin-top: 3px;"><strong>Pagamento:</strong> ${paymentConditions || 'À Vista / PIX / Cartão'}</div>
 
-          <div class="footer-terms">
-            <strong>Condições Gerais:</strong> Este orçamento possui validade de ${validityDays || 10} dias a contar da data de emissão. A aprovação pode ser feita via WhatsApp ou diretamente no balcão. Após aprovação, as peças serão reservadas e o serviço executado nos prazos acordados.
-          </div>
+              <div class="footer">
+                <p>Validade de ${validityDays} dias.<br/>Agradecemos a preferência!</p>
+                <br/><br/>
+                ____________________________<br/>
+                Assinatura do Cliente
+              </div>
+            </body>
+          </html>
+        `;
+      }
 
-          <div class="signatures">
-            <div>
-              <div class="sig-line">ASSINATURA DA EMPRESA / TÉCNICO</div>
-            </div>
-            <div>
-              <div class="sig-line">APROVAÇÃO DO CLIENTE</div>
-            </div>
-          </div>
+      // Layout Padrão A4
+      return `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8"/>
+            <title>Orçamento Comercial #${activeCode}</title>
+            <style>
+              @page { size: A4; margin: 10mm; }
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                color: #1e293b;
+                margin: 0;
+                padding: 10px;
+                font-size: 12px;
+                line-height: 1.35;
+              }
+              .header-table { width: 100%; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+              .company-name { font-size: 18px; font-weight: 900; color: #0f172a; text-transform: uppercase; }
+              .company-sub { font-size: 10.5px; color: #475569; }
+              .doc-title-box { text-align: right; }
+              .doc-title { font-size: 18px; font-weight: 900; color: #d97706; }
+              .doc-num { font-size: 14px; font-weight: 700; color: #0f172a; }
+              .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+              .info-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; background-color: #f8fafc; }
+              .card-title { font-weight: bold; color: #0f172a; font-size: 11.5px; border-bottom: 1px solid #e2e8f0; padding-bottom: 3px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+              th { background-color: #f1f5f9; color: #334155; font-weight: 700; font-size: 10.5px; text-align: left; padding: 5px 6px; border: 1px solid #cbd5e1; }
+              td { padding: 5px 6px; border: 1px solid #cbd5e1; font-size: 11px; }
+              .total-box { margin-top: 10px; border: 2px solid #0f172a; border-radius: 6px; padding: 8px; background-color: #f8fafc; display: flex; justify-content: space-between; align-items: center; }
+              .total-val { font-size: 18px; font-weight: 900; color: #0f172a; }
+              .footer-terms { margin-top: 14px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; font-size: 10px; color: #475569; line-height: 1.3; }
+              .signatures { margin-top: 25px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; }
+              .sig-line { border-top: 1px solid #000; padding-top: 4px; font-size: 10px; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <table class="header-table">
+              <tr>
+                <td>
+                  <div class="company-name">${companyInfo.name || 'VOLLEN ASSISTÊNCIA TÉCNICA'}</div>
+                  <div class="company-sub">${companyInfo.cnpj ? `CNPJ: ${companyInfo.cnpj} • ` : ''}${companyInfo.address || ''}</div>
+                  <div class="company-sub">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `• WhatsApp: ${companyInfo.whatsapp}` : ''}</div>
+                </td>
+                <td class="doc-title-box">
+                  <div class="doc-title">ORÇAMENTO</div>
+                  <div class="doc-num">#${activeCode}</div>
+                  <div style="font-size: 10.5px; color: #64748b;">Emissão: ${todayStr}</div>
+                  <div style="font-size: 10.5px; color: #64748b;">Validade: ${validityDays} dias</div>
+                </td>
+              </tr>
+            </table>
 
-          <script>
-            window.onload = function() {
-              window.print();
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+            <div class="grid-2">
+              <div class="info-card">
+                <div class="card-title">DADOS DO CLIENTE</div>
+                <div><strong>Nome:</strong> ${clientData.name}</div>
+                ${clientData.phone ? `<div><strong>Telefone:</strong> ${clientData.phone}</div>` : ''}
+                ${clientData.address ? `<div><strong>Endereço:</strong> ${clientData.address}</div>` : ''}
+              </div>
+
+              <div class="info-card">
+                <div class="card-title">DADOS DO APARELHO / EQUIPAMENTO</div>
+                <div><strong>Aparelho:</strong> ${equipmentData.type || ''} ${equipmentData.brand || ''} ${equipmentData.model ? `(Mod: ${equipmentData.model})` : ''}</div>
+                ${equipmentData.serialNumber ? `<div><strong>Nº de Série:</strong> ${equipmentData.serialNumber}</div>` : ''}
+                ${problemDescription ? `<div style="margin-top: 2px;"><strong>Defeito Declarado:</strong> ${problemDescription}</div>` : ''}
+                ${technicalReport ? `<div style="margin-top: 2px;"><strong>Laudo/Diagnóstico:</strong> ${technicalReport}</div>` : ''}
+              </div>
+            </div>
+
+            ${servicesList.length > 0 ? `
+              <div style="margin-bottom: 12px;">
+                <div style="font-weight: bold; color: #0f172a; margin-bottom: 3px; font-size: 11.5px;">SERVIÇOS / MÃO DE OBRA:</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>DESCRIÇÃO DO SERVIÇO</th>
+                      <th style="width: 120px; text-align: right;">VALOR (R$)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${servicesList.map(s => `
+                      <tr>
+                        <td>${s.name}</td>
+                        <td style="text-align: right; font-weight: bold;">R$ ${s.price}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
+
+            ${partsList.length > 0 ? `
+              <div style="margin-bottom: 12px;">
+                <div style="font-weight: bold; color: #0f172a; margin-bottom: 3px; font-size: 11.5px;">PEÇAS E COMPONENTES A SUBSTITUIR:</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width: 80px;">CÓDIGO</th>
+                      <th>DESCRIÇÃO DA PEÇA</th>
+                      <th style="width: 60px; text-align: center;">QTD</th>
+                      <th style="width: 100px; text-align: right;">UNITÁRIO</th>
+                      <th style="width: 100px; text-align: right;">TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${partsList.map(p => {
+                      const uVal = parseFloat((p.price || '0').replace('.', '').replace(',', '.')) || 0;
+                      const tot = uVal * (p.qty || 1);
+                      return `
+                        <tr>
+                          <td style="font-family: monospace;">${p.code || '-'}</td>
+                          <td>${p.name}</td>
+                          <td style="text-align: center;">${p.qty}</td>
+                          <td style="text-align: right;">R$ ${p.price}</td>
+                          <td style="text-align: right; font-weight: bold;">R$ ${tot.toFixed(2).replace('.', ',')}</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : ''}
+
+            <div class="total-box">
+              <div>
+                <strong>Condições de Pagamento:</strong> ${paymentConditions || 'À Vista / Cartão / PIX'}<br/>
+                ${notes ? `<span style="font-size: 10.5px; color: #64748b;">Obs: ${notes}</span>` : ''}
+              </div>
+              <div style="text-align: right;">
+                <span style="font-size: 12px; color: #64748b;">VALOR TOTAL DO ORÇAMENTO:</span>
+                <div class="total-val">R$ ${grandTotalVal.toFixed(2).replace('.', ',')}</div>
+              </div>
+            </div>
+
+            <div class="footer-terms">
+              <strong>Condições Gerais:</strong> Este orçamento possui validade de ${validityDays || 10} dias a contar da data de emissão. A aprovação pode ser feita via WhatsApp ou diretamente no balcão. Após aprovação, as peças serão reservadas e o serviço executado nos prazos acordados.
+            </div>
+
+            <div class="signatures">
+              <div>
+                <div class="sig-line">ASSINATURA DA EMPRESA / TÉCNICO</div>
+              </div>
+              <div>
+                <div class="sig-line">APROVAÇÃO DO CLIENTE</div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+    };
+
+    const htmlContent = generateHtml();
+
+    // 1. Tenta abrir janela popup de impressão
+    let printWindow: Window | null = null;
+    try {
+      printWindow = window.open('', '_blank', 'width=900,height=750');
+    } catch (e) {
+      printWindow = null;
+    }
+
+    if (printWindow && printWindow.document) {
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (err) {
+          console.warn('Erro ao chamar print na nova janela:', err);
+        }
+      }, 250);
+      return;
+    }
+
+    // 2. FALLBACK IMUNE A BLOQUEIO DE POP-UPS (Iframe invisível no próprio documento)
+    const existingIframe = document.getElementById('estimate_print_frame');
+    if (existingIframe) {
+      existingIframe.remove();
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'estimate_print_frame';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(htmlContent);
+      doc.close();
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (iframeErr) {
+          console.error('Falha ao imprimir via iframe:', iframeErr);
+          window.print();
+        }
+      }, 300);
+    } else {
+      window.print();
+    }
   };
 
   if (!isOpen) return null;
@@ -811,6 +1295,14 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
         className="bg-white border border-slate-300 rounded-2xl w-full max-w-5xl max-h-[94vh] shadow-2xl overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Notification Toast de Salvamento Concluído (Overlay Flutuante) */}
+        {saveToastVisible && (
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[100] bg-emerald-600 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-2xl animate-pulse border border-emerald-400 pointer-events-none">
+            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+            <span>Orçamento #{activeCode} salvo com sucesso!</span>
+          </div>
+        )}
+
         {/* Header */}
         <div className="px-4 py-2.5 bg-gradient-to-r from-amber-600 via-yellow-600 to-amber-700 text-white flex items-center justify-between shrink-0 shadow-xs">
           <div className="flex items-center gap-2.5">
@@ -847,9 +1339,20 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
               </select>
             </div>
 
+            {/* Histórico do Orçamento no Cabeçalho */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => setIsAuditHistoryModalOpen(true)}
+              className="h-7 px-2.5 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs border border-white/30 shadow-2xs"
+              title="Visualizar histórico de edições e salvamentos deste orçamento"
+            >
+              <History className="w-3.5 h-3.5 text-amber-200 shrink-0" />
+              <span>Histórico ({auditHistory.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSafeClose}
               className="text-white/80 hover:text-white p-1 rounded-lg cursor-pointer"
             >
               <X className="w-5 h-5" />
@@ -1018,16 +1521,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                 </div>
 
                 <div className="col-span-3">
-                  <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Defeito Reclamado pelo Cliente</label>
+                  <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Número de Série do Equipamento</label>
                   <input
                     type="text"
-                    value={problemDescription}
+                    value={equipmentData.serialNumber || ''}
                     onChange={(e) => {
-                      setProblemDescription(e.target.value);
+                      setEquipmentData({ ...equipmentData, serialNumber: e.target.value });
                       setIsDirty(true);
                     }}
-                    placeholder="Ex: Não liga, faz barulho ao centrifugar, vazamento de água..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 font-medium focus:bg-white focus:outline-none focus:border-amber-600"
+                    placeholder="Ex: SN-987654321, 2026-XYZ"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 font-medium focus:bg-white focus:outline-none focus:border-amber-600 uppercase"
                   />
                 </div>
               </div>
@@ -1098,7 +1601,7 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={handleAddService}
+                    onClick={() => handleAddService()}
                     className="bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer shadow-xs"
                     title="Adicionar serviço (Enter)"
                   >
@@ -1106,8 +1609,8 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                   </button>
                 </div>
 
-                {/* Lista de Serviços em Tabela */}
-                <div className="border border-slate-200 rounded-lg overflow-hidden max-h-36 overflow-y-auto">
+                {/* Lista de Serviços em Tabela (Altura Fixa de 5 Linhas) */}
+                <div className="border border-slate-200 rounded-lg overflow-hidden h-[175px] overflow-y-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 text-[10.5px]">
                       <tr>
@@ -1119,16 +1622,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     <tbody>
                       {servicesList.length === 0 ? (
                         <tr>
-                          <td colSpan={3} className="p-3 text-center text-slate-400 italic">
+                          <td colSpan={3} className="p-6 text-center text-slate-400 italic">
                             Nenhum serviço adicionado
                           </td>
                         </tr>
                       ) : (
                         servicesList.map((srv, idx) => (
                           <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="p-1.5 font-medium text-slate-800">{srv.name}</td>
-                            <td className="p-1.5 font-bold font-mono text-right text-slate-900">R$ {srv.price}</td>
-                            <td className="p-1.5 text-center">
+                            <td className="p-1.5 font-medium text-slate-800 whitespace-nowrap truncate max-w-[200px]" title={srv.name}>{srv.name}</td>
+                            <td className="p-1.5 font-bold font-mono text-right text-slate-900 whitespace-nowrap">R$ {srv.price}</td>
+                            <td className="p-1.5 text-center whitespace-nowrap">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1174,8 +1677,8 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                   </div>
                 </div>
 
-                {/* Form Adicionar Peça */}
-                <div className="grid grid-cols-12 gap-1.5 mb-2">
+                {/* Form Adicionar Peça com Filtro de Busca (Nome ou Aplicação) */}
+                <div className="flex items-center gap-1 mb-2 relative">
                   <input
                     type="text"
                     value={newPartCode}
@@ -1183,25 +1686,93 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        handleAddPart();
+                        handleSearchPartByCode(newPartCode);
                       }
                     }}
                     placeholder="Cód."
-                    className="col-span-2 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600"
+                    className="w-12 shrink-0 bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-1 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600 font-mono"
                   />
-                  <input
-                    type="text"
-                    value={newPartName}
-                    onChange={(e) => setNewPartName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddPart();
-                      }
-                    }}
-                    placeholder="Nome da peça..."
-                    className="col-span-5 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600"
-                  />
+                  <div className="flex-1 min-w-0 relative">
+                    <input
+                      type="text"
+                      value={newPartName}
+                      onChange={(e) => {
+                        setNewPartName(e.target.value);
+                        setShowPartDropdown(true);
+                      }}
+                      onFocus={() => setShowPartDropdown(true)}
+                      placeholder="Buscar peça por nome ou aplicação..."
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600 font-medium"
+                    />
+
+                    {/* Dropdown Auto-Complete de Peças Filtradas */}
+                    {showPartDropdown && newPartName.trim().length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
+                        {(() => {
+                          const query = newPartName.trim().toLowerCase();
+                          const filtered = (availableParts || []).filter((p) => {
+                            if (!p) return false;
+                            const nameMatch = (p.name || '').toLowerCase().includes(query);
+                            const codeMatch = (p.code || '').toLowerCase().includes(query);
+                            const appMatch = (p.application || p.applications || p.app || '').toLowerCase().includes(query);
+                            return nameMatch || codeMatch || appMatch;
+                          });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="p-2.5 text-xs text-slate-500 italic text-center">
+                                Nenhuma peça cadastrada encontrada com este nome ou aplicação.
+                              </div>
+                            );
+                          }
+
+                          return filtered.map((pt, idx) => (
+                            <button
+                              key={pt.id || idx}
+                              type="button"
+                              onClick={() => {
+                                const currentClient = (clientsList || []).find(
+                                  (c: any) =>
+                                    (clientData.id && c.id === clientData.id) ||
+                                    (clientData.name && c.name && c.name.trim().toLowerCase() === clientData.name.trim().toLowerCase())
+                                );
+                                const isTech = Boolean(currentClient?.isTechnician);
+                                const selectedPrice = (isTech && pt.techPrice) ? pt.techPrice : (pt.finalPrice || pt.price || pt.salePrice || pt.unitPrice || pt.techPrice || '0,00');
+
+                                setNewPartCode(pt.code || '');
+                                setNewPartName((pt.name || '').toUpperCase());
+                                setNewPartPrice(formatCurrencyOnBlur(String(selectedPrice)));
+                                setShowPartDropdown(false);
+                              }}
+                              className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-slate-100 last:border-0 cursor-pointer flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0">
+                                <span className="font-bold text-xs text-slate-800 block truncate uppercase">
+                                  {pt.name}
+                                </span>
+                                {(pt.application || pt.code) && (
+                                  <span className="text-[10.5px] text-slate-500 block truncate uppercase">
+                                    {pt.code ? `Cód: ${pt.code} ` : ''}{pt.application ? `| Aplicação: ${pt.application}` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="font-mono font-bold text-amber-700 text-xs block">
+                                  R$ {formatCurrencyOnBlur(String((Boolean((clientsList || []).find((c: any) => (clientData.id && c.id === clientData.id) || (clientData.name && c.name && c.name.trim().toLowerCase() === clientData.name.trim().toLowerCase()))?.isTechnician) && pt.techPrice) ? pt.techPrice : (pt.finalPrice || pt.price || pt.salePrice || pt.unitPrice || pt.techPrice || '0,00')))}
+                                </span>
+                                {pt.stockQuantity !== undefined && (
+                                  <span className="text-[10px] text-slate-500 block">
+                                    Est: {pt.stockQuantity}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
                   <input
                     type="number"
                     min="1"
@@ -1214,52 +1785,37 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                       }
                     }}
                     placeholder="Qtd"
-                    className="col-span-2 bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-1 text-xs text-center font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600"
+                    className="w-11 shrink-0 bg-slate-50 border border-slate-300 rounded-lg px-1 py-1 text-xs text-center font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600"
                   />
                   <input
                     type="text"
                     value={newPartPrice}
-                    onChange={(e) => setNewPartPrice(e.target.value)}
-                    onBlur={(e) => {
-                      if (e.target.value) {
-                        setNewPartPrice(formatCurrencyOnBlur(e.target.value));
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (newPartPrice) {
-                          setNewPartPrice(formatCurrencyOnBlur(newPartPrice));
-                        }
-                        handleAddPart();
-                      }
-                    }}
-                    placeholder="Unit. R$"
-                    className="col-span-3 bg-slate-50 border border-slate-300 rounded-lg px-1.5 py-1 text-xs text-right font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-amber-600"
+                    readOnly
+                    placeholder="R$"
+                    className="w-16 shrink-0 bg-slate-100 border border-slate-300 rounded-lg px-1 py-1 text-xs text-right font-bold text-slate-700 cursor-not-allowed"
+                    title="O preço é puxado automaticamente do cadastro da peça selecionada"
                   />
-                </div>
-                <div className="flex justify-end mb-2">
                   <button
                     type="button"
-                    onClick={handleAddPart}
-                    className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer shadow-xs text-xs"
+                    onClick={() => handleAddPart()}
+                    className="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded-lg font-bold flex items-center gap-0.5 cursor-pointer shadow-xs text-xs shrink-0"
                     title="Adicionar peça (Enter)"
                   >
-                    <Plus className="w-3.5 h-3.5" /> Adicionar Peça
+                    <Plus className="w-3.5 h-3.5" /> Adicionar
                   </button>
                 </div>
 
-                {/* Lista de Peças em Tabela */}
-                <div className="border border-slate-200 rounded-lg overflow-hidden max-h-36 overflow-y-auto">
+                {/* Lista de Peças em Tabela (Altura Fixa de 5 Linhas) */}
+                <div className="border border-slate-200 rounded-lg overflow-hidden h-[175px] overflow-y-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 text-[10.5px]">
                       <tr>
-                        <th className="p-1.5 border-b border-slate-200 w-16">Cód</th>
-                        <th className="p-1.5 border-b border-slate-200">Descrição</th>
-                        <th className="p-1.5 border-b border-slate-200 text-center w-10">Qtd</th>
-                        <th className="p-1.5 border-b border-slate-200 text-right w-16">Unit.</th>
-                        <th className="p-1.5 border-b border-slate-200 text-right w-20">Total</th>
-                        <th className="p-1.5 border-b border-slate-200 text-center w-8">Ação</th>
+                        <th className="p-1.5 border-b border-slate-200 w-16 whitespace-nowrap">Cód</th>
+                        <th className="p-1.5 border-b border-slate-200 whitespace-nowrap">Descrição</th>
+                        <th className="p-1.5 border-b border-slate-200 text-center w-10 whitespace-nowrap">Qtd</th>
+                        <th className="p-1.5 border-b border-slate-200 text-right w-16 whitespace-nowrap">Unit.</th>
+                        <th className="p-1.5 border-b border-slate-200 text-right w-20 whitespace-nowrap">Total</th>
+                        <th className="p-1.5 border-b border-slate-200 text-center w-8 whitespace-nowrap">Ação</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1275,15 +1831,23 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                           const tVal = uVal * (pt.qty || 1);
                           return (
                             <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-1.5 font-mono text-[10.5px] text-slate-500">{pt.code || '-'}</td>
-                              <td className="p-1.5 font-medium text-slate-800">{pt.name}</td>
-                              <td className="p-1.5 text-center font-bold text-slate-700">{pt.qty}</td>
-                              <td className="p-1.5 text-right text-slate-600 font-mono">R$ {pt.price}</td>
-                              <td className="p-1.5 text-right font-bold text-slate-900 font-mono">R$ {tVal.toFixed(2).replace('.', ',')}</td>
-                              <td className="p-1.5 text-center">
+                              <td className="p-1.5 font-mono text-[10.5px] text-slate-500 whitespace-nowrap">{pt.code || '-'}</td>
+                              <td className="p-1.5 font-medium text-slate-800 whitespace-nowrap truncate max-w-[150px] uppercase" title={pt.name}>{pt.name}</td>
+                              <td className="p-1.5 text-center font-bold text-slate-700 whitespace-nowrap">{pt.qty}</td>
+                              <td className="p-1.5 text-right text-slate-600 font-mono whitespace-nowrap">{pt.price}</td>
+                              <td className="p-1.5 text-right font-bold text-slate-900 font-mono whitespace-nowrap">R$ {tVal.toFixed(2).replace('.', ',')}</td>
+                              <td className="p-1.5 text-center whitespace-nowrap">
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    if (isReadOnly) {
+                                      dlgAlert({
+                                        title: 'Orçamento Aprovado',
+                                        message: 'Não é possível alterar os itens de um orçamento APROVADO.\n\nPara modificar as peças ou serviços, clique em "Reabrir para Edição" no rodapé.',
+                                        variant: 'warning',
+                                      });
+                                      return;
+                                    }
                                     setPartsList((prev) => prev.filter((_, i) => i !== idx));
                                     setIsDirty(true);
                                   }}
@@ -1304,11 +1868,11 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
             </div>
           </div>
 
-          {/* 3. TOTALIZADOR FINANCEIRO & CONDIÇÕES */}
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
+          {/* 3. TOTALIZADOR FINANCEIRO & CONDIÇÕES (Barra Mais Compacta) */}
+          <div className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
             <div>
-              <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Validade do Orçamento</label>
-              <div className="flex items-center gap-1.5">
+              <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Validade do Orçamento</label>
+              <div className="flex items-center gap-1">
                 <input
                   type="number"
                   min="1"
@@ -1318,14 +1882,14 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     setValidityDays(parseInt(e.target.value, 10) || 10);
                     setIsDirty(true);
                   }}
-                  className="w-20 bg-slate-50 border border-slate-300 rounded-lg p-1 text-center font-bold text-slate-900 focus:bg-white focus:outline-none"
+                  className="w-16 bg-slate-50 border border-slate-300 rounded-md py-0.5 px-1 text-center font-bold text-xs text-slate-900 focus:bg-white focus:outline-none"
                 />
                 <span className="font-bold text-slate-600 text-xs">Dias</span>
               </div>
             </div>
 
             <div>
-              <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Deslocamento (R$)</label>
+              <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Deslocamento (R$)</label>
               <input
                 type="text"
                 value={travelCost}
@@ -1333,13 +1897,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                   setTravelCost(e.target.value);
                   setIsDirty(true);
                 }}
+                onBlur={(e) => {
+                  setTravelCost(formatCurrencyOnBlur(e.target.value));
+                }}
                 placeholder="0,00"
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-1 text-right font-bold text-slate-900 focus:bg-white focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 rounded-md py-0.5 px-2 text-right font-bold text-xs text-slate-900 focus:bg-white focus:outline-none"
               />
             </div>
 
             <div>
-              <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Desconto (R$)</label>
+              <label className="block text-[10px] font-bold text-slate-700 mb-0.5">Desconto (R$)</label>
               <input
                 type="text"
                 value={discountCost}
@@ -1347,14 +1914,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                   setDiscountCost(e.target.value);
                   setIsDirty(true);
                 }}
+                onBlur={(e) => {
+                  setDiscountCost(formatCurrencyOnBlur(e.target.value));
+                }}
                 placeholder="0,00"
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-1 text-right font-bold text-red-600 focus:bg-white focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 rounded-md py-0.5 px-2 text-right font-bold text-xs text-red-600 focus:bg-white focus:outline-none"
               />
             </div>
 
-            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-right shadow-2xs">
-              <span className="text-[10.5px] font-bold text-emerald-800 uppercase block">VALOR TOTAL DO ORÇAMENTO</span>
-              <span className="text-xl font-black font-mono text-emerald-700">
+            <div className="bg-emerald-50 border border-emerald-300 rounded-lg px-2 py-1 text-right shadow-2xs flex items-center justify-between">
+              <span className="text-[9.5px] font-bold text-emerald-800 uppercase block">TOTAL</span>
+              <span className="text-lg font-black font-mono text-emerald-700">
                 R$ {grandTotalVal.toFixed(2).replace('.', ',')}
               </span>
             </div>
@@ -1362,90 +1932,136 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
         </div>
 
         {/* Rodapé de Ações com Botões Principais */}
-        <div className="p-3 bg-slate-100 border-t border-slate-300 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="p-3 bg-slate-100 border-t border-slate-300 flex flex-wrap items-center justify-end gap-2 shrink-0">
+
+          {estimateToEdit && onDeleteEstimate && (
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition-all cursor-pointer text-xs"
+              onClick={async () => {
+                const ok = await dlgConfirm({
+                  title: 'Excluir Orçamento',
+                  message: `Deseja realmente EXCLUIR o orçamento #${estimateToEdit.code}?`,
+                  variant: 'danger',
+                  confirmText: 'Excluir',
+                });
+                if (ok) {
+                  onDeleteEstimate(estimateToEdit.id);
+                  onClose();
+                }
+              }}
+              className="h-9 px-3.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs"
             >
-              Cancelar
+              <Trash2 className="w-4 h-4 shrink-0" />
+              <span>Excluir</span>
+            </button>
+          )}
+
+          {/* Botão Reabrir Orçamento se estiver APROVADO sem ter virado OS */}
+          {estimateToEdit?.status === 'APROVADO' && !estimateToEdit?.convertedToOSId && (
+            <button
+              type="button"
+              onClick={handleReopenEstimate}
+              className="h-9 px-3.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs shadow-xs"
+              title="Reabre este orçamento para edição e altera seu status para PENDENTE"
+            >
+              <RefreshCw className="w-4 h-4 text-amber-700 shrink-0" />
+              <span>Reabrir para Edição</span>
+            </button>
+          )}
+
+          {/* WhatsApp */}
+          <button
+            type="button"
+            onClick={handleSendWhatsApp}
+            className="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
+            title="Enviar orçamento formatado no WhatsApp do cliente"
+          >
+            <Phone className="w-4 h-4 text-emerald-200 shrink-0" />
+            <span>WhatsApp</span>
+          </button>
+
+          {/* Menu Dropdown de Impressão */}
+          <div className="relative" ref={printMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowPrintMenu(!showPrintMenu)}
+              className="h-9 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
+              title="Selecione o formato de impressão do orçamento"
+            >
+              <Printer className="w-4 h-4 text-indigo-200 shrink-0" />
+              <span>Imprimir</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-indigo-200 transition-transform ${showPrintMenu ? 'rotate-180' : ''}`} />
             </button>
 
-            {estimateToEdit && onDeleteEstimate && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm(`Deseja realmente EXCLUIR o orçamento #${estimateToEdit.code}?`)) {
-                    onDeleteEstimate(estimateToEdit.id);
-                    onClose();
-                  }
-                }}
-                className="px-3.5 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Excluir Orçamento
-              </button>
+            {showPrintMenu && (
+              <div className="absolute bottom-full right-0 mb-2 w-52 bg-white border border-slate-300 rounded-xl shadow-xl z-50 overflow-hidden text-xs py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPrintMenu(false);
+                    handlePrintEstimate('A4');
+                  }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-indigo-50 text-slate-800 font-medium flex items-center gap-2 transition-colors cursor-pointer border-b border-slate-100"
+                >
+                  <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <div>
+                    <div className="font-bold text-slate-900">Imprimir Folha A4</div>
+                    <div className="text-[10px] text-slate-500">Documento completo em A4</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPrintMenu(false);
+                    handlePrintEstimate('THERMAL_80MM');
+                  }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-indigo-50 text-slate-800 font-medium flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-slate-600 shrink-0" />
+                  <div>
+                    <div className="font-bold text-slate-900">Imprimir Cupom Térmico</div>
+                    <div className="text-[10px] text-slate-500">Impressora não-fiscal 80mm/58mm</div>
+                  </div>
+                </button>
+              </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* WhatsApp */}
-            <button
-              type="button"
-              onClick={handleSendWhatsApp}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
-              title="Enviar orçamento formatado no WhatsApp do cliente"
-            >
-              <Phone className="w-3.5 h-3.5 text-emerald-200" />
-              WhatsApp
-            </button>
+          {/* Gerar Venda no Balcão */}
+          <button
+            type="button"
+            onClick={handleGenerateSale}
+            className="h-9 px-3.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
+            title="Transfere todas as peças deste orçamento para o carrinho da aba Vendas (Balcão)"
+          >
+            <ShoppingBag className="w-4 h-4 text-cyan-100 shrink-0" />
+            <span>Gerar Venda</span>
+          </button>
 
-            {/* Imprimir Térmica */}
-            <button
-              type="button"
-              onClick={() => handlePrintEstimate('THERMAL_80MM')}
-              className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
-              title="Imprimir cupom de balcão para impressora térmica 80mm / 58mm"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-300" />
-              Térmica
-            </button>
+          {/* Gerar OS a partir do Orçamento */}
+          <button
+            type="button"
+            onClick={handleGenerateOS}
+            className="h-9 px-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs hover:scale-102 active:scale-98"
+            title="Abre a ficha de OS preenchida com este cliente, aparelho, peças e serviços. O orçamento será marcado como APROVADO após salvar a OS."
+          >
+            <Sparkles className="w-4 h-4 text-emerald-200 shrink-0" />
+            <span>Gerar OS</span>
+            <ArrowRight className="w-4 h-4 shrink-0" />
+          </button>
 
-            {/* Imprimir Orçamento A4 */}
-            <button
-              type="button"
-              onClick={() => handlePrintEstimate('A4')}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer text-xs"
-              title="Imprimir folha A4 (Ctrl+P)"
-            >
-              <Printer className="w-4 h-4" />
-              Imprimir A4
-            </button>
-
-            {/* Gerar OS a partir do Orçamento */}
-            <button
-              type="button"
-              onClick={handleGenerateOS}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs hover:scale-102 active:scale-98"
-              title="Abre a ficha de OS preenchida com este cliente, aparelho, peças e serviços e exclui o orçamento após salvar"
-            >
-              <Sparkles className="w-4 h-4 text-emerald-200" />
-              Gerar OS
-              <ArrowRight className="w-4 h-4" />
-            </button>
-
-            {/* Salvar Orçamento */}
-            <button
-              type="button"
-              onClick={handleSave}
-              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs"
-              title="Salvar Orçamento (F2)"
-            >
-              <Save className="w-4 h-4" />
-              Salvar (F2)
-            </button>
-          </div>
+          {/* Salvar Orçamento */}
+          <button
+            type="button"
+            disabled={isReadOnly}
+            onClick={handleSave}
+            className="h-9 px-4 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs"
+            title={isReadOnly ? 'Orçamento APROVADO não pode ser editado. Reabra para edição.' : 'Salvar Orçamento (F2)'}
+          >
+            <Save className="w-4 h-4 shrink-0" />
+            <span>Salvar (F2)</span>
+          </button>
         </div>
 
         {/* Modal Aparelhos Anteriores */}
@@ -1497,6 +2113,83 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Modal de Histórico de Auditoria do Orçamento */}
+        {isAuditHistoryModalOpen && (
+          <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+              <div className="p-4 bg-gradient-to-r from-amber-900 via-slate-800 to-amber-950 text-white flex items-center justify-between shadow-md">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-amber-500/20 border border-amber-400/30 rounded-xl">
+                    <History className="w-5 h-5 text-amber-300" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm tracking-wide">
+                      Histórico do Orçamento #{activeCode}
+                    </h3>
+                    <p className="text-[11px] text-amber-200/80">
+                      {auditHistory.length} registro(s) de alteração encontrado(s)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAuditHistoryModalOpen(false)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-4 overflow-y-auto space-y-3 flex-1 bg-slate-50">
+                {auditHistory.length > 0 ? (
+                  auditHistory.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-xs border-b border-slate-100 pb-1.5">
+                        <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5 text-amber-600" />
+                          {item.user || 'Atendente'}
+                        </span>
+                        <span className="text-slate-500 font-mono text-[11px]">
+                          {item.date}
+                        </span>
+                      </div>
+
+                      {item.changes && item.changes.length > 0 ? (
+                        <ul className="space-y-1 text-xs text-slate-600 pl-1">
+                          {item.changes.map((change, cIdx) => (
+                            <li key={cIdx} className="flex items-start gap-2">
+                              <span className="text-amber-500 font-bold">•</span>
+                              <span>{change}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-slate-600">{item.description || 'Salvamento realizado'}</p>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-slate-400 font-semibold text-xs">
+                    Nenhum registro no histórico de auditoria deste orçamento.
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-slate-100 border-t border-slate-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsAuditHistoryModalOpen(false)}
+                  className="px-4 py-1.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Fechar
+                </button>
               </div>
             </div>
           </div>

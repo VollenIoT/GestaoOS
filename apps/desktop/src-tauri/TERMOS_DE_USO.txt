@@ -1,0 +1,24 @@
+TERMOS DE USO E CONTRATO DE LICENÇA DE USO DE SOFTWARE
+
+POR FAVOR, LEIA ATENTAMENTE ESTE CONTRATO ANTES DE INSTALAR OU UTILIZAR O SOFTWARE VOLLEN - GESTÃO DE ORDENS DE SERVIÇO. AO INSTALAR, COPIAR OU UTILIZAR ESTE SOFTWARE, VOCÊ CONCORDA EM FICAR VINCULADO AOS TERMOS DESTE CONTRATO.
+
+1. CONCESSÃO DE LICENÇA
+A Vollen concede a você uma licença não exclusiva, intransferível e limitada para instalar e utilizar o software "Vollen - Gestão de Ordens de Serviço" em seus computadores e dispositivos autorizados, em conformidade com o plano de licença ou assinatura contratado.
+
+2. DIREITOS AUTORAIS E PROPRIEDADE INTELECTUAL
+O software, incluindo seu código-fonte, interface visual, logotipos, banco de dados e documentação, é de propriedade exclusiva e protegido pelas leis de direitos autorais e propriedade industrial aplicáveis. É expressamente proibida a engenharia reversa, descompilação, desmontagem ou redistribuição não autorizada.
+
+3. PRIVACIDADE E PROTEÇÃO DE DADOS
+Os dados cadastrados no sistema (clientes, ordens de serviço, produtos e financeiro) pertencem exclusivamente ao usuário/empresa licenciada. O software implementa práticas de segurança para proteção dessas informações de acordo com a legislação vigente (LGPD).
+
+4. RESPONSABILIDADE SOBRE BACKUPS
+É de responsabilidade do usuário a realização periódica de cópias de segurança (backups) dos dados do sistema, utilizando as ferramentas integradas no próprio aplicativo ou rotinas próprias de segurança da informação.
+
+5. LIMITAÇÃO DE RESPONSABILIDADE
+Em nenhuma hipótese a fornecedora do software será responsável por lucros cessantes, perdas financeiras indiretas ou danos decorrentes do mau uso do sistema, falhas em equipamentos de terceiros, perda de conexão com a internet ou falta de backup adequado por parte do usuário.
+
+6. ATUALIZAÇÕES E SUPORTE
+As atualizações de correção, melhorias e novas funcionalidades serão disponibilizadas de acordo com as políticas de suporte e manutenção ativas.
+
+7. ACEITAÇÃO DOS TERMOS
+Ao clicar em "Eu aceito os termos do Contrato de Licença" e prosseguir com a instalação, você declara ter lido, compreendido e concordado integralmente com todas as cláusulas deste contrato.

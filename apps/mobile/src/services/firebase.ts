@@ -1,28 +1,100 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, getFirestore } from 'firebase/firestore';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { initializeFirestore, getFirestore, Firestore, setLogLevel } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const firebaseConfig = {
-  apiKey: "AIzaSyBYldSd19R4l8dVPj5akUNdjiBjckmO_lk",
-  authDomain: "vollen---gestao-os.firebaseapp.com",
-  projectId: "vollen---gestao-os",
-  storageBucket: "vollen---gestao-os.firebasestorage.app",
-  messagingSenderId: "436401191883",
-  appId: "1:436401191883:web:cfa2281a25dca4f81f944e",
-  measurementId: "G-YRPSCPSBVC"
+// Suprime logs internos normais de reconexão do Firebase quando o celular está offline
+try {
+  setLogLevel('silent');
+} catch {}
+
+// ✅ Segurança: credenciais lidas de variáveis de ambiente Expo (.env), nunca hardcoded.
+// Prefixo EXPO_PUBLIC_ é obrigatório para que o Expo exponha as variáveis no bundle.
+export const MASTER_FIREBASE_CONFIG = {
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY!,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID!,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID!,
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Inicializa o App do Firebase no Mobile
-export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Instância Master (para consulta e resolução de ApiKeys/Seriais)
+let masterApp: FirebaseApp | null = null;
+let masterDb: Firestore | null = null;
 
-// Inicializa o Firestore no React Native de forma segura contra fast-refresh
-let firestoreDb;
+export function getMasterFirestore(): Firestore {
+  if (!masterApp) {
+    const existing = getApps().find(a => a.name === 'masterCatalogMobile');
+    masterApp = existing || initializeApp(MASTER_FIREBASE_CONFIG, 'masterCatalogMobile');
+  }
+  if (!masterDb && masterApp) {
+    try {
+      masterDb = initializeFirestore(masterApp, {
+        experimentalAutoDetectLongPolling: true,
+      });
+    } catch {
+      masterDb = getFirestore(masterApp);
+    }
+  }
+  return masterDb!;
+}
+
+// Inicializa o App do Firebase no Mobile
+let defaultApp: FirebaseApp;
+const existingDefault = getApps().find(a => a.name === '[DEFAULT]');
+if (existingDefault) {
+  defaultApp = existingDefault;
+} else {
+  defaultApp = initializeApp(MASTER_FIREBASE_CONFIG);
+}
+
+export const app = defaultApp;
+
+// Retorna a instância Firestore ativa (do Tenant vinculado ou do Master)
+let currentTenantFirestore: Firestore | null = null;
+let currentTenantProjectId: string | null = null;
+
+export async function getActiveMobileFirestore(): Promise<Firestore> {
+  try {
+    const raw = await AsyncStorage.getItem('mobile_tenant_firebase_config');
+    if (raw) {
+      const config = JSON.parse(raw);
+      if (config && config.projectId && config.apiKey) {
+        if (currentTenantFirestore && currentTenantProjectId === config.projectId) {
+          return currentTenantFirestore;
+        }
+
+        const appName = `tenant_${config.projectId}`;
+        const existing = getApps().find(a => a.name === appName);
+        const tenantApp = existing || initializeApp(config, appName);
+        
+        try {
+          currentTenantFirestore = initializeFirestore(tenantApp, {
+            experimentalAutoDetectLongPolling: true,
+          });
+        } catch {
+          currentTenantFirestore = getFirestore(tenantApp);
+        }
+        currentTenantProjectId = config.projectId;
+        return currentTenantFirestore;
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao resolver Firestore dinâmico no mobile:', err);
+  }
+  return defaultDb;
+}
+
+// Instância Firestore padrão
+let defaultDb: Firestore;
 try {
-  firestoreDb = initializeFirestore(app, {
+  defaultDb = initializeFirestore(defaultApp, {
     experimentalAutoDetectLongPolling: true,
   });
 } catch {
-  firestoreDb = getFirestore(app);
+  defaultDb = getFirestore(defaultApp);
 }
 
-export const db = firestoreDb;
-
+export const firestoreDb = defaultDb;
+export const db = defaultDb;

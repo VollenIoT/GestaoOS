@@ -114,6 +114,12 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        project.ext.set("archivesBaseName", "APK-Vollen-GestaoOS")
+    }
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "APK-Vollen-GestaoOS.apk"
+        }
     }
     signingConfigs {
         debug {

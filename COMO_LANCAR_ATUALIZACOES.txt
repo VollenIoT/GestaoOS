@@ -1,0 +1,54 @@
+=============================================================================
+             COMO LANÇAR ATUALIZAÇÕES DO SISTEMA OS (VOLLEN)
+=============================================================================
+
+Todos os clientes possuem a mesma versão padronizada do sistema.
+Você não precisa abrir o programa para enviar uma nova atualização para os clientes.
+Tudo é feito diretamente a partir da pasta deste projeto.
+
+-----------------------------------------------------------------------------
+1. COMO GERAR O NOVO INSTALADOR (.EXE)
+-----------------------------------------------------------------------------
+1. Na pasta raiz do projeto, dê dois cliques em:
+   -> gerar-instalador.bat
+
+2. O instalador atualizado (.exe) será gerado na pasta:
+   -> apps\desktop\src-tauri\target\release\bundle\nsis\
+
+3. Suba esse arquivo .exe para o seu site, servidor, Google Drive, Dropbox ou OneDrive,
+   e obtenha o link de download direto do arquivo.
+
+-----------------------------------------------------------------------------
+2. COMO PUBLICAR A ATUALIZAÇÃO PARA TODOS OS CLIENTES
+-----------------------------------------------------------------------------
+1. Na pasta raiz do projeto, dê dois cliques em:
+   -> lancar-atualizacao.bat
+
+2. O terminal abrirá e solicitará 4 informações simples:
+   - 1. Número da Nova Versão (ex: 1.0.1 ou 1.1.0)
+   - 2. Título do Lançamento (ex: Melhorias e Novas Funções)
+   - 3. Link de Download do Instalador (.exe ou link do Drive)
+   - 4. Novidades / Notas da Versão (ex: Melhorias na impressão, Correção no estoque)
+
+3. Pressione Enter. O script conecta automaticamente na Nuvem (Firebase)
+   e publica a atualização em 1 segundo!
+
+-----------------------------------------------------------------------------
+3. O QUE ACONTECE NOS COMPUTADORES DOS CLIENTES?
+-----------------------------------------------------------------------------
+1. O cliente abre o sistema ou vai em:
+   Menu Opções -> Verificar Atualizações do Sistema.
+
+2. O sistema avisa que existe uma nova versão disponível (ex: v1.0.1)
+   mostrando as novidades que você escreveu.
+
+3. O cliente clica no botão "Baixar e Atualizar Agora".
+
+4. Ao rodar o instalador da nova versão por cima:
+   -> NENHUM DADO É PERDIDO!
+   -> Todas as Ordens de Serviço, Clientes, Peças, Serviços, Histórico e Configurações
+      ficam 100% preservados e intactos no banco de dados.
+
+=============================================================================
+             SISTEMA OS VOLLEN - GESTÃO PROFISSIONAL DE OS
+=============================================================================

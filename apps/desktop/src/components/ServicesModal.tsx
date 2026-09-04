@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Search, PlusCircle, Wrench, Check, LogOut, Edit3, Trash2 } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
 import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 export interface ServiceItem {
   id: string;
@@ -78,6 +79,17 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
     }
   }, [isOpen]);
 
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  React.useEffect(() => {
+    if (isOpen) {
+      modalStack.register('ServicesModal', () => onCloseRef.current?.());
+      return () => modalStack.unregister('ServicesModal');
+    }
+  }, [isOpen]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -85,14 +97,11 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
         e.preventDefault();
         onClose();
         if (onOpenCreateService) onOpenCreateService();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onOpenCreateService, onClose]);
 
   if (!isOpen) return null;
 

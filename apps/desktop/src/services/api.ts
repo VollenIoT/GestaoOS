@@ -1,6 +1,19 @@
+import { verifyPasswordWithMigration, hashPassword } from '../utils/hashUtils';
+
+
 const API_URL = 'http://localhost:3333/api';
 
-// Função utilitária para converter todos os textos para CAIXA ALTA se o CAPS estiver ativo
+/**
+ * Retorna os headers padrão para chamadas à API local.
+ * ✅ Segurança: inclui token interno para autenticar requisições do desktop ao servidor.
+ */
+function getApiHeaders(): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    'x-internal-token': import.meta.env.VITE_INTERNAL_API_TOKEN || 'vollen-internal-token-2024',
+  };
+}
+
 function applySystemCaps<T>(data: T): T {
   try {
     const isCapsActive = document.body.classList.contains('app-caps-active');
@@ -54,7 +67,10 @@ function setLocalItem<T>(key: string, value: T): void {
 
 export async function fetchUsers() {
   try {
-    const res = await fetch(`${API_URL}/users`, { signal: AbortSignal.timeout(1000) });
+    const res = await fetch(`${API_URL}/users`, {
+      headers: getApiHeaders(),
+      signal: AbortSignal.timeout(1000),
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -64,27 +80,43 @@ export async function fetchUsers() {
     }
   } catch {}
   return getLocalItem('vollen_users', [
-    { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' }
+    // ✅ Segurança: hash SHA-256 de '1234' — nunca mais texto puro no fallback.
+    { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4' }
   ]);
 }
 
 export async function loginUser(userId: string, password?: string) {
   try {
+    const hashedPassword = password ? await hashPassword(password) : undefined;
     const res = await fetch(`${API_URL}/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, password }),
+      headers: getApiHeaders(),
+      body: JSON.stringify({ userId, password: hashedPassword }),
       signal: AbortSignal.timeout(1000),
     });
     if (res.ok) return res.json();
   } catch {}
 
+  // Fallback local com suporte à migração progressiva de senha
   const users = getLocalItem<any[]>('vollen_users', []);
   const matched = users.find((u) => String(u.id) === String(userId));
   if (!matched) throw new Error('Usuário não encontrado');
-  if (matched.password && matched.password !== password) {
-    throw new Error('Senha incorreta.');
+
+  if (matched.password && password !== undefined) {
+    const { valid, needsUpgrade } = await verifyPasswordWithMigration(password, matched.password);
+    if (!valid) throw new Error('Senha incorreta.');
+
+    // Migração progressiva: se a senha ainda estava em texto puro, persiste o hash
+    if (needsUpgrade) {
+      const hashed = await hashPassword(password);
+      const updatedUsers = users.map((u) =>
+        u.id === matched.id ? { ...u, password: hashed } : u
+      );
+      setLocalItem('vollen_users', updatedUsers);
+      console.log('[Security] Senha do usuário migrada para hash SHA-256.');
+    }
   }
+
   return { token: 'local-session-token', user: matched };
 }
 
@@ -104,6 +136,8 @@ import {
 
 export async function fetchClients() {
   const localClients = getLocalItem<any[]>('vollen_clients', []);
+  if (!db) return localClients;
+
   try {
     const colRef = collection(db, 'clients');
     const snap = await getDocs(colRef);
@@ -111,6 +145,9 @@ export async function fetchClients() {
       const serverData = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setLocalItem('vollen_clients', serverData);
       return serverData;
+    } else {
+      setLocalItem('vollen_clients', []);
+      return [];
     }
   } catch (e) {
     console.warn('Erro ao buscar clientes no Firestore:', e);
@@ -119,10 +156,12 @@ export async function fetchClients() {
 }
 
 export function subscribeClients(callback: (clients: any[]) => void) {
+  if (!db) return () => {};
+
   try {
     const colRef = collection(db, 'clients');
     return onSnapshot(colRef, (snap) => {
-      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const data = snap.empty ? [] : snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setLocalItem('vollen_clients', data);
       callback(data);
     });
@@ -141,10 +180,13 @@ export async function createClient(data: any) {
   const updated = [newClient, ...current.filter((c) => c.id !== clientId)];
   setLocalItem('vollen_clients', updated);
 
-  try {
-    await setDoc(doc(db, 'clients', clientId), newClient, { merge: true });
-  } catch (e) {
-    console.warn('Erro ao salvar cliente no Firestore:', e);
+  if (db) {
+    try {
+      await setDoc(doc(db, 'clients', clientId), newClient, { merge: true });
+      console.log(`[Firestore] Cliente ${clientId} salvo com sucesso na nuvem.`);
+    } catch (e: any) {
+      console.error('❌ Erro ao salvar cliente no Firestore:', e);
+    }
   }
 
   return newClient;
@@ -155,32 +197,34 @@ export async function deleteClient(clientId: string) {
   const updated = current.filter((c) => c.id !== clientId);
   setLocalItem('vollen_clients', updated);
 
-  try {
-    await deleteDoc(doc(db, 'clients', clientId));
-  } catch (e) {
-    console.warn('Erro ao deletar cliente no Firestore:', e);
+  if (db) {
+    try {
+      await deleteDoc(doc(db, 'clients', clientId));
+    } catch (e) {
+      console.error('❌ Erro ao deletar cliente no Firestore:', e);
+    }
   }
   return { success: true };
 }
 
 export async function fetchOrders(includeDeleted: boolean = false) {
   const localOrders = getLocalItem<any[]>('vollen_orders', []);
+  if (!db) {
+    if (!includeDeleted) {
+      return localOrders.filter((o) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
+    }
+    return localOrders;
+  }
+
   try {
     const colRef = collection(db, 'orders');
     const snap = await getDocs(colRef);
     if (!snap.empty) {
       const serverData = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // MERGE INTELIGENTE: preserva a versão local se ela for mais recente que a do servidor.
-      // Isso evita que writes recentes do usuário sejam sobrescritos por dados antigos do Firestore.
-      const localMap = new Map(localOrders.map((o: any) => [o.id, o]));
-      const merged = serverData.map((serverOrder: any) => {
-        const localOrder = localMap.get(serverOrder.id);
-        if (localOrder && localOrder.updatedAt && serverOrder.updatedAt) {
-          // Se a versão local é mais recente, mantém a local
-          if (localOrder.updatedAt > serverOrder.updatedAt) return localOrder;
-        }
-        // Garante que campos de arrays não sejam perdidos (fallback para local se servidor veio vazio)
+      // Garante que campos de array e itens estejam presentes
+      const normalizedServerData = serverData.map((serverOrder: any) => {
+        const localOrder = localOrders.find((o: any) => o.id === serverOrder.id);
         const mergedOrder = { ...serverOrder };
         const arrayFields = ['partsUsed', 'parts', 'partsList', 'servicesExecuted', 'services', 'servicesList'];
         if (localOrder) {
@@ -195,16 +239,15 @@ export async function fetchOrders(includeDeleted: boolean = false) {
         return mergedOrder;
       });
 
-      // Inclui OS que existem só no local (criadas recentemente e ainda não sincronizadas)
-      const serverIds = new Set(serverData.map((o: any) => o.id));
-      const localOnly = localOrders.filter((lo: any) => !serverIds.has(lo.id));
-      const finalData = [...localOnly, ...merged];
-
-      setLocalItem('vollen_orders', finalData);
+      setLocalItem('vollen_orders', normalizedServerData);
       if (!includeDeleted) {
-        return finalData.filter((o: any) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
+        return normalizedServerData.filter((o: any) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
       }
-      return finalData;
+      return normalizedServerData;
+    } else {
+      // Se a nuvem está vazia (ex: após restaurar padrões de fábrica), limpa o cache local
+      setLocalItem('vollen_orders', []);
+      return [];
     }
   } catch (e) {
     console.warn('Erro ao buscar ordens no Firestore:', e);
@@ -217,10 +260,12 @@ export async function fetchOrders(includeDeleted: boolean = false) {
 }
 
 export function subscribeOrders(callback: (orders: any[]) => void) {
+  if (!db) return () => {};
+
   try {
     const colRef = collection(db, 'orders');
     return onSnapshot(colRef, (snap) => {
-      const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const data = snap.empty ? [] : snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setLocalItem('vollen_orders', data);
       callback(data);
     });
@@ -235,38 +280,51 @@ export function subscribeOrders(callback: (orders: any[]) => void) {
  * uma OS exatamente ao mesmo tempo.
  */
 export async function reserveNextOrderNumber(): Promise<string> {
+  if (!db) {
+    const localOrders = getLocalItem<any[]>('vollen_orders', []);
+    let maxFound = 0;
+    localOrders.forEach((o) => {
+      const c = o.code;
+      if (c) {
+        const num = parseInt(String(c).replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > maxFound) maxFound = num;
+      }
+    });
+    try {
+      const customNext = localStorage.getItem('vollen_custom_next_os_number');
+      if (customNext) {
+        const initN = parseInt(String(customNext).replace(/\D/g, ''), 10);
+        if (!isNaN(initN) && initN - 1 > maxFound) maxFound = initN - 1;
+      }
+    } catch {}
+    const next = maxFound + 1;
+    return `OS-${String(next).padStart(4, '0')}`;
+  }
+
   const counterRef = doc(db, 'system_config', 'order_counter');
 
   const nextNumber = await runTransaction(db, async (transaction) => {
-    const counterSnap = await transaction.get(counterRef);
+    // Varre ordens existentes no Firestore para obter o maior número real ativo
+    const ordersSnap = await getDocs(collection(db, 'orders'));
+    let maxFound = 0;
+    ordersSnap.docs.forEach((d) => {
+      const c = d.data().code;
+      if (c && !String(c).includes('Aguardando') && !String(c).includes('PENDENTE')) {
+        const num = parseInt(String(c).replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > maxFound) maxFound = num;
+      }
+    });
 
-    let next: number;
-    if (counterSnap.exists()) {
-      next = (counterSnap.data().lastOrderNumber || 0) + 1;
-    } else {
-      // Primeira vez: varre ordens existentes para não sobrescrever números já usados
-      const ordersSnap = await getDocs(collection(db, 'orders'));
-      let maxFound = 0;
-      ordersSnap.docs.forEach((d) => {
-        const c = d.data().code;
-        if (c) {
-          const num = parseInt(String(c).replace(/\D/g, ''), 10);
-          if (!isNaN(num) && num > maxFound) maxFound = num;
-        }
-      });
-      // Também considera preferência de número inicial do localStorage
-      try {
-        const customNext = localStorage.getItem('vollen_custom_next_os_number');
-        if (customNext) {
-          const initN = parseInt(String(customNext).replace(/\D/g, ''), 10);
-          if (!isNaN(initN) && initN - 1 > maxFound) maxFound = initN - 1;
-        }
-      } catch {}
-      next = maxFound + 1;
-    }
+    const localOrders = getLocalItem<any[]>('vollen_orders', []);
+    localOrders.forEach((o) => {
+      const c = o.code;
+      if (c && !String(c).includes('Aguardando') && !String(c).includes('PENDENTE')) {
+        const num = parseInt(String(c).replace(/\D/g, ''), 10);
+        if (!isNaN(num) && num > maxFound) maxFound = num;
+      }
+    });
 
-    // Reserva atomicamente — outra transação simultânea falhará e será repetida
-    // com o próximo valor, eliminando completamente a chance de duplicidade
+    const next = maxFound + 1;
     transaction.set(counterRef, { lastOrderNumber: next }, { merge: true });
     return next;
   });
@@ -294,10 +352,26 @@ export async function createOrder(data: any) {
   const updated = [newOrder, ...current.filter((o) => o.id !== orderId)];
   setLocalItem('vollen_orders', updated);
 
-  try {
-    await setDoc(doc(db, 'orders', orderId), newOrder, { merge: true });
-  } catch (e) {
-    console.warn('Erro ao salvar ordem no Firestore:', e);
+  if (db) {
+    try {
+      await setDoc(doc(db, 'orders', orderId), newOrder, { merge: true });
+      console.log(`[Firestore] Ordem de Serviço ${newOrder.code || orderId} salva com sucesso na nuvem.`);
+
+      // Sincroniza e avança o contador global na nuvem para evitar duplicidade com o celular
+      if (newOrder.code) {
+        const osNum = parseInt(String(newOrder.code).replace(/\D/g, ''), 10);
+        if (!isNaN(osNum) && osNum > 0) {
+          const counterRef = doc(db, 'system_config', 'order_counter');
+          const counterSnap = await getDoc(counterRef).catch(() => null);
+          const currentCount = counterSnap && counterSnap.exists() ? (counterSnap.data().lastOrderNumber || 0) : 0;
+          if (osNum > currentCount) {
+            await setDoc(counterRef, { lastOrderNumber: osNum, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error('❌ Erro ao salvar ordem no Firestore:', e);
+    }
   }
 
   return newOrder;
@@ -342,10 +416,13 @@ export async function updateOrder(orderId: string, data: any) {
   }
   setLocalItem('vollen_orders', current);
 
-  try {
-    await setDoc(doc(db, 'orders', orderId), updatedOrder, { merge: true });
-  } catch (e) {
-    console.warn('Erro ao atualizar ordem no Firestore:', e);
+  if (db) {
+    try {
+      await setDoc(doc(db, 'orders', orderId), updatedOrder, { merge: true });
+      console.log(`[Firestore] Ordem de Serviço ${updatedOrder.code || orderId} atualizada com sucesso na nuvem.`);
+    } catch (e: any) {
+      console.error('❌ Erro ao atualizar ordem no Firestore:', e);
+    }
   }
   return updatedOrder;
 }
@@ -355,11 +432,55 @@ export async function deleteOrder(orderId: string) {
   const updated = current.filter((o) => o.id !== orderId);
   setLocalItem('vollen_orders', updated);
 
+  // Remove visitas locais vinculadas à OS
+  const currentVisits = getLocalItem<any[]>('vollen_visits', []);
+  const visitsToDelete = currentVisits.filter((v) => v.orderId === orderId || v.order?.id === orderId);
+  const updatedVisits = currentVisits.filter((v) => v.orderId !== orderId && v.order?.id !== orderId);
+  setLocalItem('vollen_visits', updatedVisits);
+
   try {
     await deleteDoc(doc(db, 'orders', orderId));
   } catch (e) {
     console.warn('Erro ao deletar ordem no Firestore:', e);
   }
+
+  // Deleta visitas no Firestore
+  try {
+    for (const v of visitsToDelete) {
+      if (v.id) {
+        await deleteDoc(doc(db, 'visits', v.id));
+      }
+    }
+    // Também busca no Firestore por garantia
+    const vSnap = await getDocs(collection(db, 'visits'));
+    for (const d of vSnap.docs) {
+      const data = d.data();
+      if (data.orderId === orderId || data.order?.id === orderId) {
+        await deleteDoc(doc(db, 'visits', d.id));
+      }
+    }
+  } catch (vErr) {
+    console.warn('Erro ao deletar visitas da OS no Firestore:', vErr);
+  }
+
+  // Atualiza o contador de OS na nuvem se a lista ficou vazia ou mudou
+  try {
+    const ordersSnap = await getDocs(collection(db, 'orders'));
+    let maxFound = 0;
+    if (ordersSnap && !ordersSnap.empty) {
+      ordersSnap.docs.forEach((d) => {
+        const c = d.data().code;
+        if (c && !String(c).includes('Aguardando') && !String(c).includes('PENDENTE')) {
+          const num = parseInt(String(c).replace(/\D/g, ''), 10);
+          if (!isNaN(num) && num > maxFound) maxFound = num;
+        }
+      });
+    }
+    await setDoc(doc(db, 'system_config', 'order_counter'), { lastOrderNumber: maxFound, updatedAt: new Date().toISOString() });
+  } catch (cErr) {
+    console.warn('Erro ao atualizar order_counter após exclusão:', cErr);
+  }
+
   return { success: true };
 }
 
@@ -474,10 +595,12 @@ export async function requestFactoryReset(payload: {
   resetClients?: boolean;
   resetOrders?: boolean;
 }) {
+  // ✅ Segurança: envia senha hasheada ao servidor
+  const hashedPassword = payload.password ? await hashPassword(payload.password) : undefined;
   const res = await fetch(`${API_URL}/factory-reset`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    headers: getApiHeaders(),
+    body: JSON.stringify({ ...payload, password: hashedPassword }),
   });
 
   const data = await res.json();

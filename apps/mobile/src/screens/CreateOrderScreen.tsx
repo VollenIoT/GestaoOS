@@ -36,7 +36,6 @@ import {
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { db } from '../services/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
   saveOrderMobile,
@@ -51,6 +50,8 @@ import {
   subscribeCompanyDataMobile,
   fetchOSPreferencesMobile,
   subscribeOSPreferencesMobile,
+  fetchWarrantyConfigMobile,
+  subscribeWarrantyConfigMobile,
   DEFAULT_EQUIPMENTS_PC,
   DEFAULT_PARTS_PC,
   DEFAULT_SERVICES_PC,
@@ -109,6 +110,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
   const [equipmentModel, setEquipmentModel] = useState(orderToEdit?.equipment?.model || '');
   const [serialNumber, setSerialNumber] = useState(orderToEdit?.equipment?.serialNumber || '');
   const [equipmentCode, setEquipmentCode] = useState(orderToEdit?.equipment?.code || '');
+  const [equipmentObservations, setEquipmentObservations] = useState(orderToEdit?.equipment?.observations || '');
 
   // Status da OS (Menu dropdown inline direto)
   const [orderStatus, setOrderStatus] = useState(orderToEdit?.status || 'ABERTA');
@@ -117,10 +119,14 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
 
   // Detalhes da OS
   const [problemDescription, setProblemDescription] = useState(orderToEdit?.problemDescription || '');
+  const [printProblemDescription, setPrintProblemDescription] = useState(orderToEdit?.printProblemDescription !== false);
   const [technicalReport, setTechnicalReport] = useState(orderToEdit?.technicalReport || '');
+  const [printTechnicalReport, setPrintTechnicalReport] = useState(orderToEdit?.printTechnicalReport !== false);
   const [executedService, setExecutedService] = useState(
     orderToEdit?.executedService || orderToEdit?.servicePerformed || orderToEdit?.servicoExecutado || ''
   );
+  const [printExecutedService, setPrintExecutedService] = useState(orderToEdit?.printExecutedService !== false);
+  const [printEquipmentObservations, setPrintEquipmentObservations] = useState(orderToEdit?.printEquipmentObservations !== false);
 
   // Catálogos (Peças e Serviços)
   const [availableParts, setAvailableParts] = useState<any[]>(DEFAULT_PARTS_PC);
@@ -148,7 +154,9 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
   const [warrantyType, setWarrantyType] = useState<'GARANTIA_LOJA' | 'GARANTIA_FABRICA' | 'NAO_SE_APLICA'>(
     orderToEdit?.warrantyType || 'NAO_SE_APLICA'
   );
-  const [warrantyDays, setWarrantyDays] = useState(orderToEdit?.warrantyDays || orderToEdit?.warrantyTermsData?.periodDays || '90');
+  const [warrantyDays, setWarrantyDays] = useState(
+    orderToEdit?.warrantyDays || orderToEdit?.warrantyTermsData?.periodDays || 'NAO_SE_APLICA'
+  );
   
   // Dados Completos de Nota Fiscal / Garantia de Fábrica (100% igual ao PC)
   const [purchaseDate, setPurchaseDate] = useState(orderToEdit?.purchaseDate || orderToEdit?.nfData?.purchaseDate || '');
@@ -168,22 +176,20 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
 
   // Modal de Finalização de OS
   const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
-  // Técnico Responsável (Para Admin poder selecionar qualquer técnico)
+  // Técnico Responsável (Sempre vinculado ao usuário autenticado no aparelho)
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [techniciansList, setTechniciansList] = useState<any[]>([]);
   const [selectedTechnicianName, setSelectedTechnicianName] = useState(() => {
-    if (!orderToEdit) return '';
-    return orderToEdit.technician || orderToEdit.technicianName || '';
+    return orderToEdit?.technician || orderToEdit?.technicianName || '';
   });
   const [selectedAttendantName, setSelectedAttendantName] = useState(() => {
-    if (!orderToEdit) return '';
-    return orderToEdit.attendantName || orderToEdit.attendant || '';
+    return orderToEdit?.attendantName || orderToEdit?.attendant || '';
   });
   const [isTechDropdownOpen, setIsTechDropdownOpen] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState(orderToEdit?.paymentMethod || 'PIX');
   const [isSplitPayment, setIsSplitPayment] = useState(Boolean(orderToEdit?.secondaryPaymentMethod));
-  const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState(orderToEdit?.secondaryPaymentMethod || 'DINHEIRO');
+  const [secondaryPaymentMethod, setSecondaryPaymentMethod] = useState(orderToEdit?.secondaryPaymentMethod || '');
   const [secondaryAmount, setSecondaryAmount] = useState(orderToEdit?.secondaryPaymentAmount || '');
   const [cardInstallments, setCardInstallments] = useState(orderToEdit?.cardInstallments || '1');
 
@@ -312,6 +318,15 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
     setAvailableServices(srvs);
     setCurrentUser(user);
     setTechniciansList(techs);
+    if (user) {
+      const loggedName = user.name || user.username || '';
+      if (!selectedTechnicianName && (!orderToEdit || !orderToEdit.technician)) {
+        setSelectedTechnicianName(loggedName);
+      }
+      if (!selectedAttendantName && (!orderToEdit || !orderToEdit.attendantName)) {
+        setSelectedAttendantName(loggedName);
+      }
+    }
     if (sts && sts.length > 0) {
       setAvailableStatuses(sts);
     }
@@ -321,6 +336,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
     entryReceiptTemplate: 'DEFAULT_2VIAS',
     exitReceiptTemplate: 'MODERN_DETAILED',
   });
+  const [warrantyConfigData, setWarrantyConfigData] = useState<any>(null);
   const [companyInfo, setCompanyInfo] = useState<any>(null);
 
   useEffect(() => {
@@ -333,6 +349,25 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       if (p) setOsPreferences(p);
     });
 
+    fetchWarrantyConfigMobile().then((w) => {
+      if (w) {
+        setWarrantyConfigData(w);
+        if (!orderToEdit) {
+          if (w.defaultDays) setWarrantyDays(w.defaultDays);
+          if (w.defaultTerms) setWarrantyTerms(w.defaultTerms);
+        }
+      }
+    });
+    const unsubWarranty = subscribeWarrantyConfigMobile((w) => {
+      if (w) {
+        setWarrantyConfigData(w);
+        if (!orderToEdit) {
+          if (w.defaultDays) setWarrantyDays(w.defaultDays);
+          if (w.defaultTerms) setWarrantyTerms(w.defaultTerms);
+        }
+      }
+    });
+
     fetchCompanyDataMobile().then((c) => {
       if (c) setCompanyInfo(c);
     });
@@ -340,30 +375,40 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       if (c) setCompanyInfo(c);
     });
 
-    const unsubParts = onSnapshot(collection(db, 'parts'), (snap) => {
-      if (!snap.empty) {
-        const pList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        setAvailableParts(pList);
-      }
-    });
+    let unsubParts = () => {};
+    let unsubServices = () => {};
+    let unsubEquipments = () => {};
+    let unsubStatuses = () => {};
 
-    const unsubServices = onSnapshot(collection(db, 'services'), (snap) => {
-      if (!snap.empty) {
-        const sList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        setAvailableServices(sList);
-      }
-    });
+    import('../services/firebase').then(async ({ getActiveMobileFirestore }) => {
+      try {
+        const activeDb = await getActiveMobileFirestore();
+        unsubParts = onSnapshot(collection(activeDb, 'parts'), (snap) => {
+          if (!snap.empty) {
+            const pList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+            setAvailableParts(pList);
+          }
+        });
 
-    const unsubEquipments = onSnapshot(collection(db, 'equipments'), (snap) => {
-      const eList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setAvailableEquipments(eList);
-    });
+        unsubServices = onSnapshot(collection(activeDb, 'services'), (snap) => {
+          if (!snap.empty) {
+            const sList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+            setAvailableServices(sList);
+          }
+        });
 
-    const unsubStatuses = onSnapshot(collection(db, 'os_statuses'), (snap) => {
-      if (!snap.empty) {
-        const stList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-        setAvailableStatuses(stList);
-      }
+        unsubEquipments = onSnapshot(collection(activeDb, 'equipments'), (snap) => {
+          const eList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+          setAvailableEquipments(eList);
+        });
+
+        unsubStatuses = onSnapshot(collection(activeDb, 'os_statuses'), (snap) => {
+          if (!snap.empty) {
+            const stList = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+            setAvailableStatuses(stList);
+          }
+        });
+      } catch {}
     });
 
     return () => {
@@ -402,6 +447,18 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       (c.city || '').toLowerCase().includes(term)
     );
   });
+
+  const formatCurrencyMask = (val: any): string => {
+    if (val === null || val === undefined || val === '') return '0,00';
+    if (typeof val === 'number') {
+      return val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    const str = String(val).trim();
+    const digits = str.replace(/\D/g, '');
+    if (!digits) return '';
+    const num = parseInt(digits, 10) / 100;
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
   const calculateTotal = () => {
     return itemsList.reduce((acc, item) => {
@@ -512,7 +569,9 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       const servicesOnly = itemsList.filter((x) => x.itemType === 'SERVICE');
       const grandTotal = calculateTotal();
       const currentFinalStatus = extraPayload.status || orderStatus;
-      const techName = selectedTechnicianName ? selectedTechnicianName.trim() : '';
+      const loggedInName = (currentUser?.name || currentUser?.username || '').trim();
+      const techName = (selectedTechnicianName ? selectedTechnicianName.trim() : loggedInName) || 'Técnico';
+      const attName = (selectedAttendantName ? selectedAttendantName.trim() : loggedInName) || 'Atendente';
 
       // Ajusta estoque com base nas peças e no novo status da OS
       const previousStatus = currentOrder?.status || orderToEdit?.status || '';
@@ -534,18 +593,25 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
         client: selectedClient,
         technician: techName,
         technicianName: techName,
+        attendant: attName,
+        attendantName: attName,
         equipment: {
           type: equipmentType,
           brand: equipmentBrand,
           model: equipmentModel,
           serialNumber: serialNumber,
           code: equipmentCode,
+          observations: equipmentObservations,
         },
         entryDate,
         exitDate: extraPayload.exitDate || exitDate,
         problemDescription,
+        printProblemDescription,
         technicalReport,
+        printTechnicalReport,
         executedService,
+        printExecutedService,
+        printEquipmentObservations,
         servicePerformed: executedService,
         servicoExecutado: executedService,
         parts: partsOnly,
@@ -584,7 +650,9 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
 
       if (saved) {
         setCurrentOrder(saved);
-        setLastSavedSnapshot(getFormSnapshot());
+        // Atualiza o snapshot com o estado exato recém-salvo para resetar o isDirty
+        const savedSnapshot = getFormSnapshot();
+        setLastSavedSnapshot(savedSnapshot);
       }
 
       // Avisa sobre estoque insuficiente
@@ -597,8 +665,20 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       }
 
       if (!silent) {
-        Alert.alert('Sucesso', (activeCode || saved?.code) ? `OS ${saved?.code || activeCode} salva com sucesso!` : 'Ordem de Serviço salva com sucesso!');
-        onSaved?.(); // Atualiza listas em background sem forçar saída da tela
+        if (saved?.code && String(saved.code).includes('Aguardando')) {
+          Alert.alert(
+            'OS Salva em Modo de Espera',
+            'Sua Ordem de Serviço foi salva com sucesso no celular.\n\nAssim que houver conexão com a internet, o sistema buscará o próximo número oficial disponível na central e sincronizará automaticamente.',
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert(
+            'Sucesso',
+            `Ordem de Serviço ${saved?.code || activeCode || ''} salva com sucesso!`,
+            [{ text: 'OK' }]
+          );
+        }
+        onSaved?.(); // Atualiza listas em background
       }
       return saved;
     } catch (err) {
@@ -609,7 +689,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
     }
   };
 
-  // GERADOR DO COMPROVANTE EXATO IDÊNTICO AO PC COM 2 VIAS OU SAÍDA
+  // GERADOR DO COMPROVANTE EXATO IDÊNTICO AO PC COM 1 VIA DO CLIENTE OU SAÍDA
   const handleGenerateReceipt = async (receiptType: 'ENTRADA' | 'SAIDA', finalizedOrderData?: any) => {
     let orderToUse = finalizedOrderData;
     if (!orderToUse) {
@@ -622,466 +702,413 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       const grandTotal = calculateTotal();
       const todayFormatted = new Date().toLocaleDateString('pt-BR');
       const printTimeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const compName = companyInfo?.tradingName || companyInfo?.name || 'Vollen Assistência Técnica';
-      const compSlogan = companyInfo?.slogan || 'Assistência Técnica Especializada em Eletrodomésticos';
-      const compLogo = companyInfo?.logoUrl ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 48px; max-width: 90px; object-fit: contain;" />` : '';
-      const compCnpj = companyInfo?.cnpj ? `CNPJ: ${companyInfo.cnpj}` : '';
-      const compPhone = companyInfo?.phone || companyInfo?.whatsapp ? `Tel: ${companyInfo?.phone || companyInfo?.whatsapp}` : '';
-      const compAddress = companyInfo?.address ? `${companyInfo.address}, ${companyInfo.number || 'S/N'} - ${companyInfo.neighborhood || ''} • ${companyInfo.city || ''}/${companyInfo.state || ''}` : '';
 
-      const entryTemplate = osPreferences?.entryReceiptTemplate || 'DEFAULT_2VIAS';
-      const exitTemplate = osPreferences?.exitReceiptTemplate || 'MODERN_DETAILED';
+      // Busca dados atualizados da empresa se não estiverem no state
+      let activeCompany = companyInfo;
+      if (!activeCompany || !activeCompany.name) {
+        try {
+          activeCompany = await fetchCompanyDataMobile();
+          if (activeCompany) setCompanyInfo(activeCompany);
+        } catch {}
+      }
+
+      // Dados da Empresa
+      const compName = activeCompany?.tradingName || activeCompany?.name || 'Vollen - Gestão OS';
+      const compSlogan = activeCompany?.slogan || 'Assistência Técnica Especializada';
+      const compLogo = activeCompany?.logoUrl ? `<img src="${activeCompany.logoUrl}" alt="Logo" style="height: 48px; width: auto; max-width: 120px; object-fit: contain; flex-shrink: 0;" />` : '';
+      const compCnpj = activeCompany?.cnpj || '';
+      const compPhone = activeCompany?.phone || activeCompany?.whatsapp || '';
+      const compEmail = activeCompany?.email || '';
+      const compAddress = activeCompany?.address ? `${activeCompany.address}${activeCompany.number ? `, ${activeCompany.number}` : ''}${activeCompany.neighborhood ? ` - ${activeCompany.neighborhood}` : ''}${activeCompany.city ? ` • ${activeCompany.city}/${activeCompany.state || ''}` : ''}` : '';
+
+      // Dados do Cliente
+      const cClient = {
+        name: selectedClient?.name || orderToUse.client?.name || '',
+        address: selectedClient?.address || orderToUse.client?.address || '',
+        number: selectedClient?.number || orderToUse.client?.number || '',
+        neighborhood: selectedClient?.neighborhood || orderToUse.client?.neighborhood || '',
+        city: selectedClient?.city || orderToUse.client?.city || '',
+        state: selectedClient?.state || orderToUse.client?.state || '',
+        complement: selectedClient?.complement || orderToUse.client?.complement || '',
+        reference: selectedClient?.reference || orderToUse.client?.reference || '',
+        phone: selectedClient?.phone || orderToUse.client?.phone || '',
+        whatsapp: selectedClient?.whatsapp || orderToUse.client?.whatsapp || '',
+      };
+
+      // Dados do Equipamento
+      const cEq = {
+        type: equipmentType || orderToUse.equipment?.type || '',
+        brand: equipmentBrand || orderToUse.equipment?.brand || '',
+        model: equipmentModel || orderToUse.equipment?.model || '',
+        serialNumber: serialNumber || orderToUse.equipment?.serialNumber || '',
+        accessories: equipmentCode || orderToUse.equipment?.accessories || orderToUse.equipment?.code || '',
+        observations: (equipmentObservations || orderToUse.equipment?.observations || '').trim(),
+      };
+
+      // Responsáveis
+      const cAttendant = selectedAttendantName || orderToUse.attendant || orderToUse.attendantName || '';
+      const cTech = orderToUse.technician || orderToUse.technicianName || selectedTechnicianName || '';
+
+      // Datas
+      const cEntry = orderToUse.entryDate || entryDate || todayFormatted;
+      const cExit = orderToUse.exitDate || exitDate || todayFormatted;
+
+      // Defeito, Laudo, Serviço e Observações
+      const cProblem = problemDescription || orderToUse.problemDescription || '';
+      const cReport = technicalReport || orderToUse.technicalReport || '';
+      const cExecuted = executedService || orderToUse.executedService || '';
+      const cObs = orderToUse.orderObservations || orderToUse.observations || additionalNotes || orderToUse.nfData?.additionalNotes || '';
+
+      // Garantia & Termos
+      const cWarrantyType = warrantyType || orderToUse.warrantyType || 'NAO_SE_APLICA';
+      const cDays = parseInt(String(warrantyDays || orderToUse.warrantyDays || orderToUse.warrantyTermsData?.periodDays || '90'), 10);
+      const cTerms = warrantyTerms || orderToUse.warrantyTerms || orderToUse.warrantyTermsData?.termsText || warrantyConfigData?.defaultExitTerms || warrantyConfigData?.defaultTerms || 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado. Não cobre danos por mau uso, umidade, descargas elétricas ou intervenção de terceiros.';
+      const cEntryTerms = warrantyConfigData?.defaultEntryTerms || warrantyConfigData?.defaultEstimateTerms || 'O cliente autoriza a realização da avaliação e diagnóstico técnico no equipamento descrito neste comprovante. Equipamentos não retirados em até 90 dias após notificação estarão sujeitos a taxas de armazenamento ou descarte conforme a lei.';
+
+      // Itens (Peças e Serviços)
+      const cParts = (orderToUse.parts || orderToUse.partsUsed || itemsList.filter((i: any) => i.itemType === 'PART') || []);
+      const cServices = (orderToUse.services || orderToUse.servicesExecuted || itemsList.filter((i: any) => i.itemType === 'SERVICE') || []);
+
+      // Dados da Nota Fiscal
+      const cNf = {
+        nfNumber: orderToUse.nfNumber || orderToUse.nfData?.nfNumber || nfNumber || '',
+        purchaseDate: orderToUse.purchaseDate || orderToUse.nfData?.purchaseDate || purchaseDate || '',
+        retailerName: orderToUse.retailerName || orderToUse.nfData?.retailerName || retailerName || '',
+        authorizedCode: orderToUse.authorizedCode || orderToUse.nfData?.authorizedCode || authorizedCode || '',
+      };
+
+      // Cálculo de Validade da Garantia da Loja
+      let expiryStr = '';
+      if (cWarrantyType === 'GARANTIA_LOJA' && !isNaN(cDays) && cDays > 0) {
+        try {
+          const baseDate = cExit || cEntry;
+          const parts = baseDate.split('T')[0].split('-');
+          if (parts.length === 3) {
+            const sd = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            sd.setDate(sd.getDate() + cDays);
+            expiryStr = sd.toLocaleDateString('pt-BR');
+          }
+        } catch {}
+      }
+
+      const osDisplayCode = String(orderToUse.code).startsWith('OS') ? orderToUse.code : `OS-${orderToUse.code}`;
 
       let htmlContent = '';
 
       if (isEntrada) {
-        if (entryTemplate === 'THERMAL_80MM') {
-          htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Comprovante de Entrada - ${orderToUse.code}</title>
-              <style>
-                @page { size: 80mm auto; margin: 2mm; }
-                body { font-family: monospace; font-size: 11px; color: #000; margin: 0; padding: 4px; }
-                .center { text-align: center; }
-                .border-bottom { border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px; }
-                .sig { border-top: 1px solid #000; margin-top: 25px; text-align: center; padding-top: 4px; }
-              </style>
-            </head>
-            <body>
-              <div class="center border-bottom">
+        // COMPROVANTE DE ENTRADA • VIA ÚNICA DO CLIENTE (FOLHA A4 COMPLETA E DETALHADA)
+        htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Comprovante de Entrada - ${osDisplayCode}</title>
+            <style>
+              @page { size: A4; margin: 8mm 10mm; }
+              * { box-sizing: border-box; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #0f172a; margin: 0; padding: 0; line-height: 1.4; }
+              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; gap: 8px; }
+              .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+              .box { background: #f8fafc; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; }
+              .box-title { font-weight: bold; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
+            </style>
+          </head>
+          <body>
+            <!-- CABEÇALHO COM DADOS DA EMPRESA E IDENTIFICAÇÃO DA OS -->
+            <div class="header">
+              <div style="display: flex; align-items: center; gap: 12px;">
                 ${compLogo}
-                <div style="font-size: 14px; font-weight: bold; text-transform: uppercase;">${compName}</div>
-                <div style="font-size: 9px;">${compCnpj} | ${compPhone}</div>
-                <div style="font-size: 8px;">${compAddress}</div>
-                <div style="margin-top: 6px; font-weight: bold; font-size: 13px; border: 1px solid #000; padding: 2px 4px; display: inline-block;">
-                  COMPROVANTE DE ENTRADA #${orderToUse.code}
+                <div>
+                  <div style="font-size: 16px; font-weight: 900; color: #0f172a; text-transform: uppercase; line-height: 1.1;">${compName}</div>
+                  <div style="font-size: 10px; color: #475569; font-weight: 500;">${compSlogan}</div>
+                  <div style="font-size: 9px; color: #64748b;">${compCnpj ? `CNPJ: ${compCnpj} | ` : ''}${compPhone ? `Tel: ${compPhone}` : ''}${compEmail ? ` | ${compEmail}` : ''}</div>
+                  <div style="font-size: 9px; color: #64748b;">${compAddress}</div>
                 </div>
               </div>
-
-              <div class="border-bottom">
-                <p><strong>Entrada:</strong> ${orderToUse.entryDate || todayFormatted} ${printTimeStr}</p>
-                <p><strong>Cliente:</strong> ${selectedClient.name?.toUpperCase()}</p>
-                <p><strong>Fone:</strong> ${selectedClient.phone || selectedClient.whatsapp || '-'}</p>
-                <p><strong>Equipamento:</strong> ${equipmentType} ${equipmentBrand || ''} ${equipmentModel || ''}</p>
-                <p><strong>Nº Série:</strong> ${serialNumber || 'N/A'}</p>
-                <p><strong>Acessórios:</strong> ${equipmentCode || 'Nenhum'}</p>
+              <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0;">
+                <span style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 9px; font-weight: 900; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; margin-bottom: 2px;">COMPROVANTE DE ENTRADA • VIA DO CLIENTE</span>
+                <div style="font-size: 18px; font-weight: 900; color: #0f172a; font-family: monospace; line-height: 1.1;">${osDisplayCode}</div>
+                <div style="font-size: 9.5px; font-weight: bold; color: #334155;">ENTRADA: ${cEntry}</div>
+                <div style="font-size: 8.5px; font-weight: 600; color: #64748b;">EMISSÃO: ${printTimeStr}</div>
               </div>
+            </div>
 
-              <div class="border-bottom">
-                <p><strong>Defeito Relatado:</strong></p>
-                <p>${problemDescription || 'Nenhum defeito relatado.'}</p>
+            <!-- DADOS DO CLIENTE & EQUIPAMENTO -->
+            <div class="grid-2">
+              <div class="box">
+                <div class="box-title">Dados do Cliente</div>
+                <div><strong>Nome:</strong> ${cClient.name || 'Não informado'}</div>
+                <div><strong>Endereço:</strong> ${cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : 'Endereço não informado'}</div>
+                <div><strong>Bairro:</strong> ${cClient.neighborhood || ''} ${cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state || ''}` : ''}</div>
+                ${cClient.complement ? `<div><strong>Complemento:</strong> ${cClient.complement}</div>` : ''}
+                ${cClient.reference ? `<div><strong>Referência:</strong> ${cClient.reference}</div>` : ''}
+                <div><strong>Telefone:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</div>
               </div>
-
-              <div style="font-size: 8px; margin-top: 6px;">
-                * Apresente este comprovante para retirada do equipamento. Prazo legal de guarda: 90 dias.
+              <div class="box">
+                <div class="box-title">Dados do Aparelho / Equipamento</div>
+                <div><strong>Equipamento:</strong> ${cEq.type || 'Equipamento Geral'}</div>
+                <div><strong>Marca:</strong> ${cEq.brand || 'N/A'} ${cEq.model ? `| <strong>Modelo:</strong> ${cEq.model}` : ''}</div>
+                <div><strong>Nº de Série:</strong> ${cEq.serialNumber || 'N/A'}</div>
+                <div><strong>Acessórios:</strong> ${cEq.accessories || 'Nenhum'}</div>
               </div>
+            </div>
 
-              <div class="sig">
-                Assinatura do Cliente
+            <!-- RESPONSÁVEIS E DADOS DE GARANTIA / NOTA FISCAL -->
+            <div class="grid-2">
+              <div style="background: rgba(240, 249, 255, 0.7); padding: 8px 10px; border-radius: 8px; border: 1px solid #bae6fd;">
+                <span style="font-weight: bold; color: #082f49; text-transform: uppercase; font-size: 9px; display: block; border-bottom: 1px solid #bae6fd; padding-bottom: 2px; margin-bottom: 3px;">Responsáveis pelo Atendimento:</span>
+                <div style="font-size: 9.5px; color: #1e293b;">
+                  <div><strong>Atendente:</strong> ${cAttendant || 'Não informado'}</div>
+                  ${cTech ? `<div><strong>Técnico:</strong> ${cTech}</div>` : ''}
+                </div>
               </div>
-            </body>
-            </html>
-          `;
-        } else {
-          // Padrão 2 Vias Compacto e Elegante
-          htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Comprovante de Entrada - ${orderToUse.code}</title>
-              <style>
-                @page { size: A4; margin: 8mm; }
-                body { font-family: Arial, sans-serif; font-size: 10px; color: #0f172a; margin: 0; padding: 0; }
-                .via-box { border: 1.5px solid #334155; border-radius: 8px; padding: 10px; margin-bottom: 8px; background: #ffffff; }
-                .header { display: flex; justify-content: space-between; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 6px; }
-                .company-name { font-size: 13px; font-weight: bold; text-transform: uppercase; color: #0f172a; }
-                .os-badge { font-size: 13px; font-weight: bold; font-family: monospace; color: #0369a1; text-align: right; }
-                .badge-tag { display: inline-block; background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: bold; text-transform: uppercase; }
-                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
-                .sub-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px; line-height: 1.35; }
-                .sub-title { font-size: 8.5px; font-weight: bold; text-transform: uppercase; color: #475569; border-bottom: 1px solid #e2e8f0; margin-bottom: 4px; padding-bottom: 2px; }
-                .cut-line { border-bottom: 1.5px dashed #94a3b8; text-align: center; margin: 8px 0; position: relative; height: 8px; }
-                .cut-text { background: #fff; padding: 0 8px; font-size: 8px; color: #94a3b8; font-weight: bold; position: relative; top: -6px; }
-                .sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: center; margin-top: 8px; padding-top: 6px; font-size: 8px; }
-                .sig-line { border-top: 1px solid #64748b; margin-bottom: 2px; }
-              </style>
-            </head>
-            <body>
-              <!-- VIA 1: VIA DA EMPRESA -->
-              <div class="via-box">
-                <div class="header">
-                  <div style="display: flex; gap: 8px; align-items: center;">
-                    ${compLogo}
-                    <div>
-                      <span class="badge-tag">VIA DA EMPRESA</span>
-                      <div class="company-name">${compName}</div>
-                      <div style="font-size: 8px; color: #64748b;">${compSlogan} • ${compCnpj} • ${compPhone}</div>
-                    </div>
+              <div class="box">
+                <div class="box-title">Garantia / Nota Fiscal</div>
+                ${cWarrantyType === 'GARANTIA_FABRICA' ? `
+                  <div style="font-size: 9.5px; color: #334155;">
+                    <div><strong>Garantia:</strong> Fabricante</div>
+                    <div><strong>NF:</strong> ${cNf.nfNumber || '-'} | <strong>Compra:</strong> ${cNf.purchaseDate ? new Date(cNf.purchaseDate).toLocaleDateString('pt-BR') : '-'}</div>
+                    <div><strong>Revenda:</strong> ${cNf.retailerName || '-'} | <strong>Autoriz.:</strong> ${cNf.authorizedCode || '-'}</div>
                   </div>
-                  <div class="os-badge">
-                    OS #${orderToUse.code}
-                    <div style="font-size: 8px; color: #64748b; font-weight: normal;">Entrada: ${orderToUse.entryDate || todayFormatted} | ${printTimeStr}</div>
+                ` : cWarrantyType === 'GARANTIA_LOJA' ? `
+                  <div style="font-size: 9.5px; color: #334155;">
+                    <div><strong>Garantia:</strong> Loja / Empresa (${cDays} dias)</div>
+                    ${expiryStr ? `<div><strong>Válida até:</strong> ${expiryStr}</div>` : ''}
                   </div>
-                </div>
+                ` : `
+                  <div style="font-size: 9.5px; color: #64748b;">GARANTIA FABRICA / EMPRESA: NÃO SE APLICA</div>
+                `}
+              </div>
+            </div>
 
-                <div class="grid">
-                  <div class="sub-box">
-                    <div class="sub-title">Dados do Cliente</div>
-                    <div><strong>Nome:</strong> ${selectedClient.name?.toUpperCase()}</div>
-                    <div><strong>Telefone:</strong> ${selectedClient.phone || selectedClient.whatsapp || '-'}</div>
-                    <div><strong>Endereço:</strong> ${selectedClient.address || ''}, ${selectedClient.number || 'S/N'} - ${selectedClient.neighborhood || ''}</div>
-                    <div><strong>Cidade/UF:</strong> ${selectedClient.city || ''}</div>
-                  </div>
-                  <div class="sub-box">
-                    <div class="sub-title">Dados do Equipamento</div>
-                    <div><strong>Tipo/Aparelho:</strong> ${equipmentType} ${equipmentBrand || ''}</div>
-                    ${equipmentModel ? `<div><strong>Modelo:</strong> ${equipmentModel}</div>` : ''}
-                    <div><strong>Nº de Série:</strong> ${serialNumber || '-'}</div>
-                    <div><strong>Modalidade:</strong> ${warrantyType === 'GARANTIA_LOJA' ? 'Garantia da Loja' : warrantyType === 'GARANTIA_FABRICA' ? 'Garantia de Fábrica' : 'Sem Garantia'}</div>
-                  </div>
-                </div>
+            <!-- OBSERVAÇÕES DO EQUIPAMENTO -->
+            ${printEquipmentObservations && cEq.observations ? `
+              <div class="box" style="margin-bottom: 8px;">
+                <div class="box-title">Obs. do Equipamento:</div>
+                <div style="color: #1e293b; min-height: 1.5em; white-space: pre-wrap;">${cEq.observations}</div>
+              </div>
+            ` : ''}
 
-                <div class="grid" style="margin-bottom: 6px;">
-                  <div class="sub-box" style="background: #f0f9ff; border-color: #bae6fd;">
-                    <div class="sub-title" style="color: #0369a1; border-bottom-color: #e0f2fe;">Atendente Responsável</div>
-                    <div><strong>Nome:</strong> ${selectedAttendantName || orderToUse.attendant || 'Não informado'}</div>
+            <!-- DEFEITO RECLAMADO E LAUDO TÉCNICO INICIAL -->
+            ${(printProblemDescription || printTechnicalReport) ? `
+              <div class="box" style="margin-bottom: 8px;">
+                ${printProblemDescription ? `
+                  <div style="margin-bottom: 6px;">
+                    <div class="box-title">Defeito / Reclamação Relatada:</div>
+                    <div style="color: #334155; min-height: 2.2em; white-space: pre-wrap;">${cProblem || 'Não informado.'}</div>
                   </div>
-                  <div class="sub-box" style="background: #eef2ff; border-color: #c7d2fe;">
-                    <div class="sub-title" style="color: #4338ca; border-bottom-color: #e0e7ff;">Técnico Responsável</div>
-                    <div><strong>Nome:</strong> ${orderToUse.technician || selectedTechnicianName || 'Não informado'}</div>
-                  </div>
-                </div>
-
-                ${orderToUse.guarantor === 'FABRICANTE' ? `
-                <div class="sub-box" style="margin-bottom: 6px; background: #fffbeb; border-color: #fde68a;">
-                  <div class="sub-title" style="color: #92400e; border-bottom-color: #fef3c7;">📄 Dados da Nota Fiscal (Garantia do Fabricante)</div>
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 8.5px;">
-                    <div><strong>Nº NF:</strong> ${orderToUse.nfNumber || '-'}</div>
-                    <div><strong>Data de Compra:</strong> ${orderToUse.purchaseDate || '-'}</div>
-                  </div>
-                  <div style="font-size: 8.5px; margin-top: 2px;">
-                    <strong>Revenda:</strong> ${orderToUse.retailerName || '-'} | <strong>CNPJ:</strong> ${orderToUse.cnpj || '-'}
-                  </div>
-                </div>
                 ` : ''}
-
-                <div class="sub-box" style="margin-bottom: 6px;">
-                  <div style="margin-bottom: 4px;">
-                    <strong>Defeito / Problema Relatado:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${problemDescription || ''}</div>
+                ${printTechnicalReport ? `
+                  <div style="${printProblemDescription ? 'border-top: 1px solid #cbd5e1; padding-top: 5px; margin-top: 5px;' : ''}">
+                    <div class="box-title">Laudo Técnico Inicial:</div>
+                    <div style="color: #334155; min-height: 2.2em; white-space: pre-wrap;">${cReport || 'Não informado.'}</div>
                   </div>
-                  <div style="margin-bottom: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-                    <strong>Laudo Técnico:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${technicalReport || ''}</div>
-                  </div>
-                  <div style="margin-bottom: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-                    <strong>Observações do Equipamento:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${equipmentCode || ''}</div>
-                  </div>
-                  <div style="font-size: 7.5px; color: #64748b; margin-top: 4px; border-top: 1px solid #f1f5f9; padding-top: 2px;">
-                    * O cliente autoriza a avaliação técnica no equipamento. Equipamentos não retirados em até 90 dias após notificação estarão sujeitos a taxa de guarda conforme a lei.
-                  </div>
-                </div>
-
-                <div class="sigs">
-                  <div><div class="sig-line"></div>Assinatura da Empresa</div>
-                  <div><div class="sig-line"></div>Assinatura do Cliente</div>
-                </div>
-              </div>
-
-              <div class="cut-line"><span class="cut-text">✂ CORTE AQUI ✂</span></div>
-
-              <!-- VIA 2: VIA DO CLIENTE -->
-              <div class="via-box">
-                <div class="header">
-                  <div style="display: flex; gap: 8px; align-items: center;">
-                    ${compLogo}
-                    <div>
-                      <span class="badge-tag" style="background: #dcfce7; color: #15803d; border-color: #86efac;">VIA DO CLIENTE</span>
-                      <div class="company-name">${compName}</div>
-                      <div style="font-size: 8px; color: #64748b;">${compSlogan} • ${compCnpj} • ${compPhone}</div>
-                    </div>
-                  </div>
-                  <div class="os-badge">
-                    OS #${orderToUse.code}
-                    <div style="font-size: 8px; color: #64748b; font-weight: normal;">Entrada: ${orderToUse.entryDate || todayFormatted} | ${printTimeStr}</div>
-                  </div>
-                </div>
-
-                <div class="grid">
-                  <div class="sub-box">
-                    <div class="sub-title">Dados do Cliente</div>
-                    <div><strong>Nome:</strong> ${selectedClient.name?.toUpperCase()}</div>
-                    <div><strong>Telefone:</strong> ${selectedClient.phone || selectedClient.whatsapp || '-'}</div>
-                    <div><strong>Endereço:</strong> ${selectedClient.address || ''}, ${selectedClient.number || 'S/N'} - ${selectedClient.neighborhood || ''}</div>
-                    <div><strong>Cidade/UF:</strong> ${selectedClient.city || ''}</div>
-                  </div>
-                  <div class="sub-box">
-                    <div class="sub-title">Dados do Equipamento</div>
-                    <div><strong>Tipo/Aparelho:</strong> ${equipmentType} ${equipmentBrand || ''}</div>
-                    ${equipmentModel ? `<div><strong>Modelo:</strong> ${equipmentModel}</div>` : ''}
-                    <div><strong>Nº de Série:</strong> ${serialNumber || '-'}</div>
-                    <div><strong>Modalidade:</strong> ${warrantyType === 'GARANTIA_LOJA' ? 'Garantia da Loja' : warrantyType === 'GARANTIA_FABRICA' ? 'Garantia de Fábrica' : 'Sem Garantia'}</div>
-                  </div>
-                </div>
-
-                ${orderToUse.guarantor === 'FABRICANTE' ? `
-                <div class="sub-box" style="margin-bottom: 6px; background: #fffbeb; border-color: #fde68a;">
-                  <div class="sub-title" style="color: #92400e; border-bottom-color: #fef3c7;">📄 Dados da Nota Fiscal (Garantia do Fabricante)</div>
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 8.5px;">
-                    <div><strong>Nº NF:</strong> ${orderToUse.nfNumber || '-'}</div>
-                    <div><strong>Data de Compra:</strong> ${orderToUse.purchaseDate || '-'}</div>
-                  </div>
-                  <div style="font-size: 8.5px; margin-top: 2px;">
-                    <strong>Revenda:</strong> ${orderToUse.retailerName || '-'} | <strong>CNPJ:</strong> ${orderToUse.cnpj || '-'}
-                  </div>
-                </div>
                 ` : ''}
-
-                <div class="sub-box" style="margin-bottom: 6px;">
-                  <div style="margin-bottom: 4px;">
-                    <strong>Defeito / Problema Relatado:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${problemDescription || ''}</div>
-                  </div>
-                  <div style="margin-bottom: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-                    <strong>Laudo Técnico:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${technicalReport || ''}</div>
-                  </div>
-                  <div style="margin-bottom: 4px; border-top: 1px solid #e2e8f0; padding-top: 4px;">
-                    <strong>Observações do Equipamento:</strong>
-                    <div style="min-height: 3.2em; padding-top: 2px;">${equipmentCode || ''}</div>
-                  </div>
-                  <div style="font-size: 7.5px; color: #64748b; margin-top: 4px; border-top: 1px solid #f1f5f9; padding-top: 2px;">
-                    * Guarde este comprovante para a retirada do equipamento ou acompanhamento do serviço.
-                  </div>
-                </div>
-
-                <div class="sigs">
-                  <div><div class="sig-line"></div>Assinatura da Empresa</div>
-                  <div><div class="sig-line"></div>Assinatura do Cliente</div>
-                </div>
               </div>
-            </body>
-            </html>
-          `;
-        }
+            ` : ''}
+
+            <!-- OBSERVAÇÕES GERAIS DA ORDEM DE SERVIÇO -->
+            ${cObs ? `
+              <div class="box" style="margin-bottom: 8px;">
+                <div class="box-title">Observações da Ordem de Serviço:</div>
+                <div style="color: #334155; min-height: 1.5em; white-space: pre-wrap;">${cObs}</div>
+              </div>
+            ` : ''}
+
+            <!-- TERMOS DE ENTRADA -->
+            <div class="box" style="margin-bottom: 8px;">
+              <div class="box-title">Termos de Entrada e Guarda do Equipamento:</div>
+              <div style="font-size: 9px; color: #475569; line-height: 1.35; white-space: pre-wrap;">${cEntryTerms}</div>
+            </div>
+
+            <!-- ASSINATURAS -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding-top: 25px; text-align: center; font-size: 11px;">
+              <div>
+                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
+                <div style="font-weight: bold; color: #1e293b;">Assinatura da Empresa</div>
+                <div style="font-size: 9.5px; color: #64748b;">${compName}</div>
+              </div>
+              <div>
+                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
+                <div style="font-weight: bold; color: #1e293b;">Assinatura do Cliente</div>
+                <div style="font-size: 9.5px; color: #64748b;">${cClient.name || 'Cliente'}</div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
       } else {
-        // Comprovante de Saída
-        if (exitTemplate === 'THERMAL_80MM') {
-          htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Comprovante de Saída - ${orderToUse.code}</title>
-              <style>
-                @page { size: 80mm auto; margin: 2mm; }
-                body { font-family: monospace; font-size: 11px; color: #000; margin: 0; padding: 4px; }
-                .center { text-align: center; }
-                .border-bottom { border-bottom: 1px dashed #000; padding-bottom: 6px; margin-bottom: 6px; }
-                .sig { border-top: 1px solid #000; margin-top: 25px; text-align: center; padding-top: 4px; }
-              </style>
-            </head>
-            <body>
-              <div class="center border-bottom">
+        // COMPROVANTE DE SAÍDA / ENTREGA IDÊNTICO AO DESKTOP (FOLHA A4 - 1 VIA COMPLETA)
+        htmlContent = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Comprovante de Saída - ${osDisplayCode}</title>
+            <style>
+              @page { size: A4; margin: 8mm 10mm; }
+              * { box-sizing: border-box; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #0f172a; margin: 0; padding: 0; line-height: 1.4; }
+              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; gap: 8px; }
+              .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+              .box { background: #f8fafc; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; }
+              .box-title { font-weight: bold; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
+              table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10.5px; }
+              th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; }
+              th { background: #f1f5f9; font-size: 9.5px; text-transform: uppercase; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <!-- TOPO DA SAÍDA -->
+            <div class="header">
+              <div style="display: flex; align-items: center; gap: 12px;">
                 ${compLogo}
-                <div style="font-size: 14px; font-weight: bold; text-transform: uppercase;">${compName}</div>
-                <div style="font-size: 9px;">${compCnpj} | ${compPhone}</div>
-                <div style="margin-top: 6px; font-weight: bold; font-size: 13px; border: 1px solid #000; padding: 2px 4px; display: inline-block;">
-                  COMPROVANTE DE SAÍDA #${orderToUse.code}
+                <div>
+                  <div style="font-size: 16px; font-weight: 900; color: #0f172a; text-transform: uppercase; line-height: 1.1;">${compName}</div>
+                  <div style="font-size: 10px; color: #475569; font-weight: 500;">${compSlogan}</div>
+                  <div style="font-size: 9px; color: #64748b;">${compCnpj ? `CNPJ: ${compCnpj} | ` : ''}${compPhone ? `Tel: ${compPhone}` : ''}${compEmail ? ` | ${compEmail}` : ''}</div>
+                  <div style="font-size: 9px; color: #64748b;">${compAddress}</div>
                 </div>
               </div>
-
-              <div class="border-bottom">
-                <p><strong>Saída / Entrega:</strong> ${orderToUse.exitDate || todayFormatted} ${printTimeStr}</p>
-                <p><strong>Cliente:</strong> ${selectedClient.name?.toUpperCase()}</p>
-                <p><strong>Aparelho:</strong> ${equipmentType} ${equipmentBrand || ''} ${equipmentModel || ''}</p>
-                <p><strong>Nº Série:</strong> ${serialNumber || 'N/A'}</p>
-                <p><strong>Técnico:</strong> ${orderToUse.technician || selectedTechnicianName || 'Técnico Responsável'}</p>
+              <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0;">
+                <span style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 9px; font-weight: 900; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; margin-bottom: 2px;">COMPROVANTE DE SAÍDA / ENTREGA</span>
+                <div style="font-size: 18px; font-weight: 900; color: #0f172a; font-family: monospace; line-height: 1.1;">${osDisplayCode}</div>
+                <div style="font-size: 9.5px; font-weight: bold; color: #334155;">SAÍDA: ${cExit}</div>
+                <div style="font-size: 8.5px; font-weight: 600; color: #64748b;">EMISSÃO: ${printTimeStr}</div>
               </div>
+            </div>
 
-              <div class="border-bottom">
-                <p><strong>Serviço Executado:</strong></p>
-                <p>${executedService || 'Manutenção técnica executada.'}</p>
+            <!-- DADOS DO CLIENTE & EQUIPAMENTO -->
+            <div class="grid-2">
+              <div class="box">
+                <div class="box-title">Dados do Cliente</div>
+                <div><strong>Nome:</strong> ${cClient.name}</div>
+                <div><strong>Endereço:</strong> ${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}</div>
+                <div><strong>Bairro:</strong> ${cClient.neighborhood} ${cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state}` : ''}</div>
+                ${cClient.complement ? `<div><strong>Complemento:</strong> ${cClient.complement}</div>` : ''}
+                <div><strong>Telefone:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</div>
               </div>
+              <div class="box">
+                <div class="box-title">Dados do Aparelho / Equipamento</div>
+                <div><strong>Equipamento:</strong> ${cEq.type}</div>
+                <div><strong>Marca:</strong> ${cEq.brand} ${cEq.model ? `| <strong>Modelo:</strong> ${cEq.model}` : ''}</div>
+                <div><strong>Nº de Série:</strong> ${cEq.serialNumber || 'N/A'}</div>
+                <div><strong>Acessórios:</strong> ${cEq.accessories || 'Nenhum'}</div>
+              </div>
+            </div>
 
-              <div class="border-bottom" style="font-weight: bold; font-size: 13px; display: flex; justify-content: space-between;">
-                <span>TOTAL PAGO:</span>
-                <span>R$ ${grandTotal.toFixed(2)}</span>
-              </div>
+            <!-- RESPONSÁVEIS -->
+            <div style="background: rgba(240, 249, 255, 0.7); padding: 6px 10px; border-radius: 8px; border: 1px solid #bae6fd; margin-bottom: 8px;">
+              <span style="font-weight: bold; color: #082f49; text-transform: uppercase; font-size: 9px; display: block; border-bottom: 1px solid #bae6fd; padding-bottom: 2px; margin-bottom: 3px;">Responsáveis pelo Atendimento:</span>
+              <span style="font-size: 9.5px; color: #1e293b;">
+                <strong>Atendente:</strong> ${cAttendant || 'Não informado'} &nbsp;|&nbsp; <strong>Técnico:</strong> ${cTech || 'Não informado'}
+              </span>
+            </div>
 
-              <div class="border-bottom">
-                <p><strong>Garantia:</strong> ${orderToUse.warrantyDays || warrantyDays} Dias</p>
-                <p style="font-size: 8.5px;">${orderToUse.warrantyTerms || warrantyTerms}</p>
-              </div>
-
-              <div class="sig">
-                Responsável Técnico / Empresa
-              </div>
-            </body>
-            </html>
-          `;
-        } else {
-          // Moderno Detalhado / Padrão Oficial com Termos de Garantia
-          htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <title>Comprovante de Saída - ${orderToUse.code}</title>
-              <style>
-                @page { size: A4; margin: 10mm; }
-                body { font-family: Arial, sans-serif; font-size: 11px; color: #0f172a; margin: 0; padding: 0; line-height: 1.4; }
-                .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; }
-                .company-name { font-size: 16px; font-weight: bold; text-transform: uppercase; color: #0f172a; }
-                .os-card { border: 2px solid #0f172a; border-radius: 8px; padding: 6px 12px; text-align: right; background: #f8fafc; }
-                .os-num { font-size: 16px; font-weight: bold; font-family: monospace; }
-                .status-tag { display: inline-block; background: #dcfce7; color: #166534; font-weight: bold; font-size: 9px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
-                .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-                .box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; background: #ffffff; }
-                .box-title { font-size: 9.5px; font-weight: bold; text-transform: uppercase; color: #475569; border-bottom: 1px solid #e2e8f0; margin-bottom: 5px; padding-bottom: 2px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-                th, td { border: 1px solid #cbd5e1; padding: 5px 7px; text-align: left; font-size: 10px; }
-                th { background: #f1f5f9; text-transform: uppercase; font-size: 9px; }
-                .total-box { display: flex; justify-content: space-between; align-items: center; border-top: 2px solid #0f172a; margin-top: 8px; padding-top: 6px; font-size: 13px; font-weight: bold; }
-                .total-val { font-size: 16px; font-family: monospace; color: #15803d; }
-                .sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; text-align: center; margin-top: 25px; padding-top: 8px; }
-                .sig-line { border-top: 1px solid #334155; margin-bottom: 3px; }
-              </style>
-            </head>
-            <body>
-              <div class="header">
-                <div style="display: flex; gap: 10px; align-items: center;">
-                  ${compLogo}
-                  <div>
-                    <div class="company-name">${compName}</div>
-                    <div style="font-size: 9.5px; color: #475569;">${compSlogan}</div>
-                    <div style="font-size: 9px; color: #64748b;">${compCnpj} • ${compPhone}</div>
+            <!-- DEFEITO E LAUDO TÉCNICO -->
+            ${(printProblemDescription || printTechnicalReport) ? `
+              <div class="box" style="margin-bottom: 8px;">
+                ${printProblemDescription ? `
+                  <div style="margin-bottom: 4px;">
+                    <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 2px;">Defeito / Reclamação Relatada:</div>
+                    <div style="color: #334155; min-height: 2.2em;">${cProblem || 'Não informado.'}</div>
                   </div>
-                </div>
-                <div class="os-card">
-                  <div style="font-size: 8.5px; font-weight: bold; color: #64748b;">COMPROVANTE DE SAÍDA</div>
-                  <div class="os-num">OS #${orderToUse.code}</div>
-                  <span class="status-tag">FINALIZADA / ENTREGUE</span>
-                  <div style="font-size: 8px; color: #64748b; margin-top: 2px;">Saída: ${orderToUse.exitDate || todayFormatted} ${printTimeStr}</div>
+                ` : ''}
+                ${printTechnicalReport ? `
+                  <div style="${printProblemDescription ? 'border-top: 1px solid #cbd5e1; padding-top: 3px; margin-top: 3px;' : ''}">
+                    <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 2px;">Laudo Técnico Inicial:</div>
+                    <div style="color: #334155; min-height: 2.2em;">${cReport || 'Não informado.'}</div>
+                  </div>
+                ` : ''}
+              </div>
+            ` : ''}
+
+            <!-- SERVIÇO EXECUTADO -->
+            ${printExecutedService ? `
+              <div style="background: #f0fdf4; padding: 8px 10px; border-radius: 8px; border: 1px solid #86efac; margin-bottom: 8px;">
+                <div style="font-weight: bold; color: #14532d; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid #bbf7d0; padding-bottom: 2px; margin-bottom: 3px;">Serviço Executado / Realizado:</div>
+                <div style="color: #0f172a; font-weight: 500; min-height: 2.4em;">${cExecuted || 'Manutenção técnica executada.'}</div>
+              </div>
+            ` : ''}
+
+            <!-- DISCRIMINAÇÃO DE SERVIÇOS E PEÇAS -->
+            ${(cServices.length > 0 || cParts.length > 0) ? `
+              <div class="box" style="background: #ffffff; margin-bottom: 8px;">
+                <div class="grid-2" style="margin-bottom: 0;">
+                  ${cServices.length > 0 ? `
+                    <div>
+                      <span style="font-weight: bold; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 3px; display: block;">Serviços Realizados:</span>
+                      <ul style="margin: 0; padding-left: 14px; font-size: 10px; color: #334155;">
+                        ${cServices.map((s: any) => `<li>${s.name || s.description} - <strong>R$ ${(parseFloat(String(s.price || 0).replace(',', '.')) || 0).toFixed(2).replace('.', ',')}</strong></li>`).join('')}
+                      </ul>
+                    </div>
+                  ` : '<div></div>'}
+                  ${cParts.length > 0 ? `
+                    <div>
+                      <span style="font-weight: bold; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 3px; display: block;">Peças Trocadas:</span>
+                      <ul style="margin: 0; padding-left: 14px; font-size: 10px; color: #334155;">
+                        ${cParts.map((p: any) => `<li>${p.name || p.description} (Qtd: ${p.qty || 1}) - <strong>R$ ${(parseFloat(String(p.price || 0).replace(',', '.')) || 0).toFixed(2).replace('.', ',')}</strong></li>`).join('')}
+                      </ul>
+                    </div>
+                  ` : '<div></div>'}
                 </div>
               </div>
+            ` : ''}
 
-              <div class="grid">
-                <div class="box">
-                  <div class="box-title">Dados do Cliente</div>
-                  <div><strong>Nome:</strong> ${selectedClient.name?.toUpperCase()}</div>
-                  <div><strong>Telefone:</strong> ${selectedClient.phone || selectedClient.whatsapp || '-'}</div>
-                  <div><strong>Endereço:</strong> ${selectedClient.address || ''}, ${selectedClient.number || 'S/N'} - ${selectedClient.neighborhood || ''}</div>
-                  <div><strong>Cidade/UF:</strong> ${selectedClient.city || ''}</div>
-                </div>
-
-                <div class="box">
-                  <div class="box-title">Dados do Equipamento</div>
-                  <div><strong>Tipo/Aparelho:</strong> ${equipmentType} ${equipmentBrand || ''}</div>
-                  ${equipmentModel ? `<div><strong>Modelo:</strong> ${equipmentModel}</div>` : ''}
-                  <div><strong>Nº de Série:</strong> ${serialNumber || '-'}</div>
-                  <div><strong>Modalidade:</strong> ${warrantyType === 'GARANTIA_LOJA' ? 'Garantia da Empresa' : warrantyType === 'GARANTIA_FABRICA' ? 'Garantia de Fábrica' : 'Sem Garantia'}</div>
-                </div>
-              </div>
-
-              <div class="grid" style="margin-bottom: 8px;">
-                <div class="box" style="background: #f0f9ff; border-color: #bae6fd;">
-                  <div class="box-title" style="color: #0369a1; border-bottom-color: #e0f2fe;">Atendente Responsável</div>
-                  <div><strong>Nome:</strong> ${selectedAttendantName || orderToUse.attendant || 'Não informado'}</div>
-                </div>
-                <div class="box" style="background: #eef2ff; border-color: #c7d2fe;">
-                  <div class="box-title" style="color: #4338ca; border-bottom-color: #e0e7ff;">Técnico Responsável</div>
-                  <div><strong>Nome:</strong> ${orderToUse.technician || selectedTechnicianName || 'Não informado'}</div>
-                </div>
-              </div>
-
-              <div class="box" style="margin-bottom: 8px;">
-                <div class="box-title">Relatório Técnico e Serviços Realizados</div>
-                <div style="margin-bottom: 4px;">
-                  <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase; color: #475569; display: block; border-bottom: 1px solid #e2e8f0; margin-bottom: 2px;">Defeito Reclamado:</span>
-                  <div style="min-height: 3.2em; max-height: 3.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">${problemDescription || 'Não informado'}</div>
-                </div>
-                ${technicalReport ? `
-                <div style="margin-bottom: 4px;">
-                  <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase; color: #475569; display: block; border-bottom: 1px solid #e2e8f0; margin-bottom: 2px;">Laudo Técnico:</span>
-                  <div style="min-height: 3.2em; max-height: 3.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">${technicalReport}</div>
-                </div>` : ''}
-                <div style="margin-top: 4px; padding: 6px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; color: #166534;">
-                  <span style="font-size: 8.5px; font-weight: bold; text-transform: uppercase; display: block; border-bottom: 1px solid #bbf7d0; margin-bottom: 2px;">Serviço Executado:</span>
-                  <div style="font-weight: bold; min-height: 3.2em; max-height: 3.8em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">${executedService || 'Serviço concluído conforme especificações técnicas.'}</div>
-                </div>
-              </div>
-
-              ${itemsList.length > 0 && warrantyType !== 'GARANTIA_FABRICA' && orderStatus !== 'Garantia' && orderStatus !== 'RETORNO_GARANTIA' ? `
-              <div class="box" style="margin-bottom: 8px;">
-                <div class="box-title">Peças e Mão de Obra Utilizadas</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th style="width: 70px;">Tipo</th>
-                      <th>Descrição</th>
-                      <th style="width: 40px; text-align: center;">Qtd</th>
-                      <th style="width: 80px; text-align: right;">Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${itemsList.map((item) => `
-                      <tr>
-                        <td>${item.itemType === 'PART' ? '📦 Peça' : '🔧 Serviço'}</td>
-                        <td>${item.name}</td>
-                        <td style="text-align: center;">${item.qty || 1}</td>
-                        <td style="text-align: right;">R$ ${(parseFloat(String(item.price).replace(',', '.')) || 0).toFixed(2)}</td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-
-                <div class="total-box">
-                  <span>VALOR TOTAL DA OS:</span>
-                  <span class="total-val">R$ ${grandTotal.toFixed(2)}</span>
-                </div>
-                <div style="font-size: 9.5px; color: #475569; margin-top: 4px;">
-                  Forma de Pagamento: <strong>${orderToUse.paymentMethod || paymentMethod}</strong> 
+            <!-- TOTAL E FORMA DE PAGAMENTO -->
+            <div class="box" style="background: #ffffff; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: flex-end; align-items: center; gap: 24px; font-size: 13px; font-weight: 900; color: #0f172a;">
+                <span style="font-size: 11px; font-weight: 600; color: #334155;">
+                  Forma de Pagamento: <strong>${orderToUse.paymentMethod || paymentMethod || 'Dinheiro / PIX'}</strong>
                   ${orderToUse.secondaryPaymentMethod ? ` + <strong>${orderToUse.secondaryPaymentMethod} (R$ ${orderToUse.secondaryPaymentAmount || '0,00'})</strong>` : ''}
-                </div>
+                </span>
+                <span>VALOR TOTAL: R$ ${Number(grandTotal).toFixed(2).replace('.', ',')}</span>
               </div>
+            </div>
+
+            <!-- DADOS DA GARANTIA + CLÁUSULAS E TERMOS -->
+            <div class="box" style="margin-bottom: 8px;">
+              ${cWarrantyType === 'GARANTIA_LOJA' ? `
+                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 6px 10px; display: flex; gap: 20px; font-size: 10px; color: #065f46; font-weight: 600; margin-bottom: 5px;">
+                  <span>🛡️ <strong>Tempo de Garantia:</strong> ${cDays} dias</span>
+                  ${expiryStr ? `<span><strong>Válida até:</strong> ${expiryStr}</span>` : ''}
+                </div>
               ` : ''}
 
-              <div class="box">
-                <div class="box-title">Termo de Garantia e Entrega</div>
-                <div class="grid" style="margin-bottom: 0;">
-                  <div><strong>Data de Entrada:</strong> ${orderToUse.entryDate || todayFormatted}</div>
-                  <div><strong>Data de Saída / Entrega:</strong> ${orderToUse.exitDate || todayFormatted}</div>
-                </div>
-                <div style="margin-top: 3px;">
-                  <strong>Modalidade:</strong> ${warrantyType === 'GARANTIA_LOJA' ? 'Garantia da Empresa' : warrantyType === 'GARANTIA_FABRICA' ? 'Garantia de Fábrica' : 'Sem Garantia'}
-                  ${warrantyType === 'GARANTIA_LOJA' ? ` • <strong>Prazo de Garantia:</strong> ${orderToUse.warrantyDays || warrantyDays} Dias` : ''}
-                </div>
-                <div style="font-size: 8.5px; color: #64748b; margin-top: 3px;">${orderToUse.warrantyTerms || warrantyTerms}</div>
+              <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px; margin-bottom: 3px;">
+                ${cWarrantyType === 'GARANTIA_LOJA' ? 'Cláusulas e Termos de Garantia da Empresa:' : 'Termos de Entrega do Equipamento:'}
               </div>
+              <div style="font-size: 9px; color: #475569; line-height: 1.35; white-space: pre-wrap;">${cTerms}</div>
+            </div>
 
-              <div class="sigs" style="display: flex; justify-content: center;">
-                <div style="width: 60%; text-align: center;">
-                  <div class="sig-line"></div>
-                  <strong>Assinatura da Empresa / Técnico</strong>
-                  <div style="font-size: 8px; color: #64748b;">${orderToUse.technician || selectedTechnicianName || 'Técnico Responsável'}</div>
-                </div>
+            <!-- ASSINATURAS -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding-top: 15px; text-align: center; font-size: 11px;">
+              <div>
+                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
+                <div style="font-weight: bold; color: #1e293b;">Assinatura da Empresa / Técnico</div>
+                <div style="font-size: 9.5px; color: #64748b;">${compName}</div>
               </div>
-            </body>
-            </html>
-          `;
-        }
+              <div>
+                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
+                <div style="font-weight: bold; color: #1e293b;">Assinatura do Cliente</div>
+                <div style="font-size: 9.5px; color: #64748b;">${cClient.name || 'Cliente'}</div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
       }
 
       const { uri } = await Print.printToFileAsync({ html: htmlContent });
       await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-      Alert.alert('Sucesso', `Comprovante de ${isEntrada ? 'Entrada' : 'Saída'} gerado e compartilhado com sucesso!`);
-      onSaved();
+      if (isEntrada) {
+        Alert.alert('Sucesso', 'Comprovante de Entrada gerado e compartilhado com sucesso!');
+        onSaved();
+      } else {
+        // Comprovante de Saída: retorna para a tela home após compartilhar
+        onSaved();
+        onBack();
+      }
     } catch (err) {
       console.error('Erro ao gerar comprovante:', err);
     }
@@ -1090,6 +1117,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
   const handleConfirmFinalizeOS = async () => {
     const todayStr = new Date().toISOString().split('T')[0];
     setExitDate(todayStr);
+    setIsFinalizeModalOpen(false);
 
     const saved = await executeSaveOrder(
       {
@@ -1099,15 +1127,13 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
         secondaryPaymentMethod: isSplitPayment ? secondaryPaymentMethod : '',
         secondaryAmount: isSplitPayment ? secondaryAmount : '',
         cardInstallments,
-        warrantyDays,
+        warrantyDays: warrantyDays === 'NAO_SE_APLICA' ? '' : warrantyDays,
         warrantyTerms,
       },
       true
     );
 
     if (saved) {
-      setIsFinalizeModalOpen(false);
-      Alert.alert('OS Finalizada!', 'Gerando Comprovante de Saída...');
       await handleGenerateReceipt('SAIDA', saved);
     }
   };
@@ -1476,124 +1502,28 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
           )}
         </View>
 
-        {/* 3. DADOS DO EQUIPAMENTO COM SELEÇÃO DIRETA NA LISTA INLINE */}
-        <View style={[styles.card, { zIndex: isEquipmentDropdownOpen ? 1000 : 20, elevation: isEquipmentDropdownOpen ? 10 : 1 }]}>
+        {/* 3. DADOS DO EQUIPAMENTO COM SELETOR EM MODAL DESLIZANTE */}
+        <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Wrench size={18} color="#0284c7" />
             <Text style={styles.cardTitle}>Dados do Equipamento</Text>
           </View>
 
           <Text style={styles.label}>Tipo de Aparelho *</Text>
-          <View style={{ zIndex: 1000, position: 'relative' }}>
-            <View style={[styles.inputWithIconRow, isEquipmentDropdownOpen && { borderColor: '#38bdf8' }]}>
-              <TextInput
-                style={styles.autocompleteInput}
-                placeholder="Digite ou selecione o aparelho..."
-                placeholderTextColor="#64748b"
-                autoCapitalize="characters"
-                value={equipmentSearch}
-                onFocus={() => {
-                  loadCatalogs();
-                  setEquipmentSearch('');
-                  setIsEquipmentDropdownOpen(true);
-                }}
-                onChangeText={(text) => {
-                  const upper = text.toUpperCase();
-                  setEquipmentSearch(upper);
-                  setEquipmentType(upper);
-                  setIsEquipmentDropdownOpen(true);
-                }}
-                onBlur={() => {
-                  // Se nada foi selecionado da lista, usa o texto digitado como tipo
-                  if (equipmentSearch.trim()) {
-                    setEquipmentType(equipmentSearch.trim().toUpperCase());
-                  }
-                  setTimeout(() => setIsEquipmentDropdownOpen(false), 150);
-                }}
-              />
-              <TouchableOpacity
-                onPress={() => {
-                  loadCatalogs();
-                  if (!isEquipmentDropdownOpen) {
-                    setEquipmentSearch('');
-                  }
-                  setIsEquipmentDropdownOpen(!isEquipmentDropdownOpen);
-                }}
-                style={{ padding: 6 }}
-              >
-                <ChevronDown
-                  size={20}
-                  color="#38bdf8"
-                  style={{ transform: [{ rotate: isEquipmentDropdownOpen ? '180deg' : '0deg' }] }}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {isEquipmentDropdownOpen && (
-              <View style={styles.floatingDropdownMenu}>
-                <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={{ maxHeight: 220 }}>
-                  {availableEquipments
-                    .filter((eq) => {
-                      // Sem texto: mostra tudo. Com texto: filtra
-                      if (!equipmentSearch.trim()) return true;
-                      const term = equipmentSearch.trim().toUpperCase();
-                      const typeStr = (eq.type || eq.name || '').toUpperCase();
-                      return typeStr.includes(term);
-                    })
-                    .map((eq, idx) => {
-                      const selType = (eq.type || eq.name || '').toUpperCase();
-                      const isSelected = equipmentType.toUpperCase() === selType;
-                      return (
-                        <TouchableOpacity
-                          key={idx}
-                          activeOpacity={0.7}
-                          style={[
-                            styles.inlineDropdownOption,
-                            isSelected && styles.inlineDropdownOptionActive,
-                          ]}
-                          onPress={() => {
-                            setEquipmentType(selType);
-                            setEquipmentSearch(selType);
-                            setIsEquipmentDropdownOpen(false);
-                          }}
-                        >
-                          <Text
-                            style={[
-                              styles.inlineDropdownOptionTitle,
-                              isSelected && { color: '#38bdf8' },
-                            ]}
-                          >
-                            {selType}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-
-                  {availableEquipments.filter((eq) => {
-                    if (!equipmentSearch.trim()) return true;
-                    const term = equipmentSearch.trim().toUpperCase();
-                    const typeStr = (eq.type || eq.name || '').toUpperCase();
-                    return typeStr.includes(term);
-                  }).length === 0 && equipmentSearch.trim().length > 0 && (
-                    <TouchableOpacity
-                      style={{ padding: 12 }}
-                      onPress={() => {
-                        setEquipmentType(equipmentSearch.trim().toUpperCase());
-                        setIsEquipmentDropdownOpen(false);
-                      }}
-                    >
-                      <Text style={{ color: '#38bdf8', fontSize: 12, fontWeight: 'bold' }}>
-                        ➕ Usar: "{equipmentSearch.toUpperCase()}"
-                      </Text>
-                      <Text style={{ color: '#64748b', fontSize: 10, marginTop: 2 }}>
-                        (Tipo personalizado, salvo apenas nesta OS)
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </ScrollView>
-              </View>
-            )}
-          </View>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            style={styles.inlineSelectTrigger}
+            onPress={() => {
+              loadCatalogs();
+              setEquipmentSearch('');
+              setIsEquipmentDropdownOpen(true);
+            }}
+          >
+            <Text style={[styles.inlineSelectTriggerText, !equipmentType && { color: '#64748b', fontWeight: 'normal' }]}>
+              {equipmentType || 'Selecione ou digite o tipo de aparelho...'}
+            </Text>
+            <ChevronDown size={20} color="#38bdf8" />
+          </TouchableOpacity>
 
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
@@ -1639,6 +1569,29 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                 onChangeText={setEquipmentCode}
               />
             </View>
+          </View>
+
+          <View style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.label, { marginBottom: 0 }]}>Obs. do Equipamento</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.printToggleBtn, printEquipmentObservations ? styles.printToggleBtnActive : styles.printToggleBtnInactive]}
+                onPress={() => setPrintEquipmentObservations(!printEquipmentObservations)}
+              >
+                <Text style={[styles.printToggleBtnText, printEquipmentObservations ? styles.printToggleBtnTextActive : styles.printToggleBtnTextInactive]}>
+                  {printEquipmentObservations ? '✓ Exibir na impressão' : '✕ Oculto na impressão'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { height: 50, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Obs. de estado físico, acessórios..."
+              placeholderTextColor="#64748b"
+              value={equipmentObservations}
+              onChangeText={setEquipmentObservations}
+            />
           </View>
         </View>
 
@@ -1828,35 +1781,77 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
             </View>
           )}
 
-          <Text style={[styles.label, { marginTop: 12 }]}>Defeito Reclamado / Problema</Text>
-          <TextInput
-            style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
-            multiline
-            placeholder="Descreva o que o cliente relatou..."
-            placeholderTextColor="#64748b"
-            value={problemDescription}
-            onChangeText={setProblemDescription}
-          />
+          {/* DEFEITO RECLAMADO COM BOTÃO EXIBIR NA IMPRESSÃO */}
+          <View style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.label, { marginBottom: 0 }]}>Defeito Reclamado / Problema</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.printToggleBtn, printProblemDescription ? styles.printToggleBtnActive : styles.printToggleBtnInactive]}
+                onPress={() => setPrintProblemDescription(!printProblemDescription)}
+              >
+                <Text style={[styles.printToggleBtnText, printProblemDescription ? styles.printToggleBtnTextActive : styles.printToggleBtnTextInactive]}>
+                  {printProblemDescription ? '✓ Exibir na impressão' : '✕ Oculto na impressão'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Descreva o que o cliente relatou..."
+              placeholderTextColor="#64748b"
+              value={problemDescription}
+              onChangeText={setProblemDescription}
+            />
+          </View>
 
-          <Text style={[styles.label, { marginTop: 12 }]}>Laudo Técnico</Text>
-          <TextInput
-            style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
-            multiline
-            placeholder="Diagnóstico técnico realizado..."
-            placeholderTextColor="#64748b"
-            value={technicalReport}
-            onChangeText={setTechnicalReport}
-          />
+          {/* LAUDO TÉCNICO COM BOTÃO EXIBIR NA IMPRESSÃO */}
+          <View style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.label, { marginBottom: 0 }]}>Laudo Técnico</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.printToggleBtn, printTechnicalReport ? styles.printToggleBtnActive : styles.printToggleBtnInactive]}
+                onPress={() => setPrintTechnicalReport(!printTechnicalReport)}
+              >
+                <Text style={[styles.printToggleBtnText, printTechnicalReport ? styles.printToggleBtnTextActive : styles.printToggleBtnTextInactive]}>
+                  {printTechnicalReport ? '✓ Exibir na impressão' : '✕ Oculto na impressão'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Diagnóstico técnico realizado..."
+              placeholderTextColor="#64748b"
+              value={technicalReport}
+              onChangeText={setTechnicalReport}
+            />
+          </View>
 
-          <Text style={[styles.label, { marginTop: 12 }]}>Serviço Executado</Text>
-          <TextInput
-            style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
-            multiline
-            placeholder="Detalhes dos serviços prestados..."
-            placeholderTextColor="#64748b"
-            value={executedService}
-            onChangeText={setExecutedService}
-          />
+          {/* SERVIÇO EXECUTADO COM BOTÃO EXIBIR NA IMPRESSÃO (NOTA: COMPROVANTE DE ENTRADA POR PADRÃO NÃO EXIBE) */}
+          <View style={{ marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <Text style={[styles.label, { marginBottom: 0 }]}>Serviço Executado</Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[styles.printToggleBtn, printExecutedService ? styles.printToggleBtnActive : styles.printToggleBtnInactive]}
+                onPress={() => setPrintExecutedService(!printExecutedService)}
+              >
+                <Text style={[styles.printToggleBtnText, printExecutedService ? styles.printToggleBtnTextActive : styles.printToggleBtnTextInactive]}>
+                  {printExecutedService ? '✓ Exibir na impressão' : '✕ Oculto na impressão'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+              multiline
+              placeholder="Detalhes dos serviços prestados..."
+              placeholderTextColor="#64748b"
+              value={executedService}
+              onChangeText={setExecutedService}
+            />
+          </View>
         </View>
 
         {/* 5. SEÇÃO UNIFICADA ELEGANTE: PEÇAS E SERVIÇOS */}
@@ -1958,7 +1953,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                     </View>
 
                     {/* 3ª COLUNA: VALOR TOTAL */}
-                    <Text style={styles.itemPriceText}>R$ {subtotal.toFixed(2)}</Text>
+                    <Text style={styles.itemPriceText}>R$ {formatCurrencyMask(subtotal)}</Text>
 
                     {/* 4ª COLUNA: EXCLUIR */}
                     <TouchableOpacity
@@ -1975,7 +1970,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
             {itemsList.length > 0 && (
               <View style={styles.tableFooterTotal}>
                 <Text style={styles.tableFooterTotalLabel}>SUBTOTAL ({itemsList.length} itens):</Text>
-                <Text style={styles.tableFooterTotalVal}>R$ {calculateTotal().toFixed(2)}</Text>
+                <Text style={styles.tableFooterTotalVal}>R$ {formatCurrencyMask(calculateTotal())}</Text>
               </View>
             )}
           </View>
@@ -2300,7 +2295,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
         {/* VALOR TOTAL */}
         <View style={styles.totalCard}>
           <Text style={styles.totalLabel}>VALOR TOTAL DA OS:</Text>
-          <Text style={styles.totalValue}>R$ {calculateTotal().toFixed(2)}</Text>
+          <Text style={styles.totalValue}>R$ {formatCurrencyMask(calculateTotal())}</Text>
         </View>
 
         {/* BOTÕES FINAIS DE AÇÃO (SALVAR, FINALIZAR OS, COMPROVANTES) */}
@@ -2411,7 +2406,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
               keyboardType="numeric"
               placeholderTextColor="#64748b"
               value={customItemPrice}
-              onChangeText={setCustomItemPrice}
+              onChangeText={(t) => setCustomItemPrice(formatCurrencyMask(t))}
             />
 
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
@@ -2541,7 +2536,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                     keyboardType="numeric"
                     placeholderTextColor="#64748b"
                     value={secondaryAmount}
-                    onChangeText={setSecondaryAmount}
+                    onChangeText={(t) => setSecondaryAmount(formatCurrencyMask(t))}
                   />
                 </View>
               )}
@@ -2555,14 +2550,14 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
 
               <Text style={styles.label}>Prazo de Garantia</Text>
               <View style={styles.paymentMethodsGrid}>
-                {['30', '90', '180', '365'].map((d) => (
+                {['NAO_SE_APLICA', '30', '90', '180', '365'].map((d) => (
                   <TouchableOpacity
                     key={d}
                     style={[styles.paymentBtn, warrantyDays === d && styles.paymentBtnActive]}
                     onPress={() => setWarrantyDays(d)}
                   >
                     <Text style={[styles.paymentBtnText, warrantyDays === d && styles.paymentBtnTextActive]}>
-                      {d} Dias
+                      {d === 'NAO_SE_APLICA' ? 'Não se Aplica' : `${d} Dias`}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -2609,6 +2604,34 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
             />
           </View>
 
+          {/* Botão de Adicionar Novo Cliente Destacado */}
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#e0f2fe',
+              borderColor: '#38bdf8',
+              borderWidth: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 14,
+              borderRadius: 10,
+              marginHorizontal: 16,
+              marginBottom: 8,
+              gap: 6,
+            }}
+            onPress={() => {
+              setClientToEditInside(null);
+              setIsClientsModalOpen(false);
+              setIsCreatingClientInside(true);
+            }}
+          >
+            <PlusCircle size={18} color="#0284c7" />
+            <Text style={{ color: '#0284c7', fontSize: 13, fontWeight: 'bold' }}>
+              + Cadastrar Novo Cliente
+            </Text>
+          </TouchableOpacity>
+
           <Text style={styles.modalHint}>💡 Toque para selecionar ou segure para opções/editar cadastro</Text>
 
           <FlatList
@@ -2625,10 +2648,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                 onLongPress={() => handleClientLongPress(item)}
                 delayLongPress={400}
               >
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={styles.clientItemName}>{item.name?.toUpperCase()}</Text>
-                  <Edit3 size={16} color="#94a3b8" />
-                </View>
+                <Text style={styles.clientItemName}>{item.name?.toUpperCase()}</Text>
                 <Text style={styles.clientItemSub}>📞 {item.phone || item.whatsapp || 'Sem telefone'}</Text>
                 {item.address ? (
                   <Text style={styles.clientItemAddress}>📍 {item.address}, {item.number || 'S/N'} - {item.city || ''}</Text>
@@ -2673,7 +2693,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                   <Text style={styles.catalogItemName}>{item.name}</Text>
                   <Text style={styles.catalogItemStock}>Estoque: {item.stockQuantity ?? '0'}</Text>
                 </View>
-                <Text style={styles.catalogItemPrice}>R$ {item.finalPrice || item.price}</Text>
+                <Text style={styles.catalogItemPrice}>R$ {formatCurrencyMask(item.finalPrice || item.price)}</Text>
               </TouchableOpacity>
             )}
           />
@@ -2711,11 +2731,122 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                 onPress={() => handleAddItemFromCatalog(item, 'SERVICE')}
               >
                 <Text style={styles.catalogItemName}>{item.name}</Text>
-                <Text style={styles.catalogItemPrice}>R$ {item.price}</Text>
+                <Text style={styles.catalogItemPrice}>R$ {formatCurrencyMask(item.price)}</Text>
               </TouchableOpacity>
             )}
           />
         </View>
+      </Modal>
+
+      {/* MODAL DE SELEÇÃO DE TIPO DE APARELHO / EQUIPAMENTO */}
+      <Modal
+        visible={isEquipmentDropdownOpen}
+        animationType="slide"
+        onRequestClose={() => setIsEquipmentDropdownOpen(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Selecionar Tipo de Aparelho</Text>
+            <TouchableOpacity onPress={() => setIsEquipmentDropdownOpen(false)}>
+              <X size={24} color="#ffffff" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.modalSearchBox}>
+            <Search size={18} color="#94a3b8" />
+            <TextInput
+              style={styles.modalSearchInput}
+              placeholder="Digite para buscar ou adicionar um Novo..."
+              placeholderTextColor="#64748b"
+              autoCapitalize="characters"
+              value={equipmentSearch}
+              onChangeText={(text) => {
+                const upper = text.toUpperCase();
+                setEquipmentSearch(upper);
+              }}
+            />
+          </View>
+
+          {equipmentSearch.trim().length > 0 && (
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#0284c715',
+                borderColor: '#0284c7',
+                borderWidth: 1,
+                borderRadius: 8,
+                padding: 12,
+                marginHorizontal: 16,
+                marginBottom: 8,
+              }}
+              onPress={() => {
+                setEquipmentType(equipmentSearch.trim().toUpperCase());
+                setIsEquipmentDropdownOpen(false);
+              }}
+            >
+              <Text style={{ color: '#0284c7', fontSize: 13, fontWeight: 'bold' }}>
+                ➕ Usar: "{equipmentSearch.trim().toUpperCase()}"
+              </Text>
+              <Text style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                (Salvar como tipo personalizado nesta OS)
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <FlatList
+            data={availableEquipments.filter((eq) => {
+              if (!equipmentSearch.trim()) return true;
+              const term = equipmentSearch.trim().toUpperCase();
+              const typeStr = (eq.type || eq.name || '').toUpperCase();
+              return typeStr.includes(term);
+            })}
+            keyExtractor={(item, index) => item.id || String(index)}
+            contentContainerStyle={{ padding: 16 }}
+            renderItem={({ item }) => {
+              const selType = (item.type || item.name || '').toUpperCase();
+              const isSelected = (equipmentType || '').toUpperCase() === selType;
+              return (
+                <TouchableOpacity
+                  style={[styles.catalogItemCard, isSelected && { borderColor: '#38bdf8', backgroundColor: '#e0f2fe' }]}
+                  onPress={() => {
+                    setEquipmentType(selType);
+                    setEquipmentSearch(selType);
+                    setIsEquipmentDropdownOpen(false);
+                  }}
+                >
+                  <Text style={[styles.catalogItemName, isSelected && { color: '#0284c7', fontWeight: 'bold' }]}>
+                    {selType}
+                  </Text>
+                  {isSelected && <Text style={{ color: '#0284c7', fontSize: 12, fontWeight: 'bold' }}>✓ Selecionado</Text>}
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </Modal>
+
+      {/* MODAL DE CADASTRO / EDIÇÃO DE CLIENTES DENTRO DA OS */}
+      <Modal
+        visible={isCreatingClientInside}
+        animationType="slide"
+        onRequestClose={() => {
+          setIsCreatingClientInside(false);
+          setClientToEditInside(null);
+        }}
+      >
+        <CreateClientScreen
+          clientToEdit={clientToEditInside}
+          onBack={() => {
+            setIsCreatingClientInside(false);
+            setClientToEditInside(null);
+          }}
+          onSaved={(newClient) => {
+            setIsCreatingClientInside(false);
+            setClientToEditInside(null);
+            if (newClient) {
+              setSelectedClient(newClient);
+            }
+          }}
+        />
       </Modal>
     </View>
   );
@@ -3348,5 +3479,29 @@ const styles = StyleSheet.create({
     borderColor: '#334155',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  printToggleBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  printToggleBtnActive: {
+    backgroundColor: '#0284c715',
+    borderColor: '#0284c7',
+  },
+  printToggleBtnInactive: {
+    backgroundColor: '#f1f5f9',
+    borderColor: '#cbd5e1',
+  },
+  printToggleBtnText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  printToggleBtnTextActive: {
+    color: '#0284c7',
+  },
+  printToggleBtnTextInactive: {
+    color: '#94a3b8',
   },
 });

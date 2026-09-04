@@ -67,20 +67,31 @@ export const WarrantyConfigModal: React.FC<WarrantyConfigModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
+    const configPayload = {
       defaultDays: days,
       defaultTerms: terms,
       defaultCoverage: coverage,
       defaultEntryTerms: entryTerms,
       defaultEstimateTerms: estimateTerms,
       defaultExitTerms: exitTerms,
-    });
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const { setDoc, doc } = await import('firebase/firestore');
+      const { db } = await import('../services/firebase');
+      await setDoc(doc(db, 'system_config', 'warranty_config'), configPayload, { merge: true }).catch(() => null);
+    } catch (err) {
+      console.warn('Erro ao salvar termos no Firestore:', err);
+    }
+
+    onSave(configPayload);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -181,42 +192,6 @@ export const WarrantyConfigModal: React.FC<WarrantyConfigModalProps> = ({
           {/* ABA 3: TERMOS DE SAÍDA / GARANTIA */}
           {activeTab === 'EXIT' && (
             <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-emerald-600" /> Prazo de Garantia Padrão na Saída
-                  </label>
-                  <select
-                    value={days}
-                    onChange={(e) => setDays(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-emerald-600 cursor-pointer text-xs"
-                  >
-                    <option value="30">30 Dias (1 Mês)</option>
-                    <option value="90">90 Dias (3 Meses - Legal)</option>
-                    <option value="180">180 Dias (6 Meses)</option>
-                    <option value="365">365 Dias (1 Ano)</option>
-                    <option value="CUSTOM">Personalizado</option>
-                    <option value="NAO_SE_APLICA">Não se Aplica (Sem Garantia)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Abrangência de Cobertura Padrão
-                  </label>
-                  <select
-                    value={coverage}
-                    onChange={(e) => setCoverage(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-emerald-600 cursor-pointer text-xs"
-                  >
-                    <option value="PECAS_E_MAO_DE_OBRA">Peças Substituídas & Mão de Obra</option>
-                    <option value="APENAS_MAO_DE_OBRA">Apenas Mão de Obra</option>
-                    <option value="APENAS_PECAS">Apenas Peças Substituídas</option>
-                    <option value="SERVICO_ESPECIFICO">Serviço Específico Realizado</option>
-                  </select>
-                </div>
-              </div>
-
               <div className="bg-emerald-50/80 p-3.5 rounded-xl border border-emerald-200 space-y-2">
                 <label className="block text-xs font-bold text-emerald-950 flex items-center gap-1.5">
                   <ArrowUpRight className="w-4 h-4 text-emerald-700" /> Termo de Garantia e Entrega (Comprovante de Saída) *
@@ -225,7 +200,7 @@ export const WarrantyConfigModal: React.FC<WarrantyConfigModalProps> = ({
                   Este texto será impresso no <strong>Comprovante de Saída / Entrega</strong> quando a OS for finalizada e o aparelho for entregue ao cliente.
                 </p>
                 <textarea
-                  rows={4}
+                  rows={6}
                   value={exitTerms}
                   onChange={(e) => {
                     setExitTerms(e.target.value);

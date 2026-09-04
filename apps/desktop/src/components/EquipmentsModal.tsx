@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Search, PlusCircle, Cpu, Check, Trash2, Edit3 } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
 
 interface ColumnConfig {
   id: string;
@@ -32,15 +34,21 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string | null>(null);
   const canManage = Boolean(currentUser?.role === 'Admin' || currentUser?.permissions?.manageEquipments);
+  const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     try {
       const saved = localStorage.getItem('equipments_modal_columns');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        return JSON.parse(saved);
+      }
     } catch (err) { }
     return [
-      { id: 'code', label: 'Código', width: 120, visible: true },
-      { id: 'type', label: 'Nome / Tipo de Equipamento', width: 400, visible: true },
+      { id: 'code', label: 'Código', width: 90, visible: true, fixed: true },
+      { id: 'type', label: 'Tipo / Aparelho', width: 200, visible: true, fixed: true },
+      { id: 'brand', label: 'Marca / Fabricante', width: 160, visible: true },
+      { id: 'model', label: 'Modelo Padrão', width: 160, visible: true },
+      { id: 'serialNumber', label: 'Nº de Série Padrão', width: 160, visible: true },
     ];
   });
 
@@ -57,11 +65,16 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
     if (isOpen) {
       setSearchTerm('');
       setSelectedEquipmentId(null);
-    } else {
-      setSearchTerm('');
-      setSelectedEquipmentId(null);
     }
   }, [isOpen]);
+
+  // Registro na pilha de modais para ESC fechar apenas o último modal aberto
+  React.useEffect(() => {
+    if (isOpen) {
+      modalStack.register('EquipmentsModal', onClose);
+      return () => modalStack.unregister('EquipmentsModal');
+    }
+  }, [isOpen, onClose]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -70,14 +83,11 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
         e.preventDefault();
         onClose();
         onOpenCreateEquipment();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, onOpenCreateEquipment, onClose]);
 
   if (!isOpen) return null;
 
@@ -380,9 +390,15 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
             </button>
 
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!selectedEquipment) return alert('Por favor, selecione um equipamento na tabela.');
-                if (confirm(`Deseja realmente EXCLUIR o equipamento "${selectedEquipment.type}"?`)) {
+                const ok = await dlgConfirm({
+                  title: 'Excluir Equipamento',
+                  message: `Deseja realmente EXCLUIR o equipamento "${selectedEquipment.type}"?`,
+                  variant: 'danger',
+                  confirmText: 'Excluir',
+                });
+                if (ok) {
                   if (onDeleteEquipment) {
                     onDeleteEquipment(selectedEquipment.id);
                   }
@@ -393,7 +409,7 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
               title={!canManage ? 'Você não tem permissão para excluir equipamentos.' : undefined}
               className="h-8 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer whitespace-nowrap shrink-0"
             >
-              <Trash2 className="w-4 h-4 shrink-0" />
+              <Trash2 className="w-4 h-4" />
               <span>Excluir</span>
             </button>
 

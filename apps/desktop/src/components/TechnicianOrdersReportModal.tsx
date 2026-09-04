@@ -31,30 +31,126 @@ export const TechnicianOrdersReportModal: React.FC<TechnicianOrdersReportModalPr
   onClose,
   onOpenOrderDetails,
 }) => {
-  // Lista de técnicos disponíveis do sistema
+  // Lista de técnicos disponíveis do sistema (carregados de vollen_technicians, vollen_users e das OSs)
+  const [syncedTechs, setSyncedTechs] = useState<any[]>([]);
+
+  // Sincroniza em tempo real com o Firestore e localStorage ao abrir
+  React.useEffect(() => {
+    if (!isOpen) return;
+
+    let unsub = () => {};
+
+    // 1. Tenta carregar do Firestore para garantir dados 100% atualizados
+    import('../services/firebase').then(({ db }) => {
+      import('firebase/firestore').then(({ collection, onSnapshot, getDocs }) => {
+        unsub = onSnapshot(collection(db, 'users'), (snap) => {
+          if (!snap.empty) {
+            const list = snap.docs
+              .map((d) => ({ id: d.id, ...d.data() } as any))
+              .filter((u: any) => {
+                const role = (u.role || '').toUpperCase();
+                return (
+                  role === 'TECNICO' ||
+                  role === 'TÉCNICO' ||
+                  u.isTechnician === true ||
+                  u.specialty ||
+                  role === 'ADMIN'
+                );
+              })
+              .map((u: any) => ({
+                id: u.id,
+                name: (u.name || u.username || '').trim(),
+              }))
+              .filter((u: any) => Boolean(u.name) && u.name !== 'Técnico Exemplo');
+
+            if (list.length > 0) {
+              setSyncedTechs(list);
+            }
+          }
+        });
+      });
+    });
+
+    return () => unsub();
+  }, [isOpen]);
+
   const availableTechnicians = useMemo(() => {
-    let list: any[] = [];
+    const techMap = new Map<string, { id: string; name: string }>();
+
+    // 1. Técnicos de vollen_technicians
     try {
       const saved = localStorage.getItem('vollen_technicians');
-      if (saved) list = JSON.parse(saved);
-    } catch {}
-    if (!list || list.length === 0) {
-      if (technicians && technicians.length > 0) {
-        list = technicians;
-      } else {
-        list = [
-          { id: '1', name: 'Técnico Roberto' },
-          { id: '2', name: 'Técnico Carlos' },
-          { id: '3', name: 'Técnica Ana' },
-        ];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((t: any) => {
+            const n = (t.name || '').trim();
+            if (n && n !== 'Técnico Roberto' && n !== 'Técnico Carlos' && n !== 'Técnica Ana' && n !== 'Técnico Exemplo') {
+              techMap.set(n.toLowerCase(), { id: t.id || n, name: n });
+            }
+          });
+        }
       }
-    }
-    return list;
-  }, [technicians, isOpen]);
+    } catch {}
 
-  const [selectedTechName, setSelectedTechName] = useState<string>(() => {
-    return availableTechnicians[0]?.name || 'TODOS';
-  });
+    // 2. Usuários técnicos de vollen_users
+    try {
+      const savedUsers = localStorage.getItem('vollen_users');
+      if (savedUsers) {
+        const parsedUsers = JSON.parse(savedUsers);
+        if (Array.isArray(parsedUsers)) {
+          parsedUsers.forEach((u: any) => {
+            const role = (u.role || '').toUpperCase();
+            if (
+              role === 'TECNICO' ||
+              role === 'TÉCNICO' ||
+              u.isTechnician === true ||
+              u.specialty ||
+              role === 'ADMIN'
+            ) {
+              const n = (u.name || u.username || '').trim();
+              if (n && n !== 'Técnico Exemplo') {
+                techMap.set(n.toLowerCase(), { id: u.id || n, name: n });
+              }
+            }
+          });
+        }
+      }
+    } catch {}
+
+    // 3. Sincronizados do Firestore
+    syncedTechs.forEach((t) => {
+      const n = (t.name || '').trim();
+      if (n) {
+        techMap.set(n.toLowerCase(), { id: t.id || n, name: n });
+      }
+    });
+
+    // 4. Props de técnicos se existirem
+    if (Array.isArray(technicians)) {
+      technicians.forEach((t: any) => {
+        const n = typeof t === 'string' ? t.trim() : (t.name || '').trim();
+        if (n && n !== 'Técnico Roberto' && n !== 'Técnico Carlos' && n !== 'Técnica Ana') {
+          techMap.set(n.toLowerCase(), { id: t.id || n, name: n });
+        }
+      });
+    }
+
+    // 5. Técnicos atribuídos nas próprias OSs
+    if (Array.isArray(orders)) {
+      orders.forEach((o: any) => {
+        const n = (o.technician || o.technicianName || '').trim();
+        if (n && n !== 'Técnico Roberto' && n !== 'Técnico Carlos' && n !== 'Técnica Ana') {
+          techMap.set(n.toLowerCase(), { id: n, name: n });
+        }
+      });
+    }
+
+    const result = Array.from(techMap.values());
+    return result;
+  }, [technicians, orders, syncedTechs, isOpen]);
+
+  const [selectedTechName, setSelectedTechName] = useState<string>('TODOS');
 
   // Filtro de status: 'TODOS' (Ambas), 'ABERTA' (Abertas) ou 'FINALIZADA' (Finalizadas)
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ABERTA' | 'FINALIZADA'>('TODOS');

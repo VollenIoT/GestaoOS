@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   BackHandler,
 } from 'react-native';
-import { FileText, Users, Calendar, Wrench, LogOut, Settings, Sliders, Building2 } from 'lucide-react-native';
+import { FileText, Users, Calendar, Wrench, LogOut, Settings, Sliders, Building2, WifiOff } from 'lucide-react-native';
 import { Image } from 'react-native';
 import { OrdersListScreen } from './src/screens/OrdersListScreen';
 import { ClientsListScreen } from './src/screens/ClientsListScreen';
@@ -35,6 +35,8 @@ import {
   logoutUserMobile,
   getLinkedCompanyMobile,
   unlinkCompanyMobile,
+  verifyAndSyncApiKeyMobile,
+  subscribeSecurityValidationMobile,
 } from './src/services/api';
 import {
   sendLocalVisitNotification,
@@ -46,6 +48,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any | null>(null);
   const [companyInfo, setCompanyInfo] = useState<any>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [activeTab, setActiveTab] = useState<'orders' | 'clients' | 'schedule' | 'options'>('orders');
   const [orders, setOrders] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
@@ -122,6 +125,15 @@ export default function App() {
 
   useEffect(() => {
     async function checkAuth() {
+      // 1. Verificação silenciosa da ApiKey com o servidor
+      const keyCheck = await verifyAndSyncApiKeyMobile();
+      if (!keyCheck.valid) {
+        setLinkedCompany(null);
+        setCurrentUser(null);
+        setAuthChecked(true);
+        return;
+      }
+
       const linked = await getLinkedCompanyMobile();
       setLinkedCompany(linked);
 
@@ -143,22 +155,50 @@ export default function App() {
     const unsubComp = subscribeCompanyDataMobile((data) => {
       if (data) setCompanyInfo(data);
     });
-    return () => unsubComp();
+
+    // Escuta em tempo real: se ApiKey for alterada no PC ou se o usuário logado for deletado
+    const unsubSec = subscribeSecurityValidationMobile({
+      onApiKeyInvalidated: () => {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          'ApiKey Invalidada',
+          'A ApiKey desta empresa foi alterada ou revogada no sistema principal. Por favor, insira a nova ApiKey para reconectar.'
+        );
+        setLinkedCompany(null);
+        setCurrentUser(null);
+      },
+      onUserInvalidated: () => {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          'Acesso Revogado',
+          'Sua conta de usuário foi excluída ou desativada no sistema principal. Sua sessão foi encerrada.'
+        );
+        setCurrentUser(null);
+      },
+    });
+
+    return () => {
+      unsubComp();
+      unsubSec();
+    };
   }, []);
 
   const filterOrdersForCurrentUser = (rawOrders: any[], user: any) => {
     if (!user) return [];
-    if (user.role === 'Admin' || user.isAdmin || user.username === 'admin') return rawOrders;
+    const roleUpper = (user.role || '').toUpperCase();
+    const isAdmin = user.isAdmin || roleUpper === 'ADMIN' || (user.username || '').toLowerCase() === 'admin';
+    if (isAdmin) return rawOrders;
 
     const currentName = (user.name || '').toLowerCase().trim();
     const currentUsername = (user.username || '').toLowerCase().trim();
     const currentId = String(user.id || '').toLowerCase().trim();
 
     return rawOrders.filter((o) => {
-      const assigned = (o.technician || o.technicianName || '').toLowerCase().trim();
+      const assigned = (o.technician || o.technicianName || o.assignedTechnician || '').toLowerCase().trim();
       const techId = String(o.technicianId || '').toLowerCase().trim();
 
-      if (!assigned && !techId) return false;
+      // Se a OS não tem técnico específico atribuído, técnicos também podem ver para atender
+      if (!assigned && !techId) return true;
 
       return (
         (assigned && currentName && assigned === currentName) ||
@@ -199,6 +239,7 @@ export default function App() {
 
   const loadAllData = async () => {
     try {
+      await syncPendingOrdersMobile();
       const [ords, clis] = await Promise.all([fetchOrdersMobile(), fetchClientsMobile()]);
       setOrders(filterOrdersForCurrentUser(ords, currentUser));
       setClients(clis);
@@ -213,10 +254,28 @@ export default function App() {
     loadAllData();
     syncPendingOrdersMobile();
 
+    // Monitor de conectividade simples e leve
+    const checkConnection = async () => {
+      try {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), 2000);
+        await fetch('https://clients3.google.com/generate_204', {
+          method: 'HEAD',
+          signal: controller.signal,
+        });
+        clearTimeout(t);
+        setIsOffline(false);
+      } catch {
+        setIsOffline(true);
+      }
+    };
+
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+
     // Escuta em tempo real direto da nuvem
     const unsubOrders = subscribeOrdersMobile((realtimeOrders) => {
       setOrders(filterOrdersForCurrentUser(realtimeOrders, currentUser));
-      syncPendingOrdersMobile();
       updateVisitsAndNotify(currentUser);
     });
     const unsubClients = subscribeClientsMobile((realtimeClients) => {
@@ -224,6 +283,7 @@ export default function App() {
     });
 
     return () => {
+      clearInterval(interval);
       unsubOrders();
       unsubClients();
     };
@@ -299,9 +359,17 @@ export default function App() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <LogOut size={18} color="#ef4444" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {isOffline && (
+            <View style={styles.offlineBadge}>
+              <WifiOff size={12} color="#f59e0b" />
+              <Text style={styles.offlineBadgeText}>Offline</Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+            <LogOut size={18} color="#ef4444" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Roteamento de Telas */}
@@ -392,6 +460,15 @@ export default function App() {
             onEditClient={(client) => {
               setClientToEdit(client);
               setIsCreatingClient(true);
+            }}
+            onDeleteClient={async (client) => {
+              try {
+                const { deleteClientMobile } = await import('./src/services/api');
+                await deleteClientMobile(client.id);
+                loadAllData();
+              } catch (err) {
+                console.error('Erro ao deletar cliente:', err);
+              }
             }}
             onRefresh={loadAllData}
           />
@@ -504,6 +581,22 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: '#1e293b',
     borderRadius: 8,
+  },
+  offlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  offlineBadgeText: {
+    color: '#f59e0b',
+    fontSize: 11,
+    fontWeight: '700',
   },
   content: { flex: 1, backgroundColor: '#f1f5f9' },
   bottomNav: {

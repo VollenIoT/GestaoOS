@@ -14,6 +14,9 @@ import {
   Package,
   Cpu,
   CheckCircle2,
+  Wallet,
+  ShoppingCart,
+  Wrench,
 } from 'lucide-react';
 import { requestFactoryReset } from '../services/api';
 import { db } from '../services/firebase';
@@ -37,7 +40,10 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
     clients: true,
     orders: true,
     parts: true,
+    services: true,
     equipments: true,
+    cash: true,
+    sales: true,
   });
 
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -113,7 +119,10 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
       clients: val,
       orders: val,
       parts: val,
+      services: val,
       equipments: val,
+      cash: val,
+      sales: val,
     });
   };
 
@@ -205,10 +214,11 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
           if (estSnap && !estSnap.empty) {
             await Promise.all(estSnap.docs.map((d) => deleteDoc(doc(db, 'estimates', d.id)).catch(() => {})));
           }
-          // Reseta contador atômico de numeração de OS — document correto: 'order_counter'
+          // Reseta contador atômico de numeração de OS para 0 e remove qualquer documento legado
           await Promise.all([
-            setDoc(doc(db, 'system_config', 'order_counter'), { lastOrderNumber: 0 }, { merge: true }).catch(() => {}),
-            deleteDoc(doc(db, 'system_config', 'counters')).catch(() => {}), // Remove o doc errado se existir
+            setDoc(doc(db, 'system_config', 'order_counter'), { lastOrderNumber: 0, updatedAt: new Date().toISOString() }),
+            deleteDoc(doc(db, 'system_config', 'counters')).catch(() => {}),
+            deleteDoc(doc(db, 'system_config', 'last_order_number')).catch(() => {}),
           ]);
         } catch (err) {
           console.warn('Erro ao limpar ordens no Firestore:', err);
@@ -245,6 +255,21 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
         }
       }
 
+      // 4.1 Limpeza profunda de SERVIÇOS (Firestore + LocalStorage)
+      if (selectedItems.services) {
+        localStorage.removeItem('vollen_services');
+        localStorage.removeItem('vollen_custom_services');
+
+        try {
+          const srvSnap = await getDocs(collection(db, 'services')).catch(() => null);
+          if (srvSnap && !srvSnap.empty) {
+            await Promise.all(srvSnap.docs.map((d) => deleteDoc(doc(db, 'services', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar serviços no Firestore:', err);
+        }
+      }
+
       // 5. Limpeza profunda de EQUIPAMENTOS (Firestore + LocalStorage)
       if (selectedItems.equipments) {
         localStorage.removeItem('system_equipments');
@@ -257,6 +282,49 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
           }
         } catch (err) {
           console.warn('Erro ao limpar equipamentos no Firestore:', err);
+        }
+      }
+
+      // 6. Limpeza profunda de CONTROLE DE CAIXA (Firestore + LocalStorage)
+      if (selectedItems.cash) {
+        localStorage.removeItem('vollen_cash_movements');
+        localStorage.removeItem('vollen_current_cash_session');
+        localStorage.removeItem('vollen_cash_register_columns');
+
+        try {
+          const [movSnap, sessionDoc] = await Promise.all([
+            getDocs(collection(db, 'cash_movements')).catch(() => null),
+            deleteDoc(doc(db, 'cash_registers', 'current_session')).catch(() => {}),
+          ]);
+
+          if (movSnap && !movSnap.empty) {
+            await Promise.all(movSnap.docs.map((d) => deleteDoc(doc(db, 'cash_movements', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar caixa no Firestore:', err);
+        }
+      }
+
+      // 7. Limpeza profunda de VENDAS BALCÃO E CARRINHOS (Firestore + LocalStorage)
+      if (selectedItems.sales) {
+        localStorage.removeItem('vollen_sales_history');
+        localStorage.removeItem('vollen_saved_carts');
+        localStorage.removeItem('vollen_active_cart');
+
+        try {
+          const [salesSnap, cartsSnap] = await Promise.all([
+            getDocs(collection(db, 'sales')).catch(() => null),
+            getDocs(collection(db, 'saved_carts')).catch(() => null),
+          ]);
+
+          if (salesSnap && !salesSnap.empty) {
+            await Promise.all(salesSnap.docs.map((d) => deleteDoc(doc(db, 'sales', d.id)).catch(() => {})));
+          }
+          if (cartsSnap && !cartsSnap.empty) {
+            await Promise.all(cartsSnap.docs.map((d) => deleteDoc(doc(db, 'saved_carts', d.id)).catch(() => {})));
+          }
+        } catch (err) {
+          console.warn('Erro ao limpar vendas no Firestore:', err);
         }
       }
 
@@ -332,11 +400,9 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-[80] bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 select-none font-sans text-xs"
-      onClick={onClose}
     >
       <div
         className="bg-white border-2 border-red-500/80 rounded-2xl w-full max-w-lg max-h-[94vh] shadow-2xl overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header com Alerta */}
         <div className="p-3 bg-gradient-to-r from-red-700 via-rose-800 to-red-900 text-white flex items-center justify-between shrink-0">
@@ -514,6 +580,29 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
                   </div>
                 </label>
 
+                {/* 4.1 Serviços */}
+                <label
+                  onClick={() => toggleItem('services')}
+                  className="flex items-start gap-2.5 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                >
+                  <div className="mt-0.5 text-sky-700">
+                    {selectedItems.services ? (
+                      <CheckSquare className="w-4 h-4 text-red-600" />
+                    ) : (
+                      <Square className="w-4 h-4 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-slate-800 flex items-center gap-1 text-[11.5px]">
+                      <Wrench className="w-3.5 h-3.5 text-indigo-600" />
+                      Catálogo de Serviços
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Apaga todos os serviços de mão de obra cadastrados, voltando a zero.
+                    </p>
+                  </div>
+                </label>
+
                 {/* 5. Equipamentos */}
                 <label
                   onClick={() => toggleItem('equipments')}
@@ -533,6 +622,52 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
                     </div>
                     <p className="text-[10px] text-slate-500 leading-tight">
                       Apaga equipamentos adicionados e mantém apenas os tipos padrões do sistema.
+                    </p>
+                  </div>
+                </label>
+
+                {/* 6. Controle de Caixa */}
+                <label
+                  onClick={() => toggleItem('cash')}
+                  className="flex items-start gap-2.5 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                >
+                  <div className="mt-0.5 text-sky-700">
+                    {selectedItems.cash ? (
+                      <CheckSquare className="w-4 h-4 text-red-600" />
+                    ) : (
+                      <Square className="w-4 h-4 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-slate-800 flex items-center gap-1 text-[11.5px]">
+                      <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+                      Controle de Caixa
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Apaga todas as movimentações, sangrias, suprimentos e fecha a sessão do caixa.
+                    </p>
+                  </div>
+                </label>
+
+                {/* 7. Vendas e Balcão */}
+                <label
+                  onClick={() => toggleItem('sales')}
+                  className="flex items-start gap-2.5 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                >
+                  <div className="mt-0.5 text-sky-700">
+                    {selectedItems.sales ? (
+                      <CheckSquare className="w-4 h-4 text-red-600" />
+                    ) : (
+                      <Square className="w-4 h-4 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-slate-800 flex items-center gap-1 text-[11.5px]">
+                      <ShoppingCart className="w-3.5 h-3.5 text-emerald-700" />
+                      Histórico de Vendas Balcão
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-tight">
+                      Apaga o histórico de vendas de balcão (PDV) e carrinhos salvos.
                     </p>
                   </div>
                 </label>
@@ -571,8 +706,11 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
                     type="password"
                     required
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Digite a senha deste administrador..."
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setErrorMsg(null);
+                    }}
+                    placeholder="Digite a senha..."
                     className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-red-600 focus:bg-white text-xs"
                   />
                 </div>
@@ -580,21 +718,21 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
             </div>
 
             {/* Rodapé do Passo 1 */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 mt-2 shrink-0">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 mt-2 shrink-0">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl cursor-pointer text-xs"
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl cursor-pointer text-xs"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={!hasAnySelected || !password.trim()}
-                className="px-5 py-1.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl flex items-center gap-1.5 shadow cursor-pointer transition-colors text-xs"
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-red-600/20 cursor-pointer transition-transform hover:scale-102 active:scale-98"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Continuar Restauração
+                <span>Avançar para Confirmação</span>
+                <ShieldAlert className="w-3.5 h-3.5" />
               </button>
             </div>
           </form>
@@ -632,6 +770,12 @@ export const FactoryResetModal: React.FC<FactoryResetModalProps> = ({
                   )}
                   {selectedItems.equipments && (
                     <li><strong>Equipamentos</strong>: Personalizados serão removidos.</li>
+                  )}
+                  {selectedItems.cash && (
+                    <li className="text-red-700 font-semibold"><strong>Controle de Caixa</strong>: Todas as movimentações apagadas e sessão encerrada.</li>
+                  )}
+                  {selectedItems.sales && (
+                    <li className="text-red-700 font-semibold"><strong>Vendas de Balcão</strong>: Histórico de vendas PDV apagado.</li>
                   )}
                 </ul>
               </div>

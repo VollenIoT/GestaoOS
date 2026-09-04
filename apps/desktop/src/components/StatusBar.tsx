@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Cloud, CloudOff, CheckCircle2, DatabaseBackup, AlertTriangle } from 'lucide-react';
+import { Cloud, CloudOff, CheckCircle2, DatabaseBackup, AlertTriangle, User, HardDrive } from 'lucide-react';
+import { isCloudModeActive, getSavedSerial, getSavedTenantInfo } from '../services/licenseService';
 
 interface StatusBarProps {
   statusMessage?: string;
   isCapsLockActive?: boolean;
   onToggleCapsLock?: () => void;
   onOpenBackupModal?: () => void;
+  onOpenSerialLicenseModal?: () => void;
+  currentUser?: any;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -13,17 +16,16 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   isCapsLockActive = true,
   onToggleCapsLock,
   onOpenBackupModal,
+  onOpenSerialLicenseModal,
+  currentUser,
 }) => {
   const [isNumLock, setIsNumLock] = useState<boolean>(true);
-  const [isCloudOnline, setIsCloudOnline] = useState<boolean>(true);
-
-  // Verificação de último backup gerado (aviso após 7 dias sem backup)
-  const lastBackupStr = localStorage.getItem('last_backup_date');
-  const needsBackup = (() => {
-    if (!lastBackupStr) return true;
-    const diffDays = (Date.now() - new Date(lastBackupStr).getTime()) / (1000 * 60 * 60 * 24);
-    return diffDays >= 7;
-  })();
+  const isCloudOnline = isCloudModeActive();
+  const serialKey = getSavedSerial();
+  const tenantInfo = getSavedTenantInfo();
+  
+  // Nome Fantasia da empresa ativa na licença
+  const tradeName = tenantInfo?.tradeName || tenantInfo?.companyName || 'ATIVO';
 
   useEffect(() => {
     const handleModifiers = (e: KeyboardEvent | MouseEvent) => {
@@ -52,23 +54,24 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           STATUS:
         </span>
         <span className="font-semibold text-slate-800 truncate">{statusMessage}</span>
-
-        {/* Alerta de Backup Pendente */}
-        {needsBackup && onOpenBackupModal && (
-          <button
-            type="button"
-            onClick={onOpenBackupModal}
-            className="flex items-center gap-1 bg-amber-500 hover:bg-amber-600 text-white font-bold px-2 py-0.5 rounded text-[9.5px] cursor-pointer shadow-xs animate-pulse ml-2"
-            title="Clique para realizar uma cópia de segurança do banco de dados"
-          >
-            <AlertTriangle className="w-3 h-3 text-amber-100" />
-            <span>BACKUP RECOMENDADO</span>
-          </button>
-        )}
       </div>
 
-      {/* Direita: Indicadores (CAPS LOCK, NUM LOCK, NUVEM) */}
+      {/* Direita: Indicadores (USUÁRIO, CAPS LOCK, NUM LOCK, NUVEM) */}
       <div className="flex items-center gap-2 font-bold text-[10px]">
+        {/* Indicador de Usuário Logado */}
+        <div
+          className="flex items-center gap-1.5 px-2.5 py-0.5 rounded border border-indigo-300 bg-indigo-50 text-indigo-950 font-bold shadow-2xs"
+          title={`Usuário conectado: ${currentUser?.name || currentUser?.username || 'Administrador'} (${currentUser?.role || 'Admin'})`}
+        >
+          <User className="w-3.5 h-3.5 text-indigo-600" />
+          <span>USUÁRIO:</span>
+          <span className="text-indigo-900 font-extrabold truncate max-w-[150px]">
+            {currentUser?.name || currentUser?.username || 'Administrador'}
+          </span>
+        </div>
+
+        <div className="h-3.5 w-px bg-slate-400 my-auto" />
+
         {/* Indicador CAPS LOCK */}
         <button
           type="button"
@@ -99,28 +102,48 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
         <div className="h-3.5 w-px bg-slate-400 my-auto" />
 
-        {/* Indicador STATUS DA NUVEM */}
-        <div
-          onClick={() => setIsCloudOnline(!isCloudOnline)}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded border cursor-pointer ${
+        {/* Indicador STATUS DA NUVEM / MODO LOCAL */}
+        <button
+          type="button"
+          onClick={() => {
+            const isAdmin = Boolean(
+              !currentUser ||
+              currentUser?.role === 'Admin' ||
+              currentUser?.role === 'ADMIN' ||
+              currentUser?.role === 'admin' ||
+              currentUser?.accessLevel === 'ADMIN' ||
+              currentUser?.isAdmin === true ||
+              currentUser?.username?.toLowerCase() === 'admin' ||
+              (currentUser?.name || '').toLowerCase().includes('admin')
+            );
+            if (!isAdmin) {
+              return alert('Acesso Negado: Apenas Administradores podem gerenciar a Chave Serial e Conexão em Nuvem.');
+            }
+            if (onOpenSerialLicenseModal) onOpenSerialLicenseModal();
+          }}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition-colors cursor-pointer shadow-2xs font-bold ${
             isCloudOnline
-              ? 'bg-sky-700 text-white border-sky-800'
-              : 'bg-amber-100 text-amber-900 border-amber-300'
+              ? 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-800'
+              : 'bg-slate-200 hover:bg-slate-300 text-slate-700 border-slate-300'
           }`}
-          title="Status de sincronização com o banco na nuvem"
+          title={
+            isCloudOnline
+              ? `Banco Conectado na Nuvem via Chave Serial: ${serialKey || ''} (Clique para gerenciar)`
+              : 'Sistema operando em Modo Local Autônomo (Clique para inserir Chave Serial e conectar na Nuvem)'
+          }
         >
           {isCloudOnline ? (
             <>
-              <Cloud className="w-3.5 h-3.5 text-emerald-300 fill-emerald-300/30" />
-              <span>NUVEM: CONECTADO</span>
+              <Cloud className="w-3.5 h-3.5 text-emerald-300 fill-emerald-300/30 shrink-0" />
+              <span className="truncate max-w-[200px]">BANCO: NUVEM ({tradeName})</span>
             </>
           ) : (
             <>
-              <CloudOff className="w-3.5 h-3.5 text-amber-700" />
-              <span>NUVEM: OFFLINE</span>
+              <HardDrive className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span>BANCO: LOCAL (OFFLINE)</span>
             </>
           )}
-        </div>
+        </button>
       </div>
     </footer>
   );

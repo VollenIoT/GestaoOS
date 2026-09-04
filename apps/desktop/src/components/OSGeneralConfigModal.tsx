@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Settings, Sliders, FileText, CheckSquare, Save, Eye } from 'lucide-react';
-import { ReceiptTemplatePreviewModal } from './ReceiptTemplatePreviewModal';
+import { X, Settings, Sliders, CheckSquare, Save, MessageSquare, RotateCcw } from 'lucide-react';
 
 export interface OSGeneralConfigData {
   autoAssignTechnicianOnStatus?: boolean;
@@ -10,6 +9,8 @@ export interface OSGeneralConfigData {
   blockFinalizeWithoutExecutedService?: boolean;
   defaultEntryReceiptTemplate?: string;
   defaultExitReceiptTemplate?: string;
+  whatsappMessageStatusGeneral?: string;
+  whatsappMessageStatusLiberado?: string;
 }
 
 interface OSGeneralConfigModalProps {
@@ -18,15 +19,28 @@ interface OSGeneralConfigModalProps {
   onSave?: (config: OSGeneralConfigData) => void;
 }
 
+export const DEFAULT_WHATSAPP_STATUS_GENERAL = `Olá, *{cliente}*! Tudo bem?
+
+Informamos que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) teve o status atualizado para: *{status}*.
+
+💰 *Valor Total:* {valor_total}
+
+Qualquer dúvida estamos à disposição!`;
+
+export const DEFAULT_WHATSAPP_STATUS_LIBERADO = `Olá, *{cliente}*! Tudo bem?
+
+Passando para informar que a sua Ordem de Serviço *#{numero_os}* (*{equipamento}*) está com status *APARELHO LIBERADO* e o aparelho já se encontra pronto e disponível para retirada!
+
+💰 *Valor Total:* {valor_total}
+
+Ficamos à disposição!`;
+
 export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
   isOpen,
   onClose,
   onSave,
 }) => {
-  const [activeTab, setActiveTab] = useState<'geral' | 'regras' | 'impressoes'>('geral');
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [previewType, setPreviewType] = useState<'ENTRY' | 'EXIT'>('ENTRY');
-  const [previewTemplate, setPreviewTemplate] = useState<string>('DEFAULT_2VIAS');
+  const [activeTab, setActiveTab] = useState<'geral' | 'regras' | 'whatsapp'>('geral');
 
   const [config, setConfig] = useState<OSGeneralConfigData>(() => {
     try {
@@ -41,6 +55,8 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
       blockFinalizeWithoutExecutedService: true,
       defaultEntryReceiptTemplate: 'DEFAULT_2VIAS',
       defaultExitReceiptTemplate: 'MODERN_DETAILED',
+      whatsappMessageStatusGeneral: DEFAULT_WHATSAPP_STATUS_GENERAL,
+      whatsappMessageStatusLiberado: DEFAULT_WHATSAPP_STATUS_LIBERADO,
     };
   });
 
@@ -79,12 +95,14 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
         requireEquipmentSerialNumber: config.requireEquipmentSerialNumber ?? false,
         requireDefectDescription: config.requireDefectDescription ?? true,
         blockFinalizeWithoutExecutedService: config.blockFinalizeWithoutExecutedService ?? true,
+        whatsappMessageStatusGeneral: config.whatsappMessageStatusGeneral ?? DEFAULT_WHATSAPP_STATUS_GENERAL,
+        whatsappMessageStatusLiberado: config.whatsappMessageStatusLiberado ?? DEFAULT_WHATSAPP_STATUS_LIBERADO,
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem('vollen_os_preferences', JSON.stringify(prefsPayload));
       window.dispatchEvent(new Event('storage'));
 
-      // Salva no Firestore para que todos os computadores e o APK mobile utilizem o mesmo modelo
+      // Salva no Firestore para que todos os computadores e o APK mobile utilizem o mesmo modelo e mensagens
       const { setDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../services/firebase');
       await setDoc(doc(db, 'system_config', 'os_preferences'), prefsPayload, { merge: true }).catch(() => null);
@@ -154,14 +172,14 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveTab('impressoes')}
-            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${activeTab === 'impressoes'
-                ? 'bg-white text-sky-700 border-t-2 border-sky-600 shadow-xs'
+            onClick={() => setActiveTab('whatsapp')}
+            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${activeTab === 'whatsapp'
+                ? 'bg-white text-emerald-700 border-t-2 border-emerald-600 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
               }`}
           >
-            <FileText className="w-3.5 h-3.5" />
-            Modelos de Impressão
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+            Mensagens WhatsApp
           </button>
         </div>
 
@@ -240,70 +258,63 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
             </div>
           )}
 
-          {activeTab === 'impressoes' && (
+          {activeTab === 'whatsapp' && (
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Modelo Padrão de Comprovante de Entrada
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={config.defaultEntryReceiptTemplate || 'DEFAULT_2VIAS'}
-                    onChange={(e) => setConfig((prev) => ({ ...prev, defaultEntryReceiptTemplate: e.target.value }))}
-                    className="flex-1 bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 focus:border-sky-500 focus:outline-none"
-                  >
-                    <option value="DEFAULT_2VIAS">Padrão 2 Vias (Empresa e Cliente)</option>
-                    <option value="MINIMAL_1VIA">Moderno 1 Via Minimalista (A4)</option>
-                    <option value="COMPACT_1VIA">1 Via Econômica (Folha Única)</option>
-                    <option value="MODERN_BOXES">Moderno em Blocos</option>
-                    <option value="MINIMAL_BORDER">Minimalista Borda Dupla</option>
-                    <option value="THERMAL_80MM">Cupom Térmico 80mm</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPreviewType('ENTRY');
-                      setPreviewTemplate(config.defaultEntryReceiptTemplate || 'DEFAULT_2VIAS');
-                      setIsPreviewOpen(true);
-                    }}
-                    className="px-3 py-2 bg-sky-100 hover:bg-sky-200 text-sky-800 border border-sky-300 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer text-xs shrink-0"
-                    title="Visualizar modelo de entrada selecionado"
-                  >
-                    <Eye className="w-4 h-4 text-sky-600" />
-                    Visualizar Modelo
-                  </button>
+              <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl text-emerald-950 text-[11px] leading-relaxed">
+                <strong>Tags disponíveis para usar no texto:</strong>
+                <div className="flex flex-wrap gap-1.5 mt-1 font-mono text-[10px] text-emerald-800 font-bold">
+                  <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-300">{'{cliente}'}</span>
+                  <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-300">{'{numero_os}'}</span>
+                  <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-300">{'{equipamento}'}</span>
+                  <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-300">{'{status}'}</span>
+                  <span className="bg-white px-1.5 py-0.5 rounded border border-emerald-300">{'{valor_total}'}</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Modelo Padrão de Comprovante de Saída
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    value={config.defaultExitReceiptTemplate || 'MODERN_DETAILED'}
-                    onChange={(e) => setConfig((prev) => ({ ...prev, defaultExitReceiptTemplate: e.target.value }))}
-                    className="flex-1 bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 focus:border-sky-500 focus:outline-none"
-                  >
-                    <option value="MODERN_DETAILED">Executivo / Técnico Moderno (A4)</option>
-                    <option value="MINIMAL_1VIA">Moderno 1 Via Minimalista (A4)</option>
-                    <option value="EXECUTIVE_REPORT">Relatório Executivo Detalhado</option>
-                    <option value="THERMAL_80MM">Cupom Térmico 80mm</option>
-                  </select>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Mensagem Pronta Geral (Outros Status)
+                  </label>
                   <button
                     type="button"
-                    onClick={() => {
-                      setPreviewType('EXIT');
-                      setPreviewTemplate(config.defaultExitReceiptTemplate || 'MODERN_DETAILED');
-                      setIsPreviewOpen(true);
-                    }}
-                    className="px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer text-xs shrink-0"
-                    title="Visualizar modelo de saída selecionado"
+                    onClick={() => setConfig((prev) => ({ ...prev, whatsappMessageStatusGeneral: DEFAULT_WHATSAPP_STATUS_GENERAL }))}
+                    className="text-[10px] text-slate-500 hover:text-emerald-700 font-semibold flex items-center gap-1 cursor-pointer"
+                    title="Restaurar texto padrão"
                   >
-                    <Eye className="w-4 h-4 text-emerald-600" />
-                    Visualizar Modelo
+                    <RotateCcw className="w-3 h-3" /> Restaurar Padrão
                   </button>
                 </div>
+                <textarea
+                  rows={5}
+                  value={config.whatsappMessageStatusGeneral ?? DEFAULT_WHATSAPP_STATUS_GENERAL}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, whatsappMessageStatusGeneral: e.target.value }))}
+                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 font-sans text-xs text-slate-900 focus:border-emerald-500 focus:outline-none shadow-2xs leading-relaxed"
+                  placeholder="Digite a mensagem para os status gerais..."
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Mensagem de Aparelho Liberado (Pronto para Retirada)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setConfig((prev) => ({ ...prev, whatsappMessageStatusLiberado: DEFAULT_WHATSAPP_STATUS_LIBERADO }))}
+                    className="text-[10px] text-slate-500 hover:text-emerald-700 font-semibold flex items-center gap-1 cursor-pointer"
+                    title="Restaurar texto padrão"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Restaurar Padrão
+                  </button>
+                </div>
+                <textarea
+                  rows={5}
+                  value={config.whatsappMessageStatusLiberado ?? DEFAULT_WHATSAPP_STATUS_LIBERADO}
+                  onChange={(e) => setConfig((prev) => ({ ...prev, whatsappMessageStatusLiberado: e.target.value }))}
+                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 font-sans text-xs text-slate-900 focus:border-emerald-500 focus:outline-none shadow-2xs leading-relaxed"
+                  placeholder="Digite a mensagem para aparelho liberado..."
+                />
               </div>
             </div>
           )}
@@ -326,14 +337,6 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
           </div>
         </form>
       </div>
-
-      {/* Modal de Pré-visualização do Modelo */}
-      <ReceiptTemplatePreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        type={previewType}
-        templateId={previewTemplate}
-      />
     </div>
   );
 };

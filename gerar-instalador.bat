@@ -14,10 +14,14 @@ set "RUST_BACKTRACE=1"
 
 cd /d "%~dp0apps\desktop"
 
+:: Chave de assinatura para Auto-Update silencioso do Tauri
+set "TAURI_SIGNING_PRIVATE_KEY_PATH=%~dp0apps\desktop\src-tauri\updater.key"
+set "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=sistema-os-updater-key"
+
 echo [1/2] Finalizando processos e liberando arquivos...
 taskkill /F /IM "SistemaOS.exe" /IM "vollen-os.exe" /IM "cargo.exe" /IM "rustc.exe" >nul 2>&1
 
-echo [2/2] Compilando instalador NSIS (.exe)...
+echo [2/2] Compilando instalador NSIS (.exe) e pacote de Auto-Update...
 call npx @tauri-apps/cli build --bundles nsis
 
 if %ERRORLEVEL% equ 0 (

@@ -74,27 +74,27 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     try {
-      const saved = localStorage.getItem('open_orders_modal_columns');
+      const saved = localStorage.getItem('open_orders_modal_columns_v3');
       if (saved) return JSON.parse(saved);
     } catch (err) { }
     return [
       { id: 'code', label: 'Código OS', width: 110, visible: true, fixed: true },
-      { id: 'type', label: 'Tipo OS', width: 120, visible: true },
+      { id: 'entryDate', label: 'Data Entrada', width: 110, visible: true },
+      { id: 'status', label: 'Status', width: 130, visible: true },
       { id: 'client', label: 'Cliente', width: 180, visible: true, fixed: true },
-      { id: 'phone', label: 'Telefone', width: 130, visible: true },
-      { id: 'whatsapp', label: 'WhatsApp', width: 130, visible: false },
+      { id: 'contact', label: 'Telefone / WhatsApp', width: 180, visible: true },
       { id: 'equipment', label: 'Equipamento', width: 170, visible: true },
-      { id: 'address', label: 'Endereço', width: 220, visible: true },
       { id: 'problem', label: 'Problema Relatado', width: 200, visible: true },
       { id: 'value', label: 'Valor Total', width: 120, visible: true },
+      { id: 'address', label: 'Endereço', width: 220, visible: true },
       { id: 'warranty', label: 'Garantia', width: 140, visible: true },
-      { id: 'status', label: 'Status', width: 130, visible: true },
+      { id: 'type', label: 'Tipo OS', width: 120, visible: true },
     ];
   });
 
   const saveColumnsToStorage = (newCols: ColumnConfig[]) => {
     try {
-      localStorage.setItem('open_orders_modal_columns', JSON.stringify(newCols));
+      localStorage.setItem('open_orders_modal_columns_v3', JSON.stringify(newCols));
     } catch (err) { }
   };
 
@@ -321,6 +321,14 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     switch (columnId) {
       case 'code':
         return <span className="font-mono font-bold text-sky-700">{os.code}</span>;
+      case 'entryDate': {
+        const rawDate = os.entryDate || os.createdAt;
+        if (!rawDate) return <span className="text-slate-400 font-mono">-</span>;
+        const d = rawDate.includes('T') ? rawDate.split('T')[0] : rawDate;
+        const [y, m, day] = d.split('-');
+        const formatted = day && m && y ? `${day}/${m}/${y}` : d;
+        return <span className="font-mono text-slate-700 font-semibold">{formatted}</span>;
+      }
       case 'type':
         return (
           <span
@@ -334,6 +342,49 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
         );
       case 'client':
         return <span className="font-bold text-slate-900">{os.client?.name}</span>;
+      case 'contact': {
+        const phone = (os.client?.phone || '').trim();
+        const whatsapp = (os.client?.whatsapp || '').trim();
+        if (!phone && !whatsapp) {
+          return <span className="text-slate-400 font-mono">-</span>;
+        }
+        if (phone && whatsapp && phone === whatsapp) {
+          return (
+            <span className="text-slate-800 font-semibold flex items-center gap-1">
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>{phone}</span>
+            </span>
+          );
+        }
+        if (phone && whatsapp) {
+          return (
+            <div className="flex flex-col text-[10px] leading-tight justify-center">
+              <span className="text-slate-800 font-medium flex items-center gap-1">
+                <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                {phone}
+              </span>
+              <span className="text-emerald-700 font-bold flex items-center gap-1">
+                <MessageSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                {whatsapp}
+              </span>
+            </div>
+          );
+        }
+        if (whatsapp) {
+          return (
+            <span className="text-emerald-700 font-semibold flex items-center gap-1">
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>{whatsapp}</span>
+            </span>
+          );
+        }
+        return (
+          <span className="text-slate-800 font-medium flex items-center gap-1">
+            <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span>{phone}</span>
+          </span>
+        );
+      }
       case 'phone':
         return <span>{os.client?.phone}</span>;
       case 'whatsapp':

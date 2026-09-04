@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Package, Edit3, AlertTriangle, CheckCircle } from 'lucide-react';
+import { X, Package, Edit3, AlertTriangle, CheckCircle, ShoppingCart } from 'lucide-react';
 import type { Part } from './PartsModal';
 
 interface PartViewModalProps {
@@ -8,6 +8,7 @@ interface PartViewModalProps {
   currentUser: any;
   onClose: () => void;
   onEdit: (part: Part) => void;
+  onAddToSales?: (part: Part) => void;
 }
 
 export const PartViewModal: React.FC<PartViewModalProps> = ({
@@ -16,6 +17,7 @@ export const PartViewModal: React.FC<PartViewModalProps> = ({
   currentUser,
   onClose,
   onEdit,
+  onAddToSales,
 }) => {
   React.useEffect(() => {
     if (!isOpen) return;
@@ -138,6 +140,19 @@ export const PartViewModal: React.FC<PartViewModalProps> = ({
             {canEdit ? 'Você tem permissão para editar esta peça.' : 'Modo somente visualização.'}
           </span>
           <div className="flex items-center gap-2">
+            {onAddToSales && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onAddToSales(part);
+                }}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 shadow cursor-pointer transition-all text-sm"
+                title="Inserir esta peça diretamente no módulo de Vendas Balcão"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                Adicionar a Vendas
+              </button>
+            )}
             {canEdit && (
               <button
                 onClick={() => { onClose(); onEdit(part); }}

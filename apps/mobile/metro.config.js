@@ -14,9 +14,12 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// Bloqueia a indexação da pasta target do Rust/Tauri e arquivos temporários
+// Bloqueia a indexação da pasta target do Rust/Tauri, git e builds pesados
 config.resolver.blockList = [
   /.*[/\\]apps[/\\]desktop[/\\]src-tauri[/\\]target[/\\].*/,
+  /.*[/\\]apps[/\\]mobile[/\\]android[/\\].*/,
+  /.*[/\\]apps[/\\]desktop[/\\]dist[/\\].*/,
+  /.*[/\\]\.git[/\\].*/,
 ];
 
 config.resolver.extraNodeModules = {

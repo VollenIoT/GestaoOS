@@ -198,6 +198,8 @@ export const VisitExecutionScreen: React.FC<VisitExecutionScreenProps> = ({
 
   const problem = rawProblem;
   const technicalReport = rawReport;
+  const orderObservations = String(order.orderObservations || order.observations || order.generalNotes || visit.orderObservations || '').trim();
+  const visitNotes = String(visit.notes || '').trim();
   const servicePerformed = String(order.servicePerformed || order.executedService || order.servicoExecutado || visit.servicePerformed || '').trim();
   const orderType = (order.type || visit.orderType || '').toUpperCase();
   const orderTypeLabel = orderType === 'AGENDAMENTO' ? 'Agendamento / Visita Técnica'
@@ -391,12 +393,12 @@ export const VisitExecutionScreen: React.FC<VisitExecutionScreenProps> = ({
         </View>
       ) : null}
 
-      {/* Card: Defeito e Laudo */}
-      {(problem || technicalReport || servicePerformed) && (
+      {/* Card: Defeito, Laudo e Observações */}
+      {(problem || technicalReport || servicePerformed || orderObservations || visitNotes) && (
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <FileText size={16} color="#dc2626" />
-            <Text style={styles.cardTitle}>Diagnóstico e Laudo</Text>
+            <Text style={styles.cardTitle}>Diagnóstico, Laudo e Observações</Text>
           </View>
           {problem ? (
             <View style={styles.infoBlock}>
@@ -414,6 +416,18 @@ export const VisitExecutionScreen: React.FC<VisitExecutionScreenProps> = ({
             <View style={styles.infoBlock}>
               <Text style={styles.infoLabel}>Serviço Executado</Text>
               <Text style={styles.infoValue}>{servicePerformed}</Text>
+            </View>
+          ) : null}
+          {orderObservations ? (
+            <View style={styles.infoBlock}>
+              <Text style={[styles.infoLabel, { color: '#d97706' }]}>Observações Gerais da OS</Text>
+              <Text style={[styles.infoValue, { color: '#92400e', fontWeight: '500' }]}>{orderObservations}</Text>
+            </View>
+          ) : null}
+          {visitNotes && visitNotes !== orderObservations && visitNotes !== technicalReport ? (
+            <View style={styles.infoBlock}>
+              <Text style={[styles.infoLabel, { color: '#7c3aed' }]}>Observações do Agendamento</Text>
+              <Text style={[styles.infoValue, { color: '#5b21b6' }]}>{visitNotes}</Text>
             </View>
           ) : null}
         </View>

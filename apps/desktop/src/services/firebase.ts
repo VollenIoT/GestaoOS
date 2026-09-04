@@ -1,27 +1,52 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeApp, getApps, getApp, deleteApp, FirebaseApp } from 'firebase/app';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  Firestore,
+} from 'firebase/firestore';
+import {
+  getSavedTenantFirebaseConfig,
+  isCloudModeActive,
+  MASTER_CATALOG_FIREBASE_CONFIG,
+} from './licenseService';
 
-export const firebaseConfig = {
-  apiKey: "AIzaSyBYldSd19R4l8dVPj5akUNdjiBjckmO_lk",
-  authDomain: "vollen---gestao-os.firebaseapp.com",
-  projectId: "vollen---gestao-os",
-  storageBucket: "vollen---gestao-os.firebasestorage.app",
-  messagingSenderId: "436401191883",
-  appId: "1:436401191883:web:cfa2281a25dca4f81f944e",
-  measurementId: "G-YRPSCPSBVC"
-};
-
-// Inicializa o App do Firebase
-export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-
-// Inicializa o Firestore com suporte a cache offline e múltiplas abas no Desktop
-let firestoreDb;
-try {
-  firestoreDb = initializeFirestore(app, {
-    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-  });
-} catch {
-  firestoreDb = getFirestore(app);
+// Determina se há configuração ativa do tenant (ou usa a base padrão MASTER_CATALOG_FIREBASE_CONFIG)
+export function getActiveFirebaseConfig() {
+  const tenantConfig = getSavedTenantFirebaseConfig();
+  if (tenantConfig && tenantConfig.projectId && tenantConfig.apiKey) {
+    return tenantConfig;
+  }
+  return MASTER_CATALOG_FIREBASE_CONFIG;
 }
 
-export const db = firestoreDb;
+const activeConfig = getActiveFirebaseConfig();
+
+// Inicializa o App do Firebase somente se houver uma configuração de tenant ativa
+let appInstance: FirebaseApp | null = null;
+let firestoreDb: Firestore | null = null;
+
+if (activeConfig) {
+  const existingApp = getApps().find((a) => a.name === '[DEFAULT]');
+  if (existingApp) {
+    appInstance = existingApp;
+  } else {
+    appInstance = initializeApp(activeConfig);
+  }
+
+  try {
+    firestoreDb = initializeFirestore(appInstance, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    firestoreDb = getFirestore(appInstance);
+  }
+}
+
+export const app = appInstance;
+// Se estiver em modo local, db é null (operações em nuvem são ignoradas com segurança)
+export const db = firestoreDb as Firestore;
+
+
+

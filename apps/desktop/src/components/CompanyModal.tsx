@@ -67,27 +67,49 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       // 1. Tenta carregar do localStorage imediatamente
+      let baseData = defaultCompanyData;
       try {
         const saved = localStorage.getItem('vollen_company_data');
         if (saved) {
-          setFormData(JSON.parse(saved));
+          baseData = { ...defaultCompanyData, ...JSON.parse(saved) };
         }
       } catch (err) {}
 
-      // 2. Busca a versão mais atualizada do Firestore
+      // Aplica os nomes oficiais da licença ativa
+      try {
+        const rawTenant = localStorage.getItem('system_tenant_info');
+        if (rawTenant) {
+          const tenant = JSON.parse(rawTenant);
+          if (tenant.tradeName) baseData.tradingName = tenant.tradeName;
+          else if (tenant.companyName) baseData.tradingName = tenant.companyName;
+
+          if (tenant.legalName) baseData.name = tenant.legalName;
+          else if (tenant.companyName) baseData.name = tenant.companyName;
+        } else {
+          baseData.tradingName = 'Vollen Assistência Técnica';
+          baseData.name = 'Vollen Assistência Técnica';
+        }
+      } catch {}
+
+      setFormData(baseData);
+
+      // 2. Busca a versão mais atualizada do Firestore (mantendo os nomes da licença)
       import('../services/firebase').then(({ db }) => {
         import('firebase/firestore').then(({ doc, getDoc }) => {
-          getDoc(doc(db, 'system_config', 'company_data'))
-            .then((snap) => {
-              if (snap.exists()) {
-                const cloudData = snap.data() as CompanyData;
-                setFormData(cloudData);
-                try {
-                  localStorage.setItem('vollen_company_data', JSON.stringify(cloudData));
-                } catch (e) {}
-              }
-            })
-            .catch(() => {});
+          if (db) {
+            getDoc(doc(db, 'system_config', 'company_data'))
+              .then((snap) => {
+                if (snap.exists()) {
+                  const cloudData = snap.data() as CompanyData;
+                  const merged = { ...cloudData, tradingName: baseData.tradingName, name: baseData.name };
+                  setFormData(merged);
+                  try {
+                    localStorage.setItem('vollen_company_data', JSON.stringify(merged));
+                  } catch (e) {}
+                }
+              })
+              .catch(() => {});
+          }
         });
       });
     }
@@ -124,10 +146,28 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Obtém o nome oficial protegido da licença ativa ou o padrão
+    let protectedTradeName = 'Vollen Assistência Técnica';
+    let protectedLegalName = 'Vollen Assistência Técnica';
+
+    try {
+      const savedTenantInfo = localStorage.getItem('system_tenant_info');
+      if (savedTenantInfo) {
+        const parsed = JSON.parse(savedTenantInfo);
+        if (parsed.tradeName || parsed.companyName) {
+          protectedTradeName = parsed.tradeName || parsed.companyName;
+        }
+        if (parsed.legalName || parsed.companyName) {
+          protectedLegalName = parsed.legalName || parsed.companyName;
+        }
+      }
+    } catch {}
+
     const finalData = {
       ...formData,
-      name: (formData.name || formData.tradingName || '').trim(),
-      tradingName: (formData.tradingName || formData.name || '').trim(),
+      tradingName: protectedTradeName,
+      name: protectedLegalName,
     };
 
     try {
@@ -136,7 +176,9 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
 
       import('../services/firebase').then(({ db }) => {
         import('firebase/firestore').then(({ doc, setDoc }) => {
-          setDoc(doc(db, 'system_config', 'company_data'), finalData, { merge: true }).catch(() => {});
+          if (db) {
+            setDoc(doc(db, 'system_config', 'company_data'), finalData, { merge: true }).catch(() => {});
+          }
         });
       });
     } catch (err) {
@@ -243,26 +285,35 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <div className="md:col-span-2">
-                    <label className="block text-[11px] font-bold text-sky-900 mb-0.5">
-                      Nome Fantasia (Comercial) *
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5 flex items-center justify-between">
+                      <span>Nome Fantasia (Comercial)</span>
+                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold flex items-center gap-1">
+                        🔒 Vinculado à Licença
+                      </span>
                     </label>
                     <input
                       type="text"
-                      required
-                      value={formData.tradingName}
-                      onChange={(e) => setFormData({ ...formData, tradingName: e.target.value })}
-                      placeholder="Nome comercial ex: Vollen Assistência"
-                      className="w-full bg-sky-50 border border-sky-300 rounded-lg px-2 py-1 font-bold text-sky-950 focus:outline-none focus:border-sky-600 text-xs"
+                      disabled
+                      readOnly
+                      value={formData.tradingName || 'Vollen Assistência Técnica'}
+                      title="O Nome Fantasia é gerenciado exclusivamente pela Chave Serial da Licença do sistema."
+                      className="w-full bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-600 cursor-not-allowed select-none text-xs"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Razão Social</label>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5 flex items-center justify-between">
+                      <span>Razão Social</span>
+                      <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold flex items-center gap-1">
+                        🔒 Vinculado à Licença
+                      </span>
+                    </label>
                     <input
                       type="text"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Nome jurídico da empresa"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
+                      disabled
+                      readOnly
+                      value={formData.name || formData.tradingName || 'Vollen Assistência Técnica'}
+                      title="A Razão Social é gerenciada exclusivamente pela Chave Serial da Licença do sistema."
+                      className="w-full bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-600 cursor-not-allowed select-none text-xs"
                     />
                   </div>
                   <div className="md:col-span-2">
