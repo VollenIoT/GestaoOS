@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 240" width="1100" height="240">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@900&amp;display=swap');
+      
+      .bg { fill: #FFFFFF; }
+      .text-black { 
+        fill: #000000; 
+        font-family: 'Kanit', sans-serif; 
+        font-weight: 900; 
+        font-size: 135px; 
+      }
+      .text-blue { 
+        fill: #0066FF; 
+        font-family: 'Kanit', sans-serif; 
+        font-weight: 900; 
+        font-size: 135px; 
+      }
+    </style>
+  </defs>
+
+  <!-- Fundo Branco -->
+  <rect width="100%" height="100%" class="bg" />
+
+  <!-- Texto VOLLEN IoT Baseado na Opção 4 (Kanit 900) -->
+  <text x="50" y="165" xml:space="preserve">
+    <tspan class="text-black">VO</tspan><tspan class="text-blue">LL</tspan><tspan class="text-black">EN</tspan>
+    <tspan class="text-blue"> IoT</tspan>
+  </text>
+</svg>

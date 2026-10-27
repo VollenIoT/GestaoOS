@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Central de Downloads — Vollen IoT & Gestão OS</title>
+  <meta name="description" content="Baixe os aplicativos e instaladores oficiais da Vollen IoT: APK IoT para microcontroladores, Gestão OS Demonstração, APK do Técnico e todas as versões desktop." />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .download-hero {
+      background: linear-gradient(135deg, #0b1329 0%, #0f172a 50%, #1e3a8a 100%);
+      padding: 70px 0 60px;
+      color: #fff;
+      text-align: center;
+    }
+    .download-card {
+      background: var(--white);
+      border: 1.5px solid var(--slate-200);
+      border-radius: var(--radius-xl);
+      padding: 32px;
+      box-shadow: var(--shadow-md);
+      transition: all .25s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+    .download-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-xl);
+      border-color: var(--blue-300);
+    }
+    .download-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 16px;
+    }
+    .version-tag {
+      font-size: .75rem;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-bottom: 12px;
+    }
+    .step-box {
+      background: var(--slate-50);
+      border: 1px solid var(--slate-200);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .step-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--blue-600);
+      color: #fff;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     NAVBAR
+════════════════════════════════════════════ -->
+<nav class="navbar">
+  <div class="container">
+    <div class="navbar-inner">
+      <a href="index.html" class="navbar-logo">
+        <div class="brand-logo-text"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+      </a>
+      <nav class="navbar-nav">
+        <a href="index.html">Início</a>
+        <div class="nav-dropdown">
+          <button class="nav-dropdown-btn" type="button">
+            Software
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <div class="dropdown-menu">
+            <a href="gestao-os.html">
+              <div class="dropdown-icon" style="background:#0a192f;">
+                <img src="assets/gestao-os-icon.png" alt="Ícone Gestão OS" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">Gestão OS</span>
+                <span class="dropdown-desc">Sistema desktop completo para sua assistência</span>
+              </div>
+            </a>
+            <a href="download.html#apk-tecnico">
+              <div class="dropdown-icon" style="background:#1e3a8a;">
+                <span style="font-size:1.4rem;">📱</span>
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Gestão OS</span>
+                <span class="dropdown-desc">Aplicativo Android para técnicos na bancada e campo</span>
+              </div>
+            </a>
+            <a href="microcontroladores.html">
+              <div class="dropdown-icon" style="background:#0f172a;">
+                <img src="assets/vollen-iot-icon.png" alt="Ícone APK Vollen IoT" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Vollen IoT</span>
+                <span class="dropdown-desc">Controle de microcontroladores em tempo real</span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <a href="planos.html">Planos</a>
+        <a href="download.html" class="active">Downloads</a>
+        <a href="sobre.html">Sobre</a>
+        <a href="contato.html">Contato</a>
+      </nav>
+      <div class="navbar-cta">
+        <a href="download.html" class="btn btn-primary btn-sm">🚀 Baixar Agora</a>
+      </div>
+      <button class="hamburger" id="menuBtn" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     HERO DOWNLOADS
+════════════════════════════════════════════ -->
+<section class="download-hero">
+  <div class="container">
+    <div class="badge-iot-pulse" style="margin-bottom:14px;">
+      <span class="pulse-dot"></span> Central Oficial de Downloads
+    </div>
+    <h1 style="font-size:clamp(1.9rem, 4vw, 2.9rem); font-weight:900; margin-bottom:14px;">
+      Baixe os Aplicativos e Instaladores Vollen IoT
+    </h1>
+    <p style="font-size:1.05rem; opacity:.85; max-width:640px; margin:0 auto;">
+      Acesse os instaladores oficiais do sistema <strong>Gestão OS para Windows</strong> (Versões Básica, V2, V3 e V4), o <strong>APK Técnico para Android</strong> e o aplicativo <strong>Vollen IoT para Microcontroladores</strong>.
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     TODAS AS VERSÕES DESKTOP DO GESTÃO OS
+════════════════════════════════════════════ -->
+<section class="section">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:48px;">
+      <div class="section-tag">Instaladores Desktop Oficiais (Windows)</div>
+      <h2 class="section-title">Gestão OS — Todas as Versões</h2>
+      <p class="section-sub centered">Escolha a versão correspondente à sua licença anual para baixar o instalador oficial com 10 dias de teste grátis inclusos.</p>
+    </div>
+
+    <div class="grid-4" style="align-items:stretch;">
+      
+      <!-- Versão Básica -->
+      <div class="download-card">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div style="font-size:1.6rem; margin-bottom:10px;">🖥️</div>
+          <div><span class="version-tag" style="background:#f1f5f9; color:var(--slate-700);">Versão 1.0.0</span></div>
+          <h4 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:6px; min-height:2.6rem; display:flex; align-items:center;">Versão Básica</h4>
+          <p style="font-size:.82rem; color:var(--slate-500); margin-bottom:14px; min-height:3.8rem; line-height:1.45;">
+            Operação 100% offline para 1 PC. Cadastro de OS, clientes, modelos por marca, peças e impressão em 2 vias.
+          </p>
+          <ul style="font-size:.78rem; color:var(--slate-600); display:flex; flex-direction:column; gap:6px; margin-bottom:20px; flex:1; min-height:4.2rem;">
+            <li>✓ Instalador Windows (.exe)</li>
+            <li>✓ Validação CPF/CNPJ & Modelos</li>
+            <li>✓ Backup local incluso</li>
+          </ul>
+        </div>
+        <a href="downloads/Vollen - Gestão de Ordens de Serviço V1_1.0.0_x64-setup.exe" download class="btn btn-primary btn-sm" style="justify-content:center; width:100%; height:40px; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar Versão V1 (.exe)
+        </a>
+      </div>
+
+      <!-- Versão V2 -->
+      <div class="download-card">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div style="font-size:1.6rem; margin-bottom:10px;">💬</div>
+          <div><span class="version-tag" style="background:#f0fdf4; color:#15803d;">Versão 2.0.0</span></div>
+          <h4 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:6px; min-height:2.6rem; display:flex; align-items:center;">Versão V2</h4>
+          <p style="font-size:.82rem; color:var(--slate-500); margin-bottom:14px; min-height:3.8rem; line-height:1.45;">
+            Rede local multi-PC, WhatsApp automático, caixa com conferência cega, PDV e relatórios por funcionário.
+          </p>
+          <ul style="font-size:.78rem; color:var(--slate-600); display:flex; flex-direction:column; gap:6px; margin-bottom:20px; flex:1; min-height:4.2rem;">
+            <li>✓ Instalador Windows (.exe)</li>
+            <li>✓ WhatsApp automático por etapa</li>
+            <li>✓ Caixa, PDV & Orçamentos</li>
+          </ul>
+        </div>
+        <a href="downloads/Vollen - Gestão de Ordens de Serviço V2_2.0.0_x64-setup.exe" download class="btn btn-primary btn-sm" style="justify-content:center; width:100%; height:40px; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar Versão V2 (.exe)
+        </a>
+      </div>
+
+      <!-- Versão V3 Pro Cloud -->
+      <div class="download-card">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div style="font-size:1.6rem; margin-bottom:10px;">☁️</div>
+          <div><span class="version-tag" style="background:#dbeafe; color:var(--blue-700);">Versão 3.0.0 ⭐</span></div>
+          <h4 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:6px; min-height:2.6rem; display:flex; align-items:center;">Versão V3 Pro Cloud</h4>
+          <p style="font-size:.82rem; color:var(--slate-500); margin-bottom:14px; min-height:3.8rem; line-height:1.45;">
+            Nuvem em tempo real, APK Android incluso, taxas de maquininha de cartão, botão rápido e histórico.
+          </p>
+          <ul style="font-size:.78rem; color:var(--slate-600); display:flex; flex-direction:column; gap:6px; margin-bottom:20px; flex:1; min-height:4.2rem;">
+            <li>✓ Instalador Windows (.exe)</li>
+            <li>✓ App Android integrado</li>
+            <li>✓ Taxas, +Novo Aparelho & Garantias</li>
+          </ul>
+        </div>
+        <a href="downloads/Vollen - Gestão de Ordens de Serviço V3_3.0.0_x64-setup.exe" download class="btn btn-primary btn-sm" style="justify-content:center; width:100%; height:40px; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar Versão V3 (.exe)
+        </a>
+      </div>
+
+      <!-- Versão V4 Enterprise -->
+      <div class="download-card">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div style="font-size:1.6rem; margin-bottom:10px;">🏢</div>
+          <div><span class="version-tag" style="background:#fef3c7; color:#b45309;">Versão 4.0.1 ⚡</span></div>
+          <h4 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:6px; min-height:2.6rem; display:flex; align-items:center;">Versão V4 Enterprise</h4>
+          <p style="font-size:.82rem; color:var(--slate-500); margin-bottom:14px; min-height:3.8rem; line-height:1.45;">
+            Leitor de código de barras, central de etiquetas, entrada via XML de NF-e, compra automática e DRE.
+          </p>
+          <ul style="font-size:.78rem; color:var(--slate-600); display:flex; flex-direction:column; gap:6px; margin-bottom:20px; flex:1; min-height:4.2rem;">
+            <li>✓ Leitor de Código de Barras (1D/2D)</li>
+            <li>✓ XML de NF-e & Ordem de Compra</li>
+            <li>✓ Etiquetas Térmicas/A4 & DRE Lucro Real</li>
+          </ul>
+        </div>
+        <a href="downloads/Vollen - Gestão de OS e Vendas V4_4.0.1_x64-setup.exe" download class="btn btn-primary btn-sm" style="justify-content:center; width:100%; height:40px; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar Versão V4 (.exe)
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     APLICATIVOS MOBILE & FERRAMENTAS
+════════════════════════════════════════════ -->
+<section id="apk-tecnico" class="section section-gray">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:48px;">
+      <div class="section-tag">Aplicativos Android & Recursos</div>
+      <h2 class="section-title">Aplicativos Mobile & Biblioteca</h2>
+      <p class="section-sub centered">Aplicativos para técnicos em campo e controle em tempo real de microcontroladores.</p>
+    </div>
+
+    <div class="grid-3" style="align-items:stretch;">
+      
+      <!-- 1. APK Gestão OS (Técnico) -->
+      <div class="download-card" style="border-top:4px solid #f59e0b;">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div class="download-icon" style="background:#0a192f; padding:4px;">
+            <img src="assets/gestao-os-icon.png" alt="Ícone APK Técnico Gestão OS" style="width:100%; height:100%; border-radius:10px; object-fit:cover;" />
+          </div>
+          <div><span class="version-tag" style="background:#fef3c7; color:#b45309;">📱 Android • Técnico OS</span></div>
+          <h3 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:8px;">APK Técnico OS</h3>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.5; margin-bottom:14px; min-height:3.8rem;">
+            Aplicativo móvel para técnicos consultarem ordens de serviço, atualizarem laudos e darem baixa em peças direto pelo celular na casa do cliente.
+          </p>
+          <div style="font-size:.78rem; color:var(--slate-500); margin-bottom:16px;">
+            <div>✓ Compatível com <strong>Versão V3 Pro Cloud</strong> e <strong>Versão V4 Enterprise</strong></div>
+            <div>✓ Sincronização em nuvem em tempo real</div>
+          </div>
+        </div>
+        <a href="downloads/APK-Vollen-GestaoOS.apk" download class="btn btn-primary" style="background:#d97706; justify-content:center; width:100%; height:40px; font-size:.85rem; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar APK Técnico (.apk)
+        </a>
+      </div>
+
+      <!-- 2. APK Vollen IoT (Microcontroladores) -->
+      <div class="download-card" style="border-top:4px solid #10b981;">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div class="download-icon" style="background:#0f172a; padding:4px;">
+            <img src="assets/vollen-iot-icon.png" alt="Ícone APK Vollen IoT" style="width:100%; height:100%; border-radius:10px; object-fit:cover;" />
+          </div>
+          <div><span class="version-tag" style="background:#ecfdf5; color:#059669;">📱 Android APK • Grátis</span></div>
+          <h3 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:8px;">APK Vollen IoT</h3>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.5; margin-bottom:14px; min-height:3.8rem;">
+            Aplicativo para controle em tempo real de microcontroladores (ESP8266, ESP32 e Arduino) com switch, pulso, timers e QR Code.
+          </p>
+          <div style="font-size:.78rem; color:var(--slate-500); margin-bottom:16px;">
+            <div>✓ Compatível Android 7.0+</div>
+            <div>✓ Grátis até 3 dispositivos</div>
+          </div>
+        </div>
+        <a href="downloads/vollenIoT_1.0.0.apk" download class="btn btn-primary" style="background:#10b981; justify-content:center; width:100%; height:40px; font-size:.85rem; box-sizing:border-box; margin-top:auto;">
+          📲 Baixar APK Vollen IoT (.apk)
+        </a>
+      </div>
+
+      <!-- 3. Biblioteca Arduino / ESP8266 / ESP32 -->
+      <div class="download-card" style="border-top:4px solid #0284c7;">
+        <div style="display:flex; flex-direction:column; flex:1;">
+          <div class="download-icon" style="background:#f0f9ff; color:#0284c7;">📦</div>
+          <div><span class="version-tag" style="background:#f0f9ff; color:#0369a1;">💾 Biblioteca C++ / Arduino</span></div>
+          <h3 style="font-size:1.15rem; font-weight:800; color:var(--navy); margin-bottom:8px;">Biblioteca VollenIoT</h3>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.5; margin-bottom:14px; min-height:3.8rem;">
+            Biblioteca oficial para gravação do firmware no ESP8266, ESP32 e Arduino com rotinas de timers locais e comunicação MQTT.
+          </p>
+          <div style="font-size:.78rem; color:var(--slate-500); margin-bottom:16px;">
+            <div>✓ Arquivo: <code>VollenIoT-Library.zip</code></div>
+            <div>✓ Arduino IDE / PlatformIO</div>
+          </div>
+        </div>
+        <a href="downloads/VollenIoT-Library.zip" download class="btn btn-primary" style="background:#0284c7; justify-content:center; width:100%; height:40px; font-size:.85rem; box-sizing:border-box; margin-top:auto;">
+          📥 Baixar Biblioteca (.ZIP)
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     GALERIA VISUAL & TELAS REAIS DO SISTEMA
+════════════════════════════════════════════ -->
+<section class="section" style="background:#fff; border-bottom:1px solid var(--slate-200);">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:40px;">
+      <div class="section-tag">Demonstração Visual</div>
+      <h2 class="section-title">Confira as Telas Reais do Gestão OS</h2>
+      <p class="section-sub centered">Interface moderna, rápida e intuitiva. Navegue pelas capturas ou deixe o slide avançar automaticamente.</p>
+    </div>
+
+    <div style="max-width:960px; margin:0 auto;">
+      <!-- Slider Interativo e Automático de Telas do Sistema -->
+      <div class="vollen-slider-wrap">
+        <div class="vollen-slider" data-interval="4500">
+          <!-- Window Header -->
+          <div class="slider-window-bar">
+            <div class="slider-window-dots">
+              <span class="slider-window-dot red"></span>
+              <span class="slider-window-dot yellow"></span>
+              <span class="slider-window-dot green"></span>
+            </div>
+            <div class="slider-window-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+              Gestão OS — Interface e Telas em Ação
+            </div>
+            <div class="slider-window-actions">
+              <button class="slider-btn-playpause" type="button" title="Pausar / Reproduzir">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                <span>Pausar</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="slider-progress-bar">
+            <div class="slider-progress-fill"></div>
+          </div>
+
+          <!-- Viewport com Slides -->
+          <div class="slider-viewport">
+            <div class="slider-track">
+              <!-- Slide 1 -->
+              <div class="slider-slide active" data-index="0">
+                <img src="assets/capturas/Captura de tela 2026-09-15 074420.jpg" alt="Gestão OS - Painel Principal e Abertura de Atendimentos" class="slider-slide-img zoomable-img" />
+                <div class="slider-caption">
+                  <div class="slider-caption-text">
+                    <span>🖥️ Painel Operacional & Atendimento Rápido</span>
+                  </div>
+                  <div class="slider-zoom-badge">
+                    🔍 Clique para Ampliar
+                  </div>
+                </div>
+              </div>
+
+              <!-- Slide 2 -->
+              <div class="slider-slide" data-index="1">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080049.jpg" alt="Gestão OS - Gestão de Ordens de Serviço e Checklist" class="slider-slide-img zoomable-img" />
+                <div class="slider-caption">
+                  <div class="slider-caption-text">
+                    <span>📋 Gestão de Ordens de Serviço & Checklist</span>
+                  </div>
+                  <div class="slider-zoom-badge">
+                    🔍 Clique para Ampliar
+                  </div>
+                </div>
+              </div>
+
+              <!-- Slide 3 -->
+              <div class="slider-slide" data-index="2">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080307.jpg" alt="Gestão OS - Controle de Status, Clientes e Equipamentos" class="slider-slide-img zoomable-img" />
+                <div class="slider-caption">
+                  <div class="slider-caption-text">
+                    <span>🏷️ Controle de Status Personalizados & Clientes</span>
+                  </div>
+                  <div class="slider-zoom-badge">
+                    🔍 Clique para Ampliar
+                  </div>
+                </div>
+              </div>
+
+              <!-- Slide 4 -->
+              <div class="slider-slide" data-index="3">
+                <img src="assets/capturas/Capturas15092026.jpg" alt="Gestão OS - Visão Geral do Sistema e Módulos Integrados" class="slider-slide-img zoomable-img" />
+                <div class="slider-caption">
+                  <div class="slider-caption-text">
+                    <span>⚙️ Módulos Integrados & Fluxo Completo</span>
+                  </div>
+                  <div class="slider-zoom-badge">
+                    🔍 Clique para Ampliar
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botões de Navegação Manual -->
+            <button class="slider-btn-nav slider-btn-prev" type="button" aria-label="Slide anterior">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="slider-btn-nav slider-btn-next" type="button" aria-label="Próximo slide">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+
+            <!-- Dots -->
+            <div class="slider-dots-wrap">
+              <div class="slider-dots"></div>
+            </div>
+          </div>
+
+          <!-- Miniaturas Interativas -->
+          <div class="slider-thumbnails">
+            <div class="slider-thumb active" data-index="0">
+              <div class="slider-thumb-img-wrap">
+                <img src="assets/capturas/Captura de tela 2026-09-15 074420.jpg" alt="Miniatura 1" class="slider-thumb-img" />
+              </div>
+              <div class="slider-thumb-title">Painel Operacional</div>
+              <div class="slider-thumb-sub">Visão Geral</div>
+            </div>
+
+            <div class="slider-thumb" data-index="1">
+              <div class="slider-thumb-img-wrap">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080049.jpg" alt="Miniatura 2" class="slider-thumb-img" />
+              </div>
+              <div class="slider-thumb-title">Ordens de Serviço</div>
+              <div class="slider-thumb-sub">Checklist e Laudo</div>
+            </div>
+
+            <div class="slider-thumb" data-index="2">
+              <div class="slider-thumb-img-wrap">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080307.jpg" alt="Miniatura 3" class="slider-thumb-img" />
+              </div>
+              <div class="slider-thumb-title">Status & Clientes</div>
+              <div class="slider-thumb-sub">Cadastros</div>
+            </div>
+
+            <div class="slider-thumb" data-index="3">
+              <div class="slider-thumb-img-wrap">
+                <img src="assets/capturas/Capturas15092026.jpg" alt="Miniatura 4" class="slider-thumb-img" />
+              </div>
+              <div class="slider-thumb-title">Módulos do Sistema</div>
+              <div class="slider-thumb-sub">Fluxo Completo</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     PASSO A PASSO DE INSTALAÇÃO
+════════════════════════════════════════════ -->
+<section class="section">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:48px;">
+      <div class="section-tag">Guia Rápido</div>
+      <h2 class="section-title">Como Instalar e Ativar</h2>
+      <p class="section-sub centered">Passos simples para rodar no seu computador e smartphone.</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="step-box">
+        <div class="step-num">1</div>
+        <div>
+          <h4 style="font-size:.95rem; font-weight:700; color:var(--navy); margin-bottom:6px;">Baixe o Arquivo</h4>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.6;">
+            Clique no botão correspondente ao seu sistema (instalador <code>.exe</code> para Windows ou arquivo <code>.apk</code> para Android).
+          </p>
+        </div>
+      </div>
+      <div class="step-box">
+        <div class="step-num">2</div>
+        <div>
+          <h4 style="font-size:.95rem; font-weight:700; color:var(--navy); margin-bottom:6px;">Execute a Instalação</h4>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.6;">
+            No Windows, execute o instalador. No celular, toque no APK baixado e confirme a permissão para instalar.
+          </p>
+        </div>
+      </div>
+      <div class="step-box">
+        <div class="step-num">3</div>
+        <div>
+          <h4 style="font-size:.95rem; font-weight:700; color:var(--navy); margin-bottom:6px;">Inicie o Uso</h4>
+          <p style="font-size:.85rem; color:var(--slate-600); line-height:1.6;">
+            Abra o aplicativo, utilize a demonstração gratuita de 10 dias ou insira sua chave de licença anual para ativar.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     CTA FINAL
+════════════════════════════════════════════ -->
+<section class="cta-banner">
+  <div class="container">
+    <h2>Precisa de ajuda com a instalação?</h2>
+    <p>Nossa equipe de suporte técnico está à disposição no WhatsApp para auxiliar na configuração da sua assistência técnica ou projeto IoT.</p>
+    <div class="actions">
+      <a href="https://wa.me/5500000000000" target="_blank" class="btn btn-white btn-lg">📱 Suporte via WhatsApp</a>
+      <a href="contato.html" class="btn btn-lg" style="color:#fff; border: 2px solid rgba(255,255,255,.4); background:transparent;">Enviar Mensagem</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     FOOTER
+════════════════════════════════════════════ -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="brand-logo-text on-dark" style="margin-bottom: 14px;"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+        <p>Plataforma completa de soluções em tecnologia: Gestão OS para assistências técnicas e aplicativos de controle em tempo real para microcontroladores (ESP8266, ESP32 e Arduino).</p>
+      </div>
+      <div class="footer-col">
+        <h4>Softwares</h4>
+        <ul>
+          <li><a href="gestao-os.html">Gestão OS</a></li>
+          <li><a href="download.html">APK Gestão OS</a></li>
+          <li><a href="microcontroladores.html">APK Vollen IoT</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Downloads & Planos</h4>
+        <ul>
+          <li><a href="download.html">Gestão OS Demo</a></li>
+          <li><a href="download.html">APK do Técnico</a></li>
+          <li><a href="download.html">APK Vollen IoT</a></li>
+          <li><a href="planos.html">Planos Anuais</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Contato</h4>
+        <ul>
+          <li><a href="https://wa.me/5500000000000" target="_blank">📱 WhatsApp Suporte</a></li>
+          <li><a href="mailto:vollenoficial@gmail.com">✉️ vollenoficial@gmail.com</a></li>
+          <li><a href="contato.html">📝 Formulário</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Vollen IoT. Todos os direitos reservados. • Contagem - Minas Gerais</p>
+      <div class="footer-bottom-links">
+        <a href="#">Política de Privacidade</a>
+        <a href="#">Termos de Uso</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<a href="https://wa.me/5500000000000" class="whatsapp-float" title="Falar no WhatsApp" target="_blank">
+  <svg viewBox="0 0 24 24" fill="#fff"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+</a>
+
+<script>
+  document.getElementById('menuBtn')?.addEventListener('click', () => {
+    const nav = document.querySelector('.navbar-nav');
+    if (nav) nav.classList.toggle('show');
+  });
+</script>
+<script src="slider.js"></script>
+<script src="lightbox.js"></script>
+</body>
+</html>

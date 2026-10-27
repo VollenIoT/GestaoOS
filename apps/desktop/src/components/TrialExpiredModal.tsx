@@ -1,16 +1,18 @@
 import React, { useState, useRef } from 'react';
-import { Lock, ShieldAlert, KeyRound, CheckCircle2, AlertCircle, Loader2, X, LogOut } from 'lucide-react';
+import { Lock, ShieldAlert, KeyRound, CheckCircle2, AlertCircle, Loader2, X, LogOut, RefreshCw } from 'lucide-react';
 import { TrialStatus, activatePermanentLicense } from '../services/trialProtectionService';
 import { validateAndFetchSerialLicense, activateLicense } from '../services/licenseService';
 
 interface TrialExpiredModalProps {
   trialStatus: TrialStatus | null;
   onActivated: () => void;
+  onOpenUpdateModal?: () => void;
 }
 
 export const TrialExpiredModal: React.FC<TrialExpiredModalProps> = ({
   trialStatus,
   onActivated,
+  onOpenUpdateModal,
 }) => {
   const [serialInput, setSerialInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -249,15 +251,27 @@ export const TrialExpiredModal: React.FC<TrialExpiredModalProps> = ({
             </button>
           </form>
 
-          <div className="pt-2 border-t border-slate-100 flex flex-col items-center gap-2.5">
-            <button
-              type="button"
-              onClick={handleCloseApp}
-              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-300"
-            >
-              <LogOut className="w-4 h-4 text-slate-500" />
-              <span>Sair do Sistema</span>
-            </button>
+          <div className="pt-2 border-t border-slate-100 flex flex-col items-center gap-2">
+            <div className="w-full flex gap-2">
+              {onOpenUpdateModal && (
+                <button
+                  type="button"
+                  onClick={onOpenUpdateModal}
+                  className="flex-1 py-2 bg-indigo-50 hover:bg-indigo-100 active:scale-[0.99] text-indigo-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-indigo-200"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Verificar Atualizações</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleCloseApp}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-slate-300"
+              >
+                <LogOut className="w-3.5 h-3.5 text-slate-500" />
+                <span>Sair do Sistema</span>
+              </button>
+            </div>
             <span className="text-[11px] text-slate-500 text-center">
               Dúvidas ou suporte? Entre em contato com a equipe comercial para adquirir sua licença.
             </span>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { TopMenuBar } from './components/TopMenuBar';
 import { Dashboard } from './components/Dashboard';
 import { LoginScreen } from './components/LoginScreen';
@@ -34,6 +34,7 @@ import { EstimatesModal } from './components/EstimatesModal';
 import { CreateEstimateModal, Estimate } from './components/CreateEstimateModal';
 import { OrderSequenceModal } from './components/OrderSequenceModal';
 import { UpdateSystemModal } from './components/UpdateSystemModal';
+import { checkSystemUpdate } from './services/updateService';
 import { CashRegisterModal } from './components/CashRegisterModal';
 import { SalesModal } from './components/SalesModal';
 import { SalesCommissionsModal } from './components/SalesCommissionsModal';
@@ -156,6 +157,23 @@ export default function App() {
 
   // ── Efeitos globais de SO e atalhos ──────────────────────────────────────
   useAppEffects({ dlgConfirm: dlgConfirm as any, isAnyModalOpen });
+
+  // ── Checagem silenciosa automática de atualizações ao inicializar ───────
+  useEffect(() => {
+    // Aguarda 3 segundos após abrir para não concorrer com o carregamento inicial
+    const timer = setTimeout(() => {
+      checkSystemUpdate()
+        .then((res) => {
+          if (res.hasUpdate) {
+            console.log('[AutoUpdater] Nova versão encontrada silenciosamente:', res.latestVersionInfo?.version);
+            m.setIsUpdateSystemModalOpen(true);
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   // ── Helpers de persistência ───────────────────────────────────────────────
   const saveParts = async (newParts: any[]) => {
@@ -1263,6 +1281,7 @@ export default function App() {
       <TrialExpiredModal
         trialStatus={trialStatus}
         onActivated={() => { fetchSystemTrialStatus().then((s) => useUIStore.getState().setTrialStatus(s)).catch(console.error); loadData(); }}
+        onOpenUpdateModal={() => m.setIsUpdateSystemModalOpen(true)}
       />
 
       {/* Barra de Status inferior */}

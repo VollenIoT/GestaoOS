@@ -243,11 +243,16 @@ async function main() {
     updateLocalConfigs(version);
 
     console.log('⏳ 2. Registrando versão no canal da nuvem (Firebase)...');
+    const major = version.split('.')[0] || '1';
+    const releaseFileName = major === '4'
+      ? `Vollen.-.Gestao.de.OS.e.Vendas.V4_${version}_x64-setup.exe`
+      : `Vollen.-.Gestao.de.Ordens.de.Servico_${version}_x64-setup.exe`;
+
     await publishToFirestore({
       version,
       title,
       releaseNotes,
-      downloadUrl: `https://github.com/VollenIoT/GestaoOS/releases/download/v${version}/Vollen.-.Gestao.de.Ordens.de.Servico_${version}_x64-setup.exe`,
+      downloadUrl: `https://github.com/VollenIoT/GestaoOS/releases/download/v${version}/${releaseFileName}`,
       releaseDate: formatDate(),
     });
 

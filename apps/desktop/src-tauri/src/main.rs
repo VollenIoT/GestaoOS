@@ -202,7 +202,7 @@ fn init_or_tick_trial(is_heartbeat: bool) -> TrialStatusPayload {
 
   // Inicializa sessão Instant se não estiver inicializada
   let mut session_guard = SESSION_START.lock().unwrap();
-  let session_elapsed_secs = match *session_guard {
+  let _session_elapsed_secs = match *session_guard {
     Some(inst) => inst.elapsed().as_secs(),
     None => {
       *session_guard = Some(Instant::now());
@@ -210,7 +210,7 @@ fn init_or_tick_trial(is_heartbeat: bool) -> TrialStatusPayload {
     }
   };
 
-  let mut store = match read_anchor_store() {
+  let store = match read_anchor_store() {
     Some(mut s) => {
       // Se a máquina for a mesma, atualiza métricas
       let mut is_tampered = s.tampered;
@@ -774,8 +774,8 @@ fn start_embedded_local_server(port: u16) -> Result<String, String> {
             let is_options = first_line.starts_with("OPTIONS");
 
             let mut status_code = "200 OK";
-            let mut content_type = "application/json; charset=utf-8";
-            let mut body = String::new();
+            let content_type = "application/json; charset=utf-8";
+            let body: String;
 
             if is_options {
               let cors_response = "HTTP/1.1 204 No Content\r\n\

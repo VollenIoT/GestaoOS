@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vollen IoT — Plataforma de Gestão OS & Controle para Microcontroladores</title>
+  <meta name="description" content="Ecossistema completo Vollen IoT: Sistema Gestão OS para assistências técnicas e APK de automação e controle em tempo real para microcontroladores ESP8266, ESP32 e Arduino." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     NAVBAR
+════════════════════════════════════════════ -->
+<nav class="navbar">
+  <div class="container">
+    <div class="navbar-inner">
+      <a href="index.html" class="navbar-logo">
+        <div class="brand-logo-text"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+      </a>
+      <nav class="navbar-nav">
+        <a href="index.html" class="active">Início</a>
+        <div class="nav-dropdown">
+          <button class="nav-dropdown-btn" type="button">
+            Software
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <div class="dropdown-menu">
+            <a href="gestao-os.html">
+              <div class="dropdown-icon" style="background:#0a192f;">
+                <img src="assets/gestao-os-icon.png" alt="Ícone Gestão OS" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">Gestão OS</span>
+                <span class="dropdown-desc">Sistema desktop completo para sua assistência</span>
+              </div>
+            </a>
+            <a href="download.html#apk-tecnico">
+              <div class="dropdown-icon" style="background:#1e3a8a;">
+                <span style="font-size:1.4rem;">📱</span>
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Gestão OS</span>
+                <span class="dropdown-desc">Aplicativo Android para técnicos na bancada e campo</span>
+              </div>
+            </a>
+            <a href="microcontroladores.html">
+              <div class="dropdown-icon" style="background:#0f172a;">
+                <img src="assets/vollen-iot-icon.png" alt="Ícone APK Vollen IoT" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Vollen IoT</span>
+                <span class="dropdown-desc">Controle de microcontroladores em tempo real</span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <a href="planos.html">Planos</a>
+        <a href="download.html">Downloads</a>
+        <a href="sobre.html">Sobre</a>
+        <a href="contato.html">Contato</a>
+      </nav>
+      <div class="navbar-cta">
+        <a href="download.html" class="btn btn-primary btn-sm">🚀 Baixar Agora</a>
+      </div>
+      <button class="hamburger" id="menuBtn" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════
+     HERO PRINCIPAL
+════════════════════════════════════════════ -->
+<section class="hero-section">
+  <div class="container">
+    <div style="display:grid; grid-template-columns: 1.15fr 0.85fr; gap: 50px; align-items: center;">
+      <div class="hero-content">
+        <div class="hero-eyebrow">
+          ⚡ Vollen Software & Tecnologia
+        </div>
+        <h1 class="hero-title">
+          Soluções Especializadas em <span class="accent">Gestão Comercial</span> e <span class="accent" style="color:#059669;">Automação IoT</span>
+        </h1>
+        <p class="hero-subtitle">
+          Conheça nossas duas soluções independentes: o <strong>Gestão OS</strong>, um software completo para <strong>Assistências Técnicas de Eletrodomésticos</strong> e oficinas; e o <strong>Vollen IoT</strong>, um aplicativo dedicado para acionamento e controle de <strong>microcontroladores</strong> (ESP8266, ESP32 e Arduino).
+        </p>
+        <div class="hero-actions">
+          <a href="#gestao-os" class="btn btn-primary btn-lg">
+            💻 Conhecer Gestão OS
+          </a>
+          <a href="#microcontroladores" class="btn btn-outline btn-lg" style="border-color:#10b981; color:#059669;">
+            ⚡ Conhecer Vollen IoT
+          </a>
+        </div>
+        <div class="hero-trust">
+          <div class="hero-trust-label">✓ Duas ferramentas dedicadas para diferentes necessidades:</div>
+          <div class="hero-trust-icons">
+            <div class="trust-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Gestão OS: Ordem de Serviço & PDV
+            </div>
+            <div class="trust-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Gestão OS: App Android p/ Técnicos
+            </div>
+            <div class="trust-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Vollen IoT: Controle ESP8266 & ESP32
+            </div>
+            <div class="trust-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Vollen IoT: Timers & MQTT Instantâneo
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slider Direto na Tela Inicial (Hero) -->
+      <div class="vollen-slider-wrap">
+        <div class="vollen-slider" data-interval="3500">
+          <div class="slider-viewport">
+            <div class="slider-track">
+              <!-- Slide 1 -->
+              <div class="slider-slide active">
+                <img src="assets/capturas/Captura de tela 2026-09-15 074420.jpg" alt="Gestão OS - Painel Principal e Abertura de Atendimentos" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 2 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080049.jpg" alt="Gestão OS - Gestão de Ordens de Serviço e Checklist" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 3 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080307.jpg" alt="Gestão OS - Controle de Status, Clientes e Equipamentos" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 4 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Capturas15092026.jpg" alt="Gestão OS - Visão Geral do Sistema e Módulos Integrados" class="slider-slide-img" />
+              </div>
+            </div>
+
+            <!-- Setas nas Laterais -->
+            <button class="slider-btn-nav slider-btn-prev" type="button" aria-label="Foto anterior">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="slider-btn-nav slider-btn-next" type="button" aria-label="Próxima foto">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     DUAL PORTAL CARDS (ACESSO ÀS PLATAFORMAS)
+════════════════════════════════════════════ -->
+<section style="padding: 20px 0 60px;">
+  <div class="container">
+    <div class="portal-grid">
+      
+      <!-- Card Portal 1: Gestão OS -->
+      <div class="portal-card portal-os">
+        <div>
+          <div class="portal-tag tag-blue">💻 Sistema de Gestão Comercial</div>
+          <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
+            <div style="width:40px; height:40px; border-radius:12px; overflow:hidden; flex-shrink:0; background:#0a192f; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+              <img src="assets/gestao-os-icon.png" alt="Ícone Gestão OS" style="width:100%; height:100%; object-fit:cover; display:block;" />
+            </div>
+            <h2 class="portal-title" style="margin-bottom:0;">Gestão OS</h2>
+          </div>
+          <p class="portal-desc">
+            Sistema completo e definitivo para assistências técnicas. Gerencie Ordens de Serviço, estoque de peças com código de barras, fluxo de caixa, PDV balcão, garantias e envie mensagens automáticas pelo WhatsApp.
+          </p>
+          <div class="portal-pills">
+            <span class="portal-pill">📋 Ordens de Serviço</span>
+            <span class="portal-pill">💰 Caixa & PDV</span>
+            <span class="portal-pill">💬 WhatsApp Automático</span>
+            <span class="portal-pill">📱 App do Técnico</span>
+            <span class="portal-pill">🛡️ Gestão de Garantias</span>
+            <span class="portal-pill">☁️ Sincronização Nuvem</span>
+          </div>
+        </div>
+        <div class="portal-actions">
+          <a href="gestao-os.html" class="btn btn-primary">
+            Conhecer Gestão OS →
+          </a>
+          <a href="planos.html" class="btn btn-outline">
+            Ver Planos
+          </a>
+          <a href="download.html" class="btn btn-sm" style="color:var(--slate-500); font-weight:600;">
+            🚀 Testar 10 Dias
+          </a>
+        </div>
+      </div>
+
+      <!-- Card Portal 2: Vollen IoT APK Microcontroladores -->
+      <div class="portal-card portal-iot">
+        <div>
+          <div class="portal-tag tag-green">⚡ Automação & Hardware IoT</div>
+          <div style="display:flex; align-items:center; gap:14px; margin-bottom:12px;">
+            <div style="width:40px; height:40px; border-radius:12px; overflow:hidden; flex-shrink:0; background:#0f172a; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+              <img src="assets/vollen-iot-icon.png" alt="Ícone APK Vollen IoT" style="width:100%; height:100%; object-fit:cover; display:block;" />
+            </div>
+            <h2 class="portal-title" style="margin-bottom:0;">Vollen IoT Microcontroladores</h2>
+          </div>
+          <p class="portal-desc">
+            Aplicativo móvel desenvolvido para acionamento, controle e automação em tempo real de microcontroladores (ESP8266, ESP32 e Arduino) com conexão instantânea e alta estabilidade.
+          </p>
+          <div class="portal-pills">
+            <span class="portal-pill">🔌 ESP8266 & ESP32</span>
+            <span class="portal-pill">⏱️ Timers Inteligentes</span>
+            <span class="portal-pill">📡 Alta Velocidade</span>
+            <span class="portal-pill">🔘 Switch & Pulso</span>
+            <span class="portal-pill">📷 Pareamento QR Code</span>
+          </div>
+        </div>
+        <div class="portal-actions">
+          <a href="microcontroladores.html" class="btn btn-primary" style="background:#059669;">
+            Explorar APK IoT →
+          </a>
+          <a href="download.html" class="btn btn-outline">
+            📲 Baixar APK Grátis
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     SEÇÃO 1: GESTÃO OS EM DETALHES (SOFTWARE COMERCIAL)
+════════════════════════════════════════════ -->
+<section id="gestao-os" class="section" style="border-top:1px solid var(--slate-200);">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:56px;">
+      <div class="section-tag" style="background:#dbeafe; color:#1d4ed8;">Produto 1 • Software Comercial</div>
+      <h2 class="section-title">Gestão OS: Sistema Especializado para Assistências Técnicas</h2>
+      <p class="section-sub centered">Desenvolvido sob medida para a rotina diária de assistências técnicas de eletrodomésticos (lavadoras, micro-ondas, refrigeradores, fogões, motores), eletrônicos e informática.</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:60px; align-items:center; margin-bottom:64px;">
+      <div>
+        <h3 style="font-size:1.6rem; font-weight:800; color:var(--navy); margin-bottom:16px;">
+          Do balcão ao técnico em campo com total integração
+        </h3>
+        <p style="font-size:1rem; color:var(--slate-600); line-height:1.7; margin-bottom:24px;">
+          Chega de perder ordens de serviço em cadernos ou planilhas desatualizadas. O Gestão OS centraliza todo o fluxo do seu negócio com precisão e velocidade.
+        </p>
+        <ul class="check-list" style="margin-bottom:28px;">
+          <li><strong>Abertura e Impressão de OS:</strong> comprovantes térmicos de 58mm/80mm e A4 com código único.</li>
+          <li><strong>1 Aparelho por OS + Botão Rápido:</strong> cada equipamento tem sua OS exclusiva. Recebeu mais de um aparelho do mesmo cliente? Abra a próxima OS em 1 clique com dados pré-preenchidos.</li>
+          <li><strong>Histórico Completo por Cliente:</strong> consulte instantaneamente todas as OSs, aparelhos anteriores, laudos e valores já realizados para aquele cliente.</li>
+          <li><strong>Controle de Garantia:</strong> histórico blindado de retornos sem cobrança indevida.</li>
+          <li><strong>PDV Balcão e Caixa:</strong> controle financeiro com fechamento cego e relatórios de lucro.</li>
+          <li><strong>WhatsApp Automático:</strong> o cliente acompanha cada mudança de status direto no celular.</li>
+        </ul>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="gestao-os.html" class="btn btn-primary">Conhecer Recursos do Gestão OS</a>
+          <a href="planos.html" class="btn btn-outline">Tabela de Preços</a>
+        </div>
+      </div>
+      <!-- Slider Limpo e Automático de Telas do Sistema -->
+      <div class="vollen-slider-wrap">
+        <div class="vollen-slider" data-interval="3500">
+          <div class="slider-viewport">
+            <div class="slider-track">
+              <!-- Slide 1 -->
+              <div class="slider-slide active">
+                <img src="assets/capturas/Captura de tela 2026-09-15 074420.jpg" alt="Gestão OS - Painel Principal e Abertura de Atendimentos" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 2 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080049.jpg" alt="Gestão OS - Gestão de Ordens de Serviço e Checklist" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 3 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Captura de tela 2026-09-15 080307.jpg" alt="Gestão OS - Controle de Status, Clientes e Equipamentos" class="slider-slide-img" />
+              </div>
+
+              <!-- Slide 4 -->
+              <div class="slider-slide">
+                <img src="assets/capturas/Capturas15092026.jpg" alt="Gestão OS - Visão Geral do Sistema e Módulos Integrados" class="slider-slide-img" />
+              </div>
+            </div>
+
+            <!-- Setas nas Laterais -->
+            <button class="slider-btn-nav slider-btn-prev" type="button" aria-label="Foto anterior">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="slider-btn-nav slider-btn-next" type="button" aria-label="Próxima foto">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grade de Recursos Gestão OS -->
+    <div class="grid-3">
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <h3>Ordens de Serviço Completas</h3>
+        <p>Acompanhe status, laudos técnicos, peças utilizadas, valores de mão de obra e fotos do equipamento recebido.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
+        </div>
+        <h3>Multi-PC em Rede Local ou Nuvem</h3>
+        <p>Opere com terminais simultâneos no balcão e bancada técnica, com sincronização em tempo real.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        </div>
+        <h3>App Android para Técnicos</h3>
+        <p>O técnico consulta ordens atribuídas, dá baixa em peças e atualiza o laudo direto do celular na bancada ou em campo.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3>Gestão de Garantias & Retornos</h3>
+        <p>Criação automática de OS vinculada para garantia com histórico original protegido e relatório de reincidência.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+        </div>
+        <h3>Caixa & Taxas de Cartão</h3>
+        <p>Fechamento cego, controle de comissões de técnicos e cálculo automático de taxas/juros de máquina de cartão.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        </div>
+        <h3>Notificação WhatsApp</h3>
+        <p>Mensagens personalizadas automáticas enviadas para o WhatsApp do cliente em cada etapa da ordem de serviço.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#fef3c7; color:#b45309;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5v14M8 5v14M12 5v14M17 5v14M21 5v14"/></svg>
+        </div>
+        <h3>Leitor de Código de Barras & Etiquetas</h3>
+        <p>Compatível com leitor 1D/2D para vendas e OS ultrarrápidas, além de emissor de etiquetas térmicas e A4.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#fef3c7; color:#b45309;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        </div>
+        <h3>Entrada de Estoque via XML de NF-e</h3>
+        <p>Cadastre e atualize dezenas de peças e fornecedores automaticamente importando o XML da nota fiscal da SEFAZ.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon" style="background:#fef3c7; color:#b45309;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
+        </div>
+        <h3>Ordem de Compra por Estoque Mínimo</h3>
+        <p>Geração automática de listas de pedidos de reposição ao atingir a quantidade mínima de peças cadastrada.</p>
+      </div>
+    </div>
+
+    <!-- Destaque do APK do Gestão OS com o Print Real -->
+    <div style="margin-top:64px; background:linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%); border:1.5px solid #dbeafe; border-radius:24px; padding:48px; display:grid; grid-template-columns: 1.1fr 0.9fr; gap:48px; align-items:center; box-shadow:var(--shadow-md);">
+      <div>
+        <div class="badge badge-blue" style="margin-bottom:14px;">📱 Aplicativo Android Incluso</div>
+        <h3 style="font-size:1.7rem; font-weight:800; color:var(--navy); margin-bottom:16px;">
+          APK Gestão OS: O aplicativo do seu técnico na bancada e em campo
+        </h3>
+        <p style="color:var(--slate-600); font-size:1rem; line-height:1.7; margin-bottom:20px;">
+          Com o aplicativo <strong>Gestão OS (Android)</strong>, sua equipe tem acesso instantâneo às ordens de serviço atribuídas, cadastro de laudos técnicos, consulta de peças no estoque e contato direto via WhatsApp com o cliente em 1 toque.
+        </p>
+        <ul class="check-list" style="margin-bottom:28px;">
+          <li><strong>Consulta de OS em tempo real:</strong> acompanhamento do fluxo de reparo ao vivo.</li>
+          <li><strong>Baixa de Peças e Serviços:</strong> integração total com o estoque central.</li>
+          <li><strong>Sincronização Nuvem:</strong> alterações feitas no celular refletem no desktop instantaneamente.</li>
+          <li><strong>Conexão Rápida:</strong> pareamento seguro por chave de acesso ou QR Code.</li>
+        </ul>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="planos.html" class="btn btn-primary">Ver Planos com App Incluso</a>
+          <a href="contato.html" class="btn btn-outline">Solicitar Demonstração</a>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:center; align-items:center;">
+        <div style="position:relative; max-width:320px; border-radius:24px; padding:10px; background:#0f172a; box-shadow:0 25px 60px rgba(15,23,42,.25);">
+          <img src="assets/Screenshot_2026-09-14-18-56-55-583_com.vollen.sistemaos.jpg" alt="Tela do APK Gestão OS" style="width:100%; border-radius:16px; display:block;" />
+          <div style="position:absolute; top:16px; left:50%; transform:translateX(-50%); width:60px; height:4px; background:rgba(255,255,255,.3); border-radius:999px;"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     SEÇÃO 2: VOLLEN IOT - CONTROLE DE MICROCONTROLADORES (AUTOMAÇÃO & HARDWARE)
+════════════════════════════════════════════ -->
+<section id="microcontroladores" class="iot-tech-section">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:56px;">
+      <div class="badge-iot-pulse" style="margin-bottom:14px; background:rgba(16,185,129,.2); border-color:#10b981; color:#34d399;">
+        <span class="pulse-dot"></span> Produto 2 • Automação & Hardware IoT
+      </div>
+      <h2 style="font-size:clamp(1.9rem, 3.5vw, 2.7rem); font-weight:900; color:#fff; margin-bottom:14px;">
+        APK Vollen IoT: Aplicativo para Controle de Microcontroladores
+      </h2>
+      <p style="font-size:1.05rem; color:#94a3b8; max-width:700px; margin:0 auto;">
+        Uma solução independente desenvolvida especialmente para desenvolvedores, makers e projetos de automação. Conecte smartphones a <strong>ESP8266</strong>, <strong>ESP32</strong> e <strong>Arduino</strong> através de broker MQTT ultrarrápido com telemetria e acionamento instantâneo.
+      </p>
+    </div>
+
+    <!-- Destaque de Arquitetura e Recursos IoT -->
+    <div style="display:grid; grid-template-columns:1.1fr 0.9fr; gap:48px; align-items:center; margin-bottom:56px;">
+      <div>
+        <h3 style="font-size:1.45rem; font-weight:800; color:#fff; margin-bottom:16px;">
+          Controle de relés, automação e temporizadores inteligentes
+        </h3>
+        <p style="color:#cbd5e1; font-size:.95rem; line-height:1.7; margin-bottom:20px;">
+          O aplicativo <strong>Vollen IoT</strong> proporciona acionamento de altíssima velocidade com latência inferior a 100ms e sincronização de estado consistente em tempo real entre múltiplos usuários e dispositivos.
+        </p>
+
+        <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:28px;">
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="width:24px; height:24px; border-radius:50%; background:rgba(16,185,129,.2); border:1px solid #10b981; color:#34d399; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; font-weight:800;">✓</div>
+            <div>
+              <strong style="color:#fff;">Botões Switch & Pulso:</strong>
+              <span style="color:#94a3b8;"> Suporte a interruptores toggle com retenção e botões de pulso momentâneo (press=ON, release=OFF) com feedback de vibração háptica.</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="width:24px; height:24px; border-radius:50%; background:rgba(16,185,129,.2); border:1px solid #10b981; color:#34d399; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; font-weight:800;">✓</div>
+            <div>
+              <strong style="color:#fff;">Temporizadores com Lógica de Boot Único:</strong>
+              <span style="color:#94a3b8;"> Timers ativos e pendentes que garantem a execução do desligamento/ligamento automático mesmo em caso de reinicialização do microcontrolador.</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:12px; align-items:flex-start;">
+            <div style="width:24px; height:24px; border-radius:50%; background:rgba(16,185,129,.2); border:1px solid #10b981; color:#34d399; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:.8rem; font-weight:800;">✓</div>
+            <div>
+              <strong style="color:#fff;">Pareamento Rápido via QR Code:</strong>
+              <span style="color:#94a3b8;"> Conecte placas ao app lendo o QR Code gerado, sem necessidade de digitação manual de IDs extensos ou configurações complexas.</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="https://wa.me/5500000000000?text=Olá!%20Gostaria%20de%20baixar%20o%20APK%20Vollen%20IoT%20gratuitamente%20e%20obter%20o%20firmware%20para%20microcontroladores" target="_blank" class="btn btn-primary" style="background:#10b981;">
+            📲 Baixar APK Gratuitamente
+          </a>
+        </div>
+      </div>
+
+      <!-- Mockup Visual e Especificações do Hardware IoT -->
+      <div style="display:flex; flex-direction:column; gap:20px; align-items:center;">
+        <div style="display:flex; justify-content:center; background: radial-gradient(circle, rgba(16,185,129,0.2) 0%, rgba(15,23,42,0) 70%); padding: 12px; border-radius: 28px;">
+          <img src="assets/Screenshot_2026-09-14-20-50-47-102_com.otaviovollen.volleniot.jpg" alt="APK Vollen IoT" style="max-height: 440px; width: auto; border-radius: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); border: 1.5px solid rgba(255,255,255,0.15);" />
+        </div>
+        <div class="spec-box" style="width:100%;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+            <h4 style="color:#fff; font-size:1.05rem; font-weight:800;">⚡ Especificações Técnicas</h4>
+            <span class="badge badge-green" style="background:rgba(16,185,129,.2); color:#34d399;">v1.0.0 Produção</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Microcontroladores Suportados</span>
+            <span class="spec-val">ESP8266, ESP32, Arduino</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Comunicação</span>
+            <span class="spec-val">Criptografia SSL / Tempo Real</span>
+          </div>
+          <div class="spec-row">
+            <span class="spec-label">Latência Média</span>
+            <span class="spec-val">&lt; 85ms</span>
+          </div>
+          <div class="chip-group">
+            <span class="chip-item">NodeMCU</span>
+            <span class="chip-item">ESP-01 / ESP-12F</span>
+            <span class="chip-item">ESP32 DevKit V1</span>
+            <span class="chip-item">Módulos Relé 5V/12V</span>
+            <span class="chip-item">Arduino Uno/Mega</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cards dos Recursos do APK IoT -->
+    <div class="grid-3" style="margin-bottom:60px;">
+      <div class="iot-tech-card">
+        <div class="iot-icon-box">⚡</div>
+        <h3>Telemetria em Tempo Real</h3>
+        <p>Monitoramento contínuo do status Online/Offline de cada placa. Se a conexão cair, a interface avisa instantaneamente.</p>
+      </div>
+      <div class="iot-tech-card">
+        <div class="iot-icon-box">⏱️</div>
+        <h3>Temporizador com Retenção</h3>
+        <p>Defina contagem regressiva para desligar motores, lâmpadas ou maquinários com garantia de execução segura.</p>
+      </div>
+      <div class="iot-tech-card">
+        <div class="iot-icon-box">🔐</div>
+        <h3>Segurança e Permissões</h3>
+        <p>Painel Super Admin, controle de usuários por dispositivo, geração de códigos de pareamento e auditoria de acionamentos.</p>
+      </div>
+    </div>
+
+    <!-- Seção de Planos do APK Vollen IoT -->
+    <div style="border-top:1px solid rgba(255,255,255,.1); padding-top:56px;">
+      <div style="text-align:center; margin-bottom:48px;">
+        <div class="badge-iot-pulse" style="margin-bottom:12px;">
+          <span class="pulse-dot"></span> Planos do APK Vollen IoT
+        </div>
+        <h3 style="font-size:1.8rem; font-weight:800; color:#fff; margin-bottom:10px;">
+          Escolha o pacote de dispositivos para seu projeto
+        </h3>
+        <p style="color:#94a3b8; font-size:.95rem; max-width:620px; margin:0 auto;">
+          O aplicativo é <strong>gratuito para até 3 dispositivos</strong>. Para projetos que demandam mais placas, oferecemos pacotes anuais acessíveis com suporte dedicado.
+        </p>
+      </div>
+
+      <div class="grid-4" style="align-items:stretch;">
+        
+        <!-- Grátis (Até 3 dispositivos) -->
+        <div class="iot-tech-card" style="display:flex; flex-direction:column; justify-content:space-between; background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.15);">
+          <div>
+            <div style="font-size:1.8rem; margin-bottom:10px;">🎁</div>
+            <h4 style="font-size:1.15rem; font-weight:800; color:#fff; margin-bottom:4px;">Grátis Starter</h4>
+            <div style="font-size:.82rem; color:#94a3b8; margin-bottom:14px;">Até 3 dispositivos</div>
+            <div style="margin-bottom:16px;">
+              <span style="font-size:2rem; font-weight:900; color:#34d399;">R$ 0,00</span>
+              <span style="font-size:.85rem; color:#94a3b8;">/ grátis</span>
+            </div>
+            <ul style="display:flex; flex-direction:column; gap:8px; font-size:.84rem; color:#cbd5e1; margin-bottom:20px;">
+              <li>✓ Até 3 dispositivos/placas</li>
+              <li>✓ Switch & Pulso com vibração</li>
+              <li>✓ Temporizadores inteligentes</li>
+              <li>✓ Pareamento via QR Code</li>
+              <li>✓ ESP8266, ESP32 e Arduino</li>
+            </ul>
+          </div>
+          <a href="https://wa.me/5500000000000?text=Olá!%20Gostaria%20de%20solicitar%20o%20APK%20Vollen%20IoT%20Gratuito%20(até%203%20dispositivos)" target="_blank" class="btn btn-outline" style="border-color:#34d399; color:#34d399; justify-content:center; width:100%;">
+            Baixar Grátis
+          </a>
+        </div>
+
+        <!-- 5 Dispositivos -->
+        <div class="iot-tech-card" style="display:flex; flex-direction:column; justify-content:space-between; background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.15);">
+          <div>
+            <div style="font-size:1.8rem; margin-bottom:10px;">⚡</div>
+            <h4 style="font-size:1.15rem; font-weight:800; color:#fff; margin-bottom:4px;">5 Dispositivos</h4>
+            <div style="font-size:.82rem; color:#94a3b8; margin-bottom:14px;">Até 5 dispositivos</div>
+            <div style="margin-bottom:16px;">
+              <span style="font-size:2rem; font-weight:900; color:#fff;">R$ 79,90</span>
+              <span style="font-size:.85rem; color:#94a3b8;">/ ano no Pix</span>
+              <div style="font-size:.78rem; color:#34d399; font-weight:700; margin-top:2px;">ou 10x de R$ 9,61</div>
+            </div>
+            <ul style="display:flex; flex-direction:column; gap:8px; font-size:.84rem; color:#cbd5e1; margin-bottom:20px;">
+              <li>✓ Até 5 dispositivos/placas</li>
+              <li>✓ Todos os recursos do app</li>
+              <li>✓ Licença anual inclusa</li>
+              <li>✓ Atualizações de firmware</li>
+              <li>✓ Suporte via WhatsApp</li>
+            </ul>
+          </div>
+          <a href="contato.html?plano=iot-5d" class="btn btn-outline" style="border-color:rgba(255,255,255,.4); color:#fff; justify-content:center; width:100%;">
+            Contratar 5 Disp.
+          </a>
+        </div>
+
+        <!-- 8 Dispositivos (Destaque) -->
+        <div class="iot-tech-card" style="display:flex; flex-direction:column; justify-content:space-between; background:rgba(16,185,129,.1); border-color:#10b981; box-shadow:0 12px 30px rgba(16,185,129,.2); position:relative;">
+          <div style="position:absolute; top:12px; right:12px; background:#10b981; color:#fff; font-size:.65rem; font-weight:800; padding:2px 8px; border-radius:999px;">POPULAR</div>
+          <div>
+            <div style="font-size:1.8rem; margin-bottom:10px;">🚀</div>
+            <h4 style="font-size:1.15rem; font-weight:800; color:#fff; margin-bottom:4px;">8 Dispositivos</h4>
+            <div style="font-size:.82rem; color:#94a3b8; margin-bottom:14px;">Até 8 dispositivos</div>
+            <div style="margin-bottom:16px;">
+              <span style="font-size:2rem; font-weight:900; color:#34d399;">R$ 119,90</span>
+              <span style="font-size:.85rem; color:#94a3b8;">/ ano no Pix</span>
+              <div style="font-size:.78rem; color:#34d399; font-weight:700; margin-top:2px;">ou 10x de R$ 14,42</div>
+            </div>
+            <ul style="display:flex; flex-direction:column; gap:8px; font-size:.84rem; color:#cbd5e1; margin-bottom:20px;">
+              <li>✓ Até 8 dispositivos/placas</li>
+              <li>✓ Todos os recursos do app</li>
+              <li>✓ Licença anual inclusa</li>
+              <li>✓ Atualizações prioritárias</li>
+              <li>✓ Suporte VIP via WhatsApp</li>
+            </ul>
+          </div>
+          <a href="contato.html?plano=iot-8d" class="btn btn-primary" style="background:#10b981; justify-content:center; width:100%;">
+            Contratar 8 Disp.
+          </a>
+        </div>
+
+        <!-- +8 Dispositivos (Personalizado) -->
+        <div class="iot-tech-card" style="display:flex; flex-direction:column; justify-content:space-between; background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.15);">
+          <div>
+            <div style="font-size:1.8rem; margin-bottom:10px;">🏢</div>
+            <h4 style="font-size:1.15rem; font-weight:800; color:#fff; margin-bottom:4px;">+8 Dispositivos</h4>
+            <div style="font-size:.82rem; color:#94a3b8; margin-bottom:14px;">Projetos & Automação</div>
+            <div style="margin-bottom:16px;">
+              <span style="font-size:1.6rem; font-weight:900; color:#fff;">Sob Consulta</span>
+              <div style="font-size:.78rem; color:#94a3b8; margin-top:6px;">Pacotes sob medida</div>
+            </div>
+            <ul style="display:flex; flex-direction:column; gap:8px; font-size:.84rem; color:#cbd5e1; margin-bottom:20px;">
+              <li>✓ Mais de 8 dispositivos</li>
+              <li>✓ Quantidade personalizada</li>
+              <li>✓ Automação predial/industrial</li>
+              <li>✓ Consultoria de hardware</li>
+              <li>✓ Atendimento direto</li>
+            </ul>
+          </div>
+          <a href="https://wa.me/5500000000000?text=Olá!%20Gostaria%20de%20um%20pacote%20personalizado%20para%20mais%20de%208%20dispositivos%20no%20APK%20Vollen%20IoT" target="_blank" class="btn btn-outline" style="border-color:rgba(255,255,255,.4); color:#fff; justify-content:center; width:100%;">
+            Falar no WhatsApp
+          </a>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     PLANOS & VALORES (GESTAO OS - EXCLUSIVO ANUAL)
+════════════════════════════════════════════ -->
+<section class="section">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:56px;">
+      <div class="section-tag">Planos & Assinatura Anual</div>
+      <h2 class="section-title">Escolha a versão ideal do Gestão OS</h2>
+      <p class="section-sub centered">Planos anuais completos com super desconto promocional, suporte dedicado e atualizações inclusas durante todo o ano.</p>
+    </div>
+    <div class="grid-4" style="align-items:stretch;">
+      
+      <!-- Básica -->
+      <div class="price-card">
+        <div>
+          <div style="width:44px;height:44px;border-radius:12px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:1.4rem;">🖥️</div>
+          <div class="plan-name">Versão Básica</div>
+          <div class="plan-desc" style="margin-top:4px;">100% offline, 1 computador</div>
+        </div>
+
+        <div style="margin: 12px 0;">
+          <div style="font-size:.82rem; color:var(--slate-400); text-decoration:line-through;">De R$ 349,90</div>
+          <div class="price-display">
+            <span class="price-val">R$ 289,90</span>
+            <span style="font-size:.82rem; color:var(--slate-500); font-weight:600;">/ ano no Pix</span>
+          </div>
+          <div style="font-size:.78rem; color:#16a34a; font-weight:700; margin-top:2px;">ou 10x de R$ 34,86</div>
+        </div>
+
+        <hr class="price-divider" />
+        <ul class="feat-list">
+          <li><span class="check">✓</span> Licença anual (1 ano)</li>
+          <li><span class="check">✓</span> OS abertas, em análise e finalizadas</li>
+          <li><span class="check">✓</span> Cadastro de clientes com validação CPF/CNPJ</li>
+          <li><span class="check">✓</span> Cadastro de modelos vinculados a marcas</li>
+          <li><span class="check">✓</span> Impressão de comprovante de entrada (2 vias) e garantia</li>
+          <li><span class="check">✓</span> Backup e restauração local de segurança</li>
+          <li><span class="x">✗</span> Caixa financeiro & PDV</li>
+          <li><span class="x">✗</span> WhatsApp automático</li>
+          <li><span class="x">✗</span> App Android / Nuvem</li>
+        </ul>
+        <a href="contato.html?plano=basica-1a" class="btn btn-outline">Contratar Básica</a>
+      </div>
+
+      <!-- V2 -->
+      <div class="price-card">
+        <div>
+          <div style="width:44px;height:44px;border-radius:12px;background:#f0fdf4;display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:1.4rem;">💬</div>
+          <div class="plan-name">Versão V2</div>
+          <div class="plan-desc" style="margin-top:4px;">Rede local + WhatsApp automático</div>
+        </div>
+
+        <div style="margin: 12px 0;">
+          <div style="font-size:.82rem; color:var(--slate-400); text-decoration:line-through;">De R$ 535,90</div>
+          <div class="price-display">
+            <span class="price-val">R$ 449,90</span>
+            <span style="font-size:.82rem; color:var(--slate-500); font-weight:600;">/ ano no Pix</span>
+          </div>
+          <div style="font-size:.78rem; color:#16a34a; font-weight:700; margin-top:2px;">ou 10x de R$ 54,10</div>
+        </div>
+
+        <hr class="price-divider" />
+        <ul class="feat-list">
+          <li><span class="check">✓</span> Licença anual (1 ano)</li>
+          <li><span class="check">✓</span> Tudo da Versão Básica</li>
+          <li><span class="check">✓</span> Rede local (múltiplos PCs na mesma loja)</li>
+          <li><span class="check">✓</span> Notificações automáticas no WhatsApp</li>
+          <li><span class="check">✓</span> Caixa financeiro com conferência cega & PDV Balcão</li>
+          <li><span class="check">✓</span> Contas a pagar e contas a receber</li>
+          <li><span class="check">✓</span> Módulo de orçamentos com conversão em 1 clique</li>
+          <li><span class="check">✓</span> Relatórios de produtividade por funcionário</li>
+          <li><span class="x">✗</span> App Android / Nuvem</li>
+        </ul>
+        <a href="contato.html?plano=v2-1a" class="btn btn-outline">Contratar V2</a>
+      </div>
+
+      <!-- V3 Pro Cloud (destaque) -->
+      <div class="price-card highlighted">
+        <div class="badge-selected">RECOMENDADO</div>
+        <div>
+          <div style="width:44px;height:44px;border-radius:12px;background:#dbeafe;display:flex;align-items:center;justify-content:center;margin-bottom:14px;font-size:1.4rem;">☁️</div>
+          <div class="plan-name">Versão V3 Pro Cloud</div>
+          <div class="plan-desc" style="margin-top:4px;">Nuvem em tempo real + App Android</div>
+        </div>
+
+        <div style="margin: 12px 0;">
+          <div style="font-size:.82rem; color:var(--slate-400); text-decoration:line-through;">De R$ 899,00</div>
+          <div class="price-display">
+            <span class="price-val">R$ 789,00</span>
+            <span style="font-size:.82rem; color:var(--slate-500); font-weight:600;">/ ano no Pix</span>
+          </div>
+          <div style="font-size:.78rem; color:#16a34a; font-weight:700; margin-top:2px;">ou 10x de R$ 94,87</div>
+        </div>
+
+        <hr class="price-divider" />
+        <ul class="feat-list">
+          <li><span class="check">✓</span> Licença anual (1 ano)</li>
+          <li><span class="check">✓</span> Tudo da Versão V2</li>
+          <li><span class="check">✓</span> Sincronização em nuvem em tempo real</li>
+          <li><span class="check">✓</span> App Android incluso para técnicos em bancada e campo</li>
+          <li><span class="check">✓</span> Taxas e juros da máquina de cartão calculados na hora</li>
+          <li><span class="check">✓</span> Botão rápido de +Novo Aparelho (com histórico completo por cliente)</li>
+          <li><span class="check">✓</span> Retorno em garantia com histórico blindado</li>
+          <li><span class="check">✓</span> Divisão de pagamentos em 2 formas (Dinheiro + Pix / Cartão)</li>
+          <li><span class="check">✓</span> Atualizações automáticas do sistema</li>
+        </ul>
+        <a href="contato.html?plano=v3-1a" class="btn btn-primary">Contratar V3</a>
+      </div>
+
+      <!-- V4 Enterprise -->
+      <div class="price-card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px;">
+          <div style="width:44px;height:44px;border-radius:12px;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:1.4rem;">🏢</div>
+          <span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-size: 0.68rem; font-weight: 900; padding: 4px 10px; border-radius: 999px; letter-spacing: 0.05em; text-transform: uppercase; box-shadow:0 2px 6px rgba(217,119,6,0.3);">
+            ⚡ MAIS COMPLETO
+          </span>
+        </div>
+        <div>
+          <div class="plan-name">Versão V4 Enterprise</div>
+          <div class="plan-desc" style="margin-top:4px;">Código de barras, XML, DRE, etiquetas e fiscal</div>
+        </div>
+
+        <div style="margin: 12px 0;">
+          <div style="font-size:.82rem; color:var(--slate-400); text-decoration:line-through;">De R$ 1.349,90</div>
+          <div class="price-display">
+            <span class="price-val">R$ 1.189,90</span>
+            <span style="font-size:.82rem; color:var(--slate-500); font-weight:600;">/ ano no Pix</span>
+          </div>
+          <div style="font-size:.78rem; color:#16a34a; font-weight:700; margin-top:2px;">ou 10x de R$ 143,07</div>
+        </div>
+
+        <hr class="price-divider" />
+        <ul class="feat-list">
+          <li><span class="check">✓</span> Licença anual (1 ano)</li>
+          <li><span class="check">✓</span> Tudo da Versão V3 Pro Cloud</li>
+          <li><span class="check">✓</span> <strong>Compatível com leitor de código de barras (1D e 2D)</strong></li>
+          <li><span class="check">✓</span> <strong>Central de etiquetas:</strong> OS, peças, código de barras e lacre de garantia (Térmica & A4)</li>
+          <li><span class="check">✓</span> <strong>Entrada automática de peças via XML de NF-e</strong> (cadastra custo, venda e estoque em segundos)</li>
+          <li><span class="check">✓</span> <strong>Ordem de compra automática</strong> ao atingir estoque mínimo</li>
+          <li><span class="check">✓</span> <strong>Baixa ou retorno inteligente de peças</strong> de acordo com o status personalizado da OS</li>
+          <li><span class="check">✓</span> <strong>Comissões configuráveis</strong> e relatórios detalhados de funcionários</li>
+          <li><span class="check">✓</span> <strong>DRE Financeiro completo</strong> e lucro real líquido por OS</li>
+          <li><span class="check">✓</span> Módulo Fiscal completo: NF-e, NFS-e e NFC-e</li>
+        </ul>
+        <a href="contato.html?plano=v4-1a" class="btn btn-outline">Contratar V4</a>
+      </div>
+
+    </div>
+    <div style="text-align:center; margin-top:36px;">
+      <a href="planos.html" class="btn btn-outline">Ver tabela comparativa completa →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     DEPOIMENTOS
+════════════════════════════════════════════ -->
+<section class="section section-gray">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:48px;">
+      <div class="section-tag">Depoimentos</div>
+      <h2 class="section-title">O que dizem nossos clientes e parceiros</h2>
+    </div>
+    <div class="grid-3">
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"O Gestão OS transformou minha assistência técnica. O controle de caixa, estoque e o envio de WhatsApp para o cliente aumentaram nossa produtividade em mais de 50%."</p>
+        <div class="testi-author">
+          <div class="testi-avatar">MR</div>
+          <div>
+            <div class="testi-name">Marcelo R.</div>
+            <div class="testi-role">Assistência Técnica de Smartphones — SP</div>
+          </div>
+        </div>
+      </div>
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"Utilizamos o APK Vollen IoT para automação de testes na bancada com ESP8266 e módulos relés. O acionamento MQTT é instantâneo e os timers nunca falham."</p>
+        <div class="testi-author">
+          <div class="testi-avatar" style="background:#059669;">TL</div>
+          <div>
+            <div class="testi-name">Thiago L.</div>
+            <div class="testi-role">Engenheiro de Automação & Hardware — PR</div>
+          </div>
+        </div>
+      </div>
+      <div class="testi-card">
+        <div class="testi-stars">★★★★★</div>
+        <p class="testi-text">"O app do técnico do Gestão OS conectado à nuvem sincroniza tudo no mesmo segundo. O técnico finaliza o serviço em campo e o balcão já sabe na hora."</p>
+        <div class="testi-author">
+          <div class="testi-avatar">AP</div>
+          <div>
+            <div class="testi-name">Andréa P.</div>
+            <div class="testi-role">Rede de Assistências Técnicas — MG</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     CTA FINAL
+════════════════════════════════════════════ -->
+<section class="cta-banner">
+  <div class="container">
+    <h2>Pronto para elevar o nível da sua assistência e automação?</h2>
+    <p>Conheça o ecossistema Vollen IoT: teste o Gestão OS por 10 dias grátis ou solicite o APK de controle para microcontroladores.</p>
+    <div class="actions">
+      <a href="contato.html" class="btn btn-white btn-lg">🚀 Falar com a Vollen IoT</a>
+      <a href="planos.html" class="btn btn-lg" style="color:#fff; border: 2px solid rgba(255,255,255,.4); background:transparent;">Ver Planos do Gestão OS</a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     FOOTER
+════════════════════════════════════════════ -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="brand-logo-text on-dark" style="margin-bottom: 14px;"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+        <p>Plataforma completa de soluções em tecnologia: Gestão OS para assistências técnicas e aplicativos de controle em tempo real para microcontroladores (ESP8266, ESP32 e Arduino).</p>
+      </div>
+      <div class="footer-col">
+        <h4>Sistema Gestão OS</h4>
+        <ul>
+          <li><a href="gestao-os.html">Recursos do Gestão OS</a></li>
+          <li><a href="download.html">Download Demonstração</a></li>
+          <li><a href="planos.html">Planos Anuais</a></li>
+          <li><a href="download.html">APK do Técnico</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Microcontroladores</h4>
+        <ul>
+          <li><a href="#microcontroladores">APK Vollen IoT</a></li>
+          <li><a href="#microcontroladores">ESP8266 & ESP32</a></li>
+          <li><a href="#microcontroladores">MQTT Realtime</a></li>
+          <li><a href="#microcontroladores">Timers Inteligentes</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Contato & Suporte</h4>
+        <ul>
+          <li><a href="https://wa.me/5500000000000" target="_blank">📱 WhatsApp Suporte</a></li>
+          <li><a href="mailto:vollenoficial@gmail.com">✉️ E-mail: vollenoficial@gmail.com</a></li>
+          <li><a href="sobre.html">🏢 Sobre a Vollen IoT</a></li>
+          <li><a href="contato.html">📝 Enviar Mensagem</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Vollen IoT. Todos os direitos reservados. • Contagem - Minas Gerais</p>
+      <div class="footer-bottom-links">
+        <a href="#">Política de Privacidade</a>
+        <a href="#">Termos de Uso</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Menu Mobile Toggle
+  document.getElementById('menuBtn')?.addEventListener('click', () => {
+    const nav = document.querySelector('.navbar-nav');
+    if (nav) nav.classList.toggle('show');
+  });
+
+  // Interação de seleção dos Cards de Planos Anuais
+  const homeCards = document.querySelectorAll('.price-card');
+  homeCards.forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('a.btn')) return;
+
+      homeCards.forEach(c => {
+        c.classList.remove('selected', 'highlighted');
+        const btn = c.querySelector('a.btn');
+        if (btn) btn.className = 'btn btn-outline';
+      });
+
+      card.classList.add('selected');
+      const activeBtn = card.querySelector('a.btn');
+      if (activeBtn) activeBtn.className = 'btn btn-primary';
+    });
+  });
+</script>
+<script src="slider.js"></script>
+<script src="lightbox.js"></script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contato — Vollen IoT</title>
+  <meta name="description" content="Entre em contato com a equipe da Vollen IoT. Suporte comercial e técnico para Gestão OS e controle de microcontroladores." />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .contact-grid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 56px; align-items: start; }
+    .contact-card {
+      background: var(--white); border: 1px solid var(--slate-200);
+      border-radius: var(--radius-lg); padding: 28px;
+      display: flex; align-items: flex-start; gap: 16px;
+      transition: all .2s ease; cursor: pointer;
+    }
+    .contact-card:hover { border-color: var(--blue-200); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+    .contact-card-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 1.4rem;
+    }
+    .contact-card h3 { font-size: .95rem; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .contact-card p  { font-size: .85rem; color: var(--slate-500); line-height: 1.6; }
+    .contact-card .link { font-size: .85rem; color: var(--blue-600); font-weight: 600; margin-top: 6px; display: inline-block; }
+
+    .form-card {
+      background: var(--white); border: 1px solid var(--slate-200);
+      border-radius: var(--radius-xl); padding: 40px;
+      box-shadow: var(--shadow-lg);
+    }
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; font-size: .85rem; font-weight: 700; color: var(--slate-700); margin-bottom: 6px; }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%; padding: 11px 14px;
+      border: 1.5px solid var(--slate-300); border-radius: var(--radius);
+      font-size: .9rem; font-family: 'Inter', sans-serif;
+      color: var(--slate-800); background: var(--white);
+      transition: border-color .15s, box-shadow .15s;
+      outline: none;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      border-color: var(--blue-500);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    }
+    .form-group textarea { resize: vertical; min-height: 120px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+    .success-msg {
+      background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius);
+      padding: 16px 20px; color: #15803d; font-weight: 600; font-size: .9rem;
+      display: none; margin-bottom: 16px;
+    }
+    @media (max-width: 768px) {
+      .contact-grid { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+      .form-card { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav class="navbar">
+  <div class="container">
+    <div class="navbar-inner">
+      <a href="index.html" class="navbar-logo">
+        <div class="brand-logo-text"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+      </a>
+      <nav class="navbar-nav">
+        <a href="index.html">Início</a>
+        <div class="nav-dropdown">
+          <button class="nav-dropdown-btn" type="button">
+            Software
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <div class="dropdown-menu">
+            <a href="gestao-os.html">
+              <div class="dropdown-icon" style="background:#0a192f;">
+                <img src="assets/gestao-os-icon.png" alt="Ícone Gestão OS" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">Gestão OS</span>
+                <span class="dropdown-desc">Sistema desktop completo para sua assistência</span>
+              </div>
+            </a>
+            <a href="download.html#apk-tecnico">
+              <div class="dropdown-icon" style="background:#1e3a8a;">
+                <span style="font-size:1.4rem;">📱</span>
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Gestão OS</span>
+                <span class="dropdown-desc">Aplicativo Android para técnicos na bancada e campo</span>
+              </div>
+            </a>
+            <a href="microcontroladores.html">
+              <div class="dropdown-icon" style="background:#0f172a;">
+                <img src="assets/vollen-iot-icon.png" alt="Ícone APK Vollen IoT" />
+              </div>
+              <div class="dropdown-text">
+                <span class="dropdown-title">APK Vollen IoT</span>
+                <span class="dropdown-desc">Controle de microcontroladores em tempo real</span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <a href="planos.html">Planos</a>
+        <a href="download.html">Downloads</a>
+        <a href="sobre.html">Sobre</a>
+        <a href="contato.html" class="active">Contato</a>
+      </nav>
+      <div class="navbar-cta">
+        <a href="download.html" class="btn btn-primary btn-sm">🚀 Baixar Agora</a>
+      </div>
+      <button class="hamburger" id="menuBtn"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</nav>
+
+<section class="page-hero">
+  <div class="container">
+    <div class="badge badge-navy" style="margin-bottom:16px;display:inline-flex;">💬 Fale Conosco</div>
+    <h1>Estamos prontos para atender você</h1>
+    <p>Tire suas dúvidas sobre o Gestão OS, solicite o APK de controle para microcontroladores ou fale com nosso suporte técnico.</p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <div class="contact-grid">
+      <!-- CANAIS -->
+      <div style="display:flex; flex-direction:column; gap:20px;">
+        <a href="https://wa.me/5500000000000?text=Olá!%20Gostaria%20de%20saber%20mais%20sobre%20as%20soluções%20da%20Vollen%20IoT." target="_blank" class="contact-card">
+          <div class="contact-card-icon" style="background:#dcfce7; color:#16a34a;">📱</div>
+          <div>
+            <h3>WhatsApp Comercial</h3>
+            <p>Atendimento rápido para tirar dúvidas, solicitar demonstrações e contratar planos.</p>
+            <span class="link">Iniciar conversa →</span>
+          </div>
+        </a>
+
+        <a href="https://wa.me/5500000000000?text=Olá!%20Preciso%20de%20suporte%20técnico%20com%20o%20Gestão%20OS%20ou%20Vollen%20IoT." target="_blank" class="contact-card" id="suporte">
+          <div class="contact-card-icon" style="background:#dbeafe; color:#2563eb;">🛠️</div>
+          <div>
+            <h3>Suporte Técnico</h3>
+            <p>Canal exclusivo para clientes ativos. Ajuda na instalação, configuração e dúvidas de firmware.</p>
+            <span class="link">Falar com suporte →</span>
+          </div>
+        </a>
+
+        <a href="mailto:vollenoficial@gmail.com" class="contact-card">
+          <div class="contact-card-icon" style="background:#fef3c7; color:#d97706;">✉️</div>
+          <div>
+            <h3>E-mail</h3>
+            <p>vollenoficial@gmail.com<br>Respondemos em até 24 horas úteis.</p>
+            <span class="link">Enviar e-mail →</span>
+          </div>
+        </a>
+
+        <!-- HORÁRIO -->
+        <div style="background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-lg); padding:24px;">
+          <h4 style="font-size:.9rem; font-weight:700; color:var(--navy); margin-bottom:12px;">🕐 Horário de Atendimento</h4>
+          <div style="display:flex; justify-content:space-between; font-size:.85rem; color:var(--slate-600);">
+            <span>Segunda a Sexta:</span><strong>08h às 18h</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- FORMULÁRIO -->
+      <div class="form-card">
+        <h2 style="font-size:1.3rem; font-weight:800; color:var(--navy); margin-bottom:8px;">Solicite uma Proposta ou Teste</h2>
+        <p style="font-size:.88rem; color:var(--slate-500); margin-bottom:28px;">Preencha os dados e nossa equipe entrará em contato via WhatsApp com todas as informações.</p>
+
+        <div class="success-msg" id="successMsg">
+          ✓ Redirecionando para o WhatsApp...
+        </div>
+
+        <form id="contactForm" onsubmit="handleSubmit(event)">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nome">Seu Nome *</label>
+              <input type="text" id="nome" placeholder="Ex: Carlos Silva" required />
+            </div>
+            <div class="form-group">
+              <label for="empresa">Empresa / Assistência</label>
+              <input type="text" id="empresa" placeholder="Ex: Silva Cell ou Projeto IoT" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="whatsapp">WhatsApp com DDD *</label>
+              <input type="tel" id="whatsapp" placeholder="(00) 00000-0000" required />
+            </div>
+            <div class="form-group">
+              <label for="cidade">Cidade / UF</label>
+              <input type="text" id="cidade" placeholder="Ex: São Paulo - SP" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="plano">Projeto de Interesse</label>
+              <select id="plano">
+                <optgroup label="⚙️ Gestão OS (Assistências Técnicas)">
+                  <option value="10-dias-gratis">🚀 Teste Grátis Gestão OS (10 Dias)</option>
+                  <option value="basica-1a">Gestão OS Básica — Anual (R$ 289,90)</option>
+                  <option value="v2-1a">Gestão OS V2 — Anual (R$ 449,90)</option>
+                  <option value="v3-1a" selected>Gestão OS V3 Nuvem — Anual (R$ 789,00) ⭐</option>
+                  <option value="v4-1a">Gestão OS V4 Enterprise — Anual (R$ 1.189,90)</option>
+                </optgroup>
+                <optgroup label="⚡ Vollen IoT (Microcontroladores)">
+                  <option value="iot-gratis">APK Vollen IoT — Grátis (Até 3 dispositivos)</option>
+                  <option value="iot-5d">APK Vollen IoT — 5 Dispositivos (R$ 79,90/ano)</option>
+                  <option value="iot-8d">APK Vollen IoT — 8 Dispositivos (R$ 119,90/ano) ⭐</option>
+                  <option value="iot-custom">APK Vollen IoT — Mais de 8 Dispositivos (Personalizado)</option>
+                </optgroup>
+                <option value="duvidas">❓ Quero tirar dúvidas com a equipe</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="segmento">Segmento Principal</label>
+              <select id="segmento">
+                <option value="assistencia_eletro">Assistência Técnica de Eletrodomésticos</option>
+                <option value="assistencia_geral">Assistência Técnica (Celulares, Informática & Eletrônica)</option>
+                <option value="automacao">Automação Residencial ou Industrial (IoT)</option>
+                <option value="ambos">Ambos os Segmentos</option>
+                <option value="outro">Outro Segmento</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="mensagem">Mensagem ou Dúvida (opcional)</label>
+            <textarea id="mensagem" placeholder="Conte-nos como podemos ajudar você e sua empresa..."></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg" style="width:100%; justify-content:center;">
+            📱 Enviar e Falar no WhatsApp
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="brand-logo-text on-dark" style="margin-bottom: 14px;"><span class="c-dark">VO</span><span class="c-blue">LL</span><span class="c-dark">EN</span><span class="c-space"></span><span class="c-blue">IoT</span></div>
+        <p>Plataforma completa de soluções em tecnologia: Gestão OS para assistências técnicas e aplicativos de controle em tempo real para microcontroladores (ESP8266, ESP32 e Arduino).</p>
+      </div>
+      <div class="footer-col">
+        <h4>Softwares</h4>
+        <ul>
+          <li><a href="gestao-os.html">Gestão OS</a></li>
+          <li><a href="download.html">APK Gestão OS</a></li>
+          <li><a href="microcontroladores.html">APK Vollen IoT</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Links Úteis</h4>
+        <ul>
+          <li><a href="download.html">Downloads</a></li>
+          <li><a href="planos.html">Planos Anuais</a></li>
+          <li><a href="sobre.html">Sobre a Vollen IoT</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Fale Conosco</h4>
+        <ul>
+          <li><a href="https://wa.me/5500000000000" target="_blank">📱 WhatsApp</a></li>
+          <li><a href="mailto:vollenoficial@gmail.com">✉️ vollenoficial@gmail.com</a></li>
+          <li><a href="contato.html">📝 Formulário</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>© 2026 Vollen IoT. Todos os direitos reservados. • Contagem - Minas Gerais</p>
+      <div class="footer-bottom-links"><a href="#">Privacidade</a><a href="#">Termos</a></div>
+    </div>
+  </div>
+</footer>
+
+<a href="https://wa.me/5500000000000" class="whatsapp-float" target="_blank">
+  <svg viewBox="0 0 24 24" fill="#fff"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+</a>
+
+<script>
+  function handleSubmit(e) {
+    e.preventDefault();
+    const nome = document.getElementById('nome').value;
+    const empresa = document.getElementById('empresa').value;
+    const whatsapp = document.getElementById('whatsapp').value;
+    const cidade = document.getElementById('cidade').value;
+    const plano = document.getElementById('plano').value;
+    const segmento = document.getElementById('segmento').value;
+    const msg = document.getElementById('mensagem').value;
+
+    let texto = `*Contato via Site Vollen IoT*\n`;
+    texto += `*Nome:* ${nome}\n`;
+    if (empresa) texto += `*Empresa:* ${empresa}\n`;
+    texto += `*WhatsApp:* ${whatsapp}\n`;
+    if (cidade) texto += `*Cidade:* ${cidade}\n`;
+    texto += `*Interesse:* ${plano}\n`;
+    texto += `*Segmento:* ${segmento}\n`;
+    if (msg) texto += `*Mensagem:* ${msg}\n`;
+
+    const encoded = encodeURIComponent(texto);
+    const successMsg = document.getElementById('successMsg');
+    if (successMsg) successMsg.style.display = 'block';
+
+    setTimeout(() => {
+      window.open(`https://wa.me/5500000000000?text=${encoded}`, '_blank');
+    }, 600);
+  }
+
+  // Preenche o select a partir de parâmetro de URL se houver
+  const params = new URLSearchParams(window.location.search);
+  const planoParam = params.get('plano');
+  if (planoParam) {
+    const sel = document.getElementById('plano');
+    if (sel) sel.value = planoParam;
+  }
+
+  document.getElementById('menuBtn')?.addEventListener('click', () => {
+    const n = document.querySelector('.navbar-nav');
+    const c = document.querySelector('.navbar-cta');
+    if (n) n.style.display = n.style.display === 'flex' ? 'none' : 'flex';
+    if (c) c.style.display = c.style.display === 'flex' ? 'none' : 'flex';
+  });
+</script>
+</body>
+</html>

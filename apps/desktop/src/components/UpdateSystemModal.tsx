@@ -10,16 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { modalStack } from '../utils/modalStack';
 import { getCurrentEdition } from '../config/appFeatures';
 
-export const CURRENT_SYSTEM_VERSION = getCurrentEdition().replace(/^v/, '');
-
-export interface AppVersionInfo {
-  version: string;
-  releaseDate?: string;
-  title?: string;
-  releaseNotes?: string[];
-  downloadUrl?: string;
-  mandatory?: boolean;
-}
+import { checkSystemUpdate, CURRENT_SYSTEM_VERSION, AppVersionInfo, isVersionNewer } from '../services/updateService';
 
 interface UpdateSystemModalProps {
   isOpen: boolean;
@@ -78,82 +69,17 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
     };
   }, []);
 
-  const isVersionNewer = (remote: string, current: string): boolean => {
-    try {
-      const rParts = remote.replace(/[^0-9.]/g, '').split('.').map(Number);
-      const cParts = current.replace(/[^0-9.]/g, '').split('.').map(Number);
-      
-      const rMajor = rParts[0] || 0;
-      const cMajor = cParts[0] || 0;
-
-      // Importante: A versão inicial (major) precisa ser idêntica (Ex: 3.x.x só recebe 3.x.x; 2.x.x não recebe 3.x.x)
-      if (rMajor !== cMajor) {
-        return false;
-      }
-
-      for (let i = 0; i < Math.max(rParts.length, cParts.length); i++) {
-        const r = rParts[i] || 0;
-        const c = cParts[i] || 0;
-        if (r > c) return true;
-        if (r < c) return false;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  };
-
   const checkForUpdates = async () => {
     setChecking(true);
     setErrorMessage(null);
     setLastCheckedTime(new Date().toLocaleTimeString('pt-BR'));
 
     try {
-      const masterDb = getMasterFirestore();
-      const currentMajor = CURRENT_SYSTEM_VERSION.split('.')[0] || '1';
-
-      // 1. Consulta metadados da versão no canal da nuvem da respectiva versão (v1, v2 ou v3)
-      let cloudInfo: AppVersionInfo | null = null;
-      try {
-        const docRef = doc(masterDb, 'system_config', `app_version_v${currentMajor}`);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          cloudInfo = docSnap.data() as AppVersionInfo;
-        }
-      } catch (cloudErr) {
-        console.warn('Aviso ao consultar metadados do Firebase:', cloudErr);
-      }
-
-      // 2. Tenta verificar pelo Atualizador Nativo (GitHub Releases / Tauri)
-      try {
-        const tauriUpdate = await checkTauriUpdate();
-        if (tauriUpdate?.available && isVersionNewer(tauriUpdate.version, CURRENT_SYSTEM_VERSION)) {
-          setHasUpdate(true);
-          setLatestVersionInfo({
-            version: tauriUpdate.version,
-            title: cloudInfo?.title || `Atualização v${tauriUpdate.version}`,
-            releaseDate: cloudInfo?.releaseDate || new Date().toLocaleDateString('pt-BR'),
-            releaseNotes: (cloudInfo?.releaseNotes && cloudInfo.releaseNotes.length > 0)
-              ? cloudInfo.releaseNotes
-              : (tauriUpdate.body ? tauriUpdate.body.split('\n').filter(Boolean) : ['Melhorias de desempenho e novas correções.']),
-          });
-          return;
-        }
-      } catch (tauriErr) {
-        console.warn('Verificação nativa Tauri:', tauriErr);
-      }
-
-      // 3. Se houver versão mais recente no Firestore
-      if (cloudInfo && cloudInfo.version && isVersionNewer(cloudInfo.version, CURRENT_SYSTEM_VERSION)) {
-        setHasUpdate(true);
-        setLatestVersionInfo(cloudInfo);
-      } else {
-        setHasUpdate(false);
-      }
+      const res = await checkSystemUpdate();
+      setHasUpdate(res.hasUpdate);
+      setLatestVersionInfo(res.latestVersionInfo);
     } catch (err: any) {
       console.warn('Verificação de atualizações:', err);
-      // Se não há atualização ou consulta silenciosa, não quebra a interface
       setHasUpdate(false);
     } finally {
       setChecking(false);
@@ -242,7 +168,7 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn select-none font-sans">
+    <div className="fixed inset-0 z-[10000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 animate-fadeIn select-none font-sans">
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
         {/* Cabeçalho */}
         <div className="p-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between shrink-0 shadow-sm">
