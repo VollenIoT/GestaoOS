@@ -103,8 +103,6 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onOpenCreateService, onClose]);
 
-  if (!isOpen) return null;
-
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation();
     e.preventDefault();
@@ -170,13 +168,19 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
     });
   };
 
-  const filteredServices = services.filter((srv) => {
-    if (!searchTerm.trim()) return true;
-    return (
-      matchesSearchTerm(srv.name || srv.description, searchTerm) ||
-      matchesSearchTerm(srv.price, searchTerm)
-    );
-  });
+  const filteredServices = services
+    .filter((srv) => {
+      if (!searchTerm.trim()) return true;
+      return (
+        matchesSearchTerm(srv.name || srv.description, searchTerm) ||
+        matchesSearchTerm(srv.price, searchTerm)
+      );
+    })
+    .sort((a, b) => {
+      const nameA = String(a.name || a.description || '').trim();
+      const nameB = String(b.name || b.description || '').trim();
+      return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
+    });
 
   const selectedService = filteredServices.find((s) => s.id === selectedServiceId);
 
@@ -204,6 +208,8 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
   const totalPixels = columns
     .filter((c) => c.visible)
     .reduce((acc, col) => acc + col.width, 0);
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -238,7 +244,7 @@ export const ServicesModal: React.FC<ServicesModalProps> = ({
 
         {/* Tabela de Serviços */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
+          className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50 select-none"
           onContextMenu={handleContextMenu}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('tr[data-row]') === null) {

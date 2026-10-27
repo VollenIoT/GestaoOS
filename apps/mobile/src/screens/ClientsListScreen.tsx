@@ -50,17 +50,16 @@ export const ClientsListScreen: React.FC<ClientsListScreenProps> = ({
     if (!term) return true;
 
     const digitsSearch = term.replace(/\D/g, '');
+    const isPureDigits = /^\d+$/.test(term);
+    const isPhoneOrDoc = /^[\d\s().\-/]+$/.test(term) && digitsSearch.length >= 4 && !term.includes('/');
+
     const phoneDigits = (c.phone || '').replace(/\D/g, '');
     const whatsappDigits = (c.whatsapp || '').replace(/\D/g, '');
     const cpfCnpjDigits = (c.cpfCnpj || c.cpf || c.cnpj || '').replace(/\D/g, '');
     const codeDigits = (c.code || '').replace(/\D/g, '');
 
-    const matchesDigits = digitsSearch.length >= 1 && (
-      phoneDigits.includes(digitsSearch) ||
-      whatsappDigits.includes(digitsSearch) ||
-      cpfCnpjDigits.includes(digitsSearch) ||
-      codeDigits.includes(digitsSearch)
-    );
+    const matchesDigits = (isPureDigits && digitsSearch.length >= 1 && codeDigits.includes(digitsSearch)) ||
+      (isPhoneOrDoc && (phoneDigits.includes(digitsSearch) || whatsappDigits.includes(digitsSearch) || cpfCnpjDigits.includes(digitsSearch)));
 
     return (
       matchesDigits ||

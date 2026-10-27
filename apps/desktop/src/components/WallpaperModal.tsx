@@ -10,6 +10,7 @@ import {
   ZoomIn,
   RotateCcw,
 } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 interface WallpaperModalProps {
   isOpen: boolean;
@@ -48,17 +49,17 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({
   const dragStartRef = useRef<{ x: number; y: number; startPosX: number; startPosY: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('WallpaperModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('WallpaperModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

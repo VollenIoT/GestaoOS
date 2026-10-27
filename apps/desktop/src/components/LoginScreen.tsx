@@ -1,12 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { Wrench, Lock, User, LogIn, Power, AlertCircle, Loader2 } from 'lucide-react';
+import { Wrench, Lock, User, LogIn, Power, AlertCircle, Loader2, KeyRound, Play, HelpCircle } from 'lucide-react';
 import { fetchUsers, loginUser } from '../services/api';
+import { WelcomeFirstAccessModal } from './WelcomeFirstAccessModal';
+import { TerminalOfflineModal } from './TerminalOfflineModal';
+import { getLocalNetworkConfig, subscribeNetworkStatus, testServerConnection, fetchAndApplyServerData } from '../services/localNetworkService';
+import { getCurrentFeatures } from '../config/appFeatures';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: any) => void;
+  onOpenSerialModal?: () => void;
+  onStartTrial?: () => void;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({
+  onLoginSuccess,
+  onOpenSerialModal,
+  onStartTrial,
+}) => {
+  const [isFirstAccessModalOpen, setIsFirstAccessModalOpen] = useState<boolean>(() => {
+    try {
+      const dismissed = localStorage.getItem('system_first_access_dismissed');
+      return !dismissed;
+    } catch {
+      return false;
+    }
+  });
   const [users, setUsers] = useState<Array<{ id: string; username: string; name: string; role: string }>>(() => {
     try {
       const saved = localStorage.getItem('vollen_users');
@@ -52,6 +70,62 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [closed, setClosed] = useState<boolean>(false);
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutRemaining, setLockoutRemaining] = useState<number>(0);
+
+  // Contador regressivo do Lockout de 10 segundos
+  useEffect(() => {
+    let timer: any;
+    if (lockoutRemaining > 0) {
+      timer = setInterval(() => {
+        setLockoutRemaining((prev) => {
+          if (prev <= 1) {
+            setErrorMsg('');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [lockoutRemaining]);
+
+  // Monitoramento do estado da conexão com o Servidor Local
+  const [isTerminalOffline, setIsTerminalOffline] = useState<boolean>(() => {
+    const cfg = getLocalNetworkConfig();
+    return cfg.mode === 'client'; // Inicia checando se for modo cliente
+  });
+  const [networkConfig, setNetworkConfig] = useState(getLocalNetworkConfig);
+
+  useEffect(() => {
+    const unsub = subscribeNetworkStatus((netStatus) => {
+      setNetworkConfig({
+        mode: netStatus.mode,
+        syncStrategy: 'hybrid',
+        serverIp: netStatus.serverIp,
+        serverPort: netStatus.serverPort,
+      });
+
+      if (netStatus.mode === 'client') {
+        setIsTerminalOffline(!netStatus.connected);
+      } else {
+        setIsTerminalOffline(false);
+      }
+    });
+
+    // Teste inicial rápido se for modo cliente
+    const cfg = getLocalNetworkConfig();
+    if (cfg.mode === 'client') {
+      testServerConnection(cfg.serverIp, cfg.serverPort).then((res) => {
+        setIsTerminalOffline(!res.success);
+        if (res.success) {
+          fetchAndApplyServerData();
+        }
+      });
+    }
+
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     // Sincroniza usuários do localStorage ou Firestore
@@ -114,6 +188,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (lockoutRemaining > 0) {
+      setErrorMsg(`Sistema bloqueado por excesso de tentativas. Aguarde ${lockoutRemaining}s para tentar novamente.`);
+      return;
+    }
+
     if (!selectedUserId) {
       setErrorMsg('Selecione um usuário.');
       return;
@@ -126,6 +206,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     setLoading(true);
     setErrorMsg('');
+
+    // Pequeno delay proposital (300ms) para mitigar scripts automatizados de força bruta
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     // Busca o usuário exclusivamente na lista cadastrada em Gestão de Usuários (vollen_users)
     let savedUsers: any[] = [];
@@ -145,26 +228,40 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    // Se o usuário tem senha cadastrada, valida a correspondência exata
+    // Validação de senha case-insensitive (sem distinção entre maiúsculas e minúsculas)
     const registeredPassword = matchedUser.password !== undefined && matchedUser.password !== null
-      ? String(matchedUser.password).trim()
+      ? String(matchedUser.password).trim().toLowerCase()
       : '';
-    const inputPassword = String(password).trim();
+    const inputPassword = String(password).trim().toLowerCase();
+
+    let isPasswordCorrect = false;
 
     if (registeredPassword !== '') {
-      if (registeredPassword !== inputPassword) {
-        setLoading(false);
-        setErrorMsg('Senha incorreta! Digite a senha cadastrada para este usuário.');
-        return;
-      }
+      isPasswordCorrect = (registeredPassword === inputPassword);
     } else {
       // Se não há senha gravada ainda (ex: usuário padrão inicial), aceita '1234' ou 'admin'
-      if (inputPassword !== '1234' && inputPassword !== 'admin') {
-        setLoading(false);
-        setErrorMsg('Senha incorreta! Digite a senha cadastrada.');
-        return;
-      }
+      isPasswordCorrect = (inputPassword === '1234' || inputPassword === 'admin');
     }
+
+    if (!isPasswordCorrect) {
+      setLoading(false);
+      const newFails = failedAttempts + 1;
+      setFailedAttempts(newFails);
+
+      if (newFails >= 5) {
+        setLockoutRemaining(10); // Bloqueio temporário de 10 segundos
+        setFailedAttempts(0);
+        setErrorMsg('Muitas tentativas incorretas! Tela de login bloqueada por 10 segundos.');
+      } else {
+        const remaining = 5 - newFails;
+        setErrorMsg(`Senha incorreta! (${remaining} tentativa${remaining > 1 ? 's' : ''} restante${remaining > 1 ? 's' : ''} antes do bloqueio).`);
+      }
+      return;
+    }
+
+    // Sucesso: zera contador de falhas e lockout
+    setFailedAttempts(0);
+    setLockoutRemaining(0);
 
     const isRoleAdmin = (matchedUser.role || 'Admin').toUpperCase() === 'ADMIN' || (matchedUser.username || '').toLowerCase() === 'admin';
     const userRole = isRoleAdmin ? 'Admin' : matchedUser.role;
@@ -175,16 +272,35 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       editOS: true,
       cancelOS: true,
       finalizeOS: true,
+      reopenOS: true,
+      deleteOS: true,
       viewOpenOrders: true,
       viewFinishedOrders: true,
+      viewAuditHistory: true,
+      printOS: true,
+      manageEstimates: true,
+      manageSales: true,
+      manageCashRegister: true,
+      openCloseCashRegister: true,
+      manageManualCashMovement: true,
       manageClients: true,
       manageParts: true,
       manageServices: true,
       manageEquipments: true,
       manageTechnicians: true,
       manageOrderStatus: true,
+      manageOSGeneralConfig: true,
+      manageOrderSequence: true,
+      manageWarrantyTerms: true,
+      managePrinterConfig: true,
+      viewGeneralReports: true,
+      viewTechnicianReports: true,
+      manageCompanyData: true,
+      manageMobileLink: true,
+      manageWallpaper: true,
       manageUsers: true,
       accessBackup: true,
+      accessFactoryReset: true,
     };
 
     setLoading(false);
@@ -280,11 +396,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           <div className="w-16 h-16 bg-sky-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-sky-600/20">
             <Wrench className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Vollen - Gestão de OS</h1>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+            {getCurrentFeatures().edition === 'v4.0.0' ? 'Vollen - Gestão de OS e Vendas V4' : `Vollen - Gestão de OS ${getCurrentFeatures().edition === 'v1.0.0' ? '' : getCurrentFeatures().edition === 'v2.0.0' ? 'V2' : 'V3'}`}
+          </h1>
           <p className="text-sm text-slate-500 mt-1">Identifique-se para acessar o sistema</p>
         </div>
 
-        {errorMsg ? (
+        {lockoutRemaining > 0 && (
+          <div className="mb-6 bg-amber-50 border border-amber-300 text-amber-900 p-4 rounded-xl text-xs flex items-center gap-2.5 font-bold shadow-xs animate-pulse">
+            <Lock className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="text-xs font-bold text-amber-950">Acesso temporariamente suspenso</p>
+              <p className="text-[11px] text-amber-800 font-medium">Aguarde <strong>{lockoutRemaining} segundo{lockoutRemaining > 1 ? 's' : ''}</strong> para nova tentativa.</p>
+            </div>
+          </div>
+        )}
+
+        {errorMsg && lockoutRemaining === 0 ? (
           <div className="mb-6 bg-red-50 border border-red-200 text-red-700 p-3.5 rounded-xl text-sm flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
@@ -300,9 +428,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             </label>
             <div className="relative">
               <select
+                disabled={lockoutRemaining > 0}
                 value={selectedUserId}
                 onChange={(e) => setSelectedUserId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-sky-600 focus:bg-white transition-all appearance-none cursor-pointer uppercase"
+                className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-sky-600 focus:bg-white transition-all appearance-none cursor-pointer uppercase disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {users.map((u) => (
                   <option key={u.id} value={u.id} className="uppercase font-bold">
@@ -325,10 +454,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <input
               type="password"
               required
+              disabled={lockoutRemaining > 0}
+              maxLength={16}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                setPassword(val);
+              }}
               placeholder="••••••••"
-              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-sky-600 focus:bg-white transition-all"
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-sky-600 focus:bg-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             />
           </div>
 
@@ -345,19 +479,73 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
             <button
               type="submit"
-              disabled={loading}
-              className="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 transition-all cursor-pointer active:scale-95"
+              disabled={loading || lockoutRemaining > 0}
+              className="flex-1 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 transition-all cursor-pointer active:scale-95"
             >
               {loading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <LogIn className="w-4 h-4" />
               )}
-              Entrar
+              {lockoutRemaining > 0 ? `Bloqueado (${lockoutRemaining}s)` : 'Entrar'}
             </button>
           </div>
         </form>
+
+        {/* Links Rápidos: Ajuda de Primeiro Acesso e Registro de Licença */}
+        <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
+          <button
+            type="button"
+            onClick={() => setIsFirstAccessModalOpen(true)}
+            className="text-slate-500 hover:text-sky-600 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-sky-600" />
+            <span>Primeiro Acesso / Ajuda</span>
+          </button>
+
+          {onOpenSerialModal && (
+            <button
+              type="button"
+              onClick={onOpenSerialModal}
+              className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Inserir Serial</span>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Modal de Primeiro Acesso Automático */}
+      <WelcomeFirstAccessModal
+        isOpen={isFirstAccessModalOpen}
+        onClose={() => setIsFirstAccessModalOpen(false)}
+        onOpenSerialModal={() => {
+          if (onOpenSerialModal) onOpenSerialModal();
+        }}
+        onStartTrial={() => {
+          if (onStartTrial) onStartTrial();
+        }}
+      />
+
+      {/* Modal Bloqueador Inegociável quando o Servidor Principal estiver Offline no Terminal */}
+      <TerminalOfflineModal
+        isOffline={isTerminalOffline}
+        serverIp={networkConfig.serverIp}
+        serverPort={networkConfig.serverPort}
+        onRetryConnection={async () => {
+          const currentConfig = getLocalNetworkConfig();
+          if (currentConfig.mode !== 'client') {
+            setIsTerminalOffline(false);
+            return;
+          }
+          const res = await testServerConnection(currentConfig.serverIp, currentConfig.serverPort);
+          if (res.success) {
+            setIsTerminalOffline(false);
+            fetchAndApplyServerData();
+          }
+        }}
+      />
     </div>
   );
 };

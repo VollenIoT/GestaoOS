@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { X, UserCheck, Eye, PlusCircle, User } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 interface ClientViewModalProps {
   isOpen: boolean;
@@ -12,17 +13,17 @@ export const ClientViewModal: React.FC<ClientViewModalProps> = ({
   client,
   onClose,
 }) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('ClientViewModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('ClientViewModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen || !client) return null;
 

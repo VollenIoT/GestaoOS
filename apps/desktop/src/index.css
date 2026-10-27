@@ -28,6 +28,24 @@ textarea,
   -webkit-user-select: text !important;
 }
 
+/* Oculta botão/ícone nativo de revelar senha do WebView2/Edge/Chromium para não duplicar com o botão de olho personalizado */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-contacts-auto-fill-button {
+  visibility: hidden !important;
+  display: none !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+}
+
 
 /* Regra CAPS LOCK: Força visualização e digitação em maiúsculas dentro dos campos de texto do sistema */
 body.app-caps-active input:not([type="password"]):not([type="email"]):not([type="color"]):not([type="date"]):not([type="time"]):not([type="number"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]),
@@ -39,7 +57,7 @@ body.app-caps-active textarea {
 @media print {
   @page {
     size: A4 portrait;
-    margin: 8mm;
+    margin: 5mm;
   }
 
   /* Garante que o container de impressão fique visível */
@@ -65,31 +83,32 @@ body.app-caps-active textarea {
     break-before: page !important;
   }
 
-  /* Cada comprovante se encaixa na folha A4 */
+  /* Cada comprovante se encaixa na folha A4 com largura e altura seguras */
   .print-single-sheet {
     width: 100% !important;
-    max-width: 194mm !important;
-    height: 281mm !important;
-    max-height: 281mm !important;
+    max-width: 198mm !important;
     box-sizing: border-box !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
+    display: block !important;
     margin: 0 auto !important;
   }
 
   .entry-receipt-container {
-    height: 100% !important;
+    height: 275mm !important;
+    max-height: 275mm !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    padding: 0 !important;
   }
 
   .entry-receipt-via {
     height: 133mm !important;
     max-height: 133mm !important;
+    flex: 0 0 133mm !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
@@ -98,10 +117,14 @@ body.app-caps-active textarea {
   }
 
   .entry-receipt-cutline {
-    height: 6mm !important;
+    height: 5mm !important;
+    max-height: 5mm !important;
+    flex: 0 0 5mm !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   /* Comprovante de Venda Térmico e A4 */

@@ -29,6 +29,9 @@ import {
 import { CompanyData, defaultCompanyData } from './CompanyModal';
 import { useDialog } from './DialogContext';
 import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
+import { useCatalogStore } from '../stores/useCatalogStore';
+import { getAllAggregatedBrands, getAllAggregatedModels } from '../utils/catalogSuggestions';
 
 export interface EstimateItemPart {
   code?: string;
@@ -134,6 +137,8 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     neighborhood: '',
     city: '',
     state: '',
+    hasRestriction: false,
+    restrictionReason: '',
   });
 
   const [equipmentData, setEquipmentData] = useState({
@@ -191,6 +196,76 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     if (isNaN(num)) return '0,00';
     return num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+
+  const brands = useCatalogStore((s) => s.brands);
+  const models = useCatalogStore((s) => s.models);
+  const addBrandIfNotExists = useCatalogStore((s) => s.addBrandIfNotExists);
+  const addModelIfNotExists = useCatalogStore((s) => s.addModelIfNotExists);
+
+  const [brandSuggestionsOpen, setBrandSuggestionsOpen] = useState(false);
+  const [modelSuggestionsOpen, setModelSuggestionsOpen] = useState(false);
+  const brandContainerRef = useRef<HTMLDivElement>(null);
+  const modelContainerRef = useRef<HTMLDivElement>(null);
+
+  // Fecha dropdowns de Marca e Modelo ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (brandContainerRef.current && !brandContainerRef.current.contains(e.target as Node)) {
+        setBrandSuggestionsOpen(false);
+      }
+      if (modelContainerRef.current && !modelContainerRef.current.contains(e.target as Node)) {
+        setModelSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Marcas cadastradas na Central de Marcas
+  const allAvailableBrands = useMemo(() => {
+    return getAllAggregatedBrands(brands);
+  }, [brands]);
+
+  // Modelos cadastrados na Central de Modelos
+  const allAvailableModels = useMemo(() => {
+    return getAllAggregatedModels(models);
+  }, [models]);
+
+  // Filtro de sugestões de Marcas (Apenas após começar a digitar)
+  const filteredBrandSuggestions = useMemo(() => {
+    const input = (equipmentData.brand || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    if (!input) {
+      return [];
+    }
+    return allAvailableBrands.filter((b) => {
+      const norm = (b.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      return norm.includes(input);
+    }).slice(0, 10);
+  }, [allAvailableBrands, equipmentData.brand]);
+
+  // Filtro de sugestões de Modelos estritamente vinculado à Marca cadastrada
+  const filteredModelSuggestions = useMemo(() => {
+    const brandInput = (equipmentData.brand || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    const modelInput = (equipmentData.model || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+    // Modelos pertencentes à Marca cadastrada (ou todos caso nenhuma marca esteja informada)
+    const brandModels = allAvailableModels.filter((m) => {
+      if (!brandInput) return true;
+      const mBrand = (m.brandName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      return mBrand && (mBrand === brandInput || mBrand.includes(brandInput) || brandInput.includes(mBrand));
+    });
+
+    // Se o usuário não digitou nada no modelo, mostra os modelos daquela marca
+    if (!modelInput) {
+      return brandInput ? brandModels.slice(0, 15) : [];
+    }
+
+    // Filtra os modelos da marca pelo que foi digitado no modelo
+    return brandModels.filter((m) => {
+      const normName = (m.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      return normName.includes(modelInput);
+    }).slice(0, 15);
+  }, [allAvailableModels, equipmentData.brand, equipmentData.model]);
 
   const [isClientEquipmentsOpen, setIsClientEquipmentsOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -259,6 +334,8 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
           neighborhood: currentClient?.neighborhood || estimateToEdit.client?.neighborhood || '',
           city: currentClient?.city || estimateToEdit.client?.city || '',
           state: currentClient?.state || estimateToEdit.client?.state || '',
+          hasRestriction: Boolean(currentClient?.hasRestriction ?? (estimateToEdit.client as any)?.hasRestriction),
+          restrictionReason: currentClient?.restrictionReason || (estimateToEdit.client as any)?.restrictionReason || '',
         });
         setEquipmentData({
           type: estimateToEdit.equipment?.type || '',
@@ -291,6 +368,8 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
           neighborhood: '',
           city: '',
           state: '',
+          hasRestriction: false,
+          restrictionReason: '',
         });
         setEquipmentData({
           type: '',
@@ -327,8 +406,14 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
         neighborhood: selectedClient.neighborhood || '',
         city: selectedClient.city || '',
         state: selectedClient.state || '',
+        hasRestriction: Boolean(selectedClient.hasRestriction),
+        restrictionReason: selectedClient.restrictionReason || '',
       });
       setIsDirty(true);
+
+      if (selectedClient.hasRestriction) {
+        alert(`⚠️ ATENÇÃO: ESTE CLIENTE POSSUI RESTRIÇÃO CADASTRAL!\n\nCliente: ${selectedClient.name}\nMotivo: ${selectedClient.restrictionReason || 'Sem motivo especificado'}`);
+      }
     }
   }, [selectedClient, isOpen]);
 
@@ -550,11 +635,28 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
     const trimmedCode = codeToSearch.trim();
     if (!trimmedCode || !availableParts || availableParts.length === 0) return;
 
-    const foundPart = availableParts.find(
-      (p) =>
-        (p.code && p.code.toLowerCase() === trimmedCode.toLowerCase()) ||
-        (p.id && String(p.id) === trimmedCode)
-    );
+    const lower = trimmedCode.toLowerCase();
+    const digitsOnly = trimmedCode.replace(/\D/g, '');
+    const strippedDigits = digitsOnly.replace(/^0+/, '');
+
+    const foundPart = availableParts.find((p: any) => {
+      const pCode = String(p.code || '').trim().toLowerCase();
+      const pBarcode = String(p.barcode || '').trim().toLowerCase();
+      const pManuf = String(p.manufacturerCode || '').trim().toLowerCase();
+      const pId = String(p.id || '').trim().toLowerCase();
+
+      // 1. Match direto de string
+      if (pCode === lower || pBarcode === lower || pManuf === lower || pId === lower) return true;
+
+      // 2. Match numérico ignorando zeros à esquerda
+      if (strippedDigits) {
+        const pCodeDigits = pCode.replace(/\D/g, '').replace(/^0+/, '');
+        const pBarcodeDigits = pBarcode.replace(/\D/g, '').replace(/^0+/, '');
+        if (pCodeDigits === strippedDigits || pBarcodeDigits === strippedDigits) return true;
+      }
+
+      return false;
+    });
 
     if (foundPart) {
       setNewPartCode(foundPart.code || '');
@@ -678,6 +780,14 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
       notes,
       auditHistory: updatedAuditHistory,
     };
+
+    // Auto-cadastro de Marca e Modelo
+    if (equipmentData.brand?.trim()) {
+      addBrandIfNotExists(equipmentData.brand.trim());
+      if (equipmentData.model?.trim()) {
+        addModelIfNotExists(equipmentData.model.trim(), equipmentData.brand.trim());
+      }
+    }
 
     onSaveEstimate(estimateObj);
     setIsDirty(false);
@@ -978,6 +1088,16 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
   // Imprimir Orçamento (A4 ou Térmica 80mm) - Suporta window.open e Fallback via iframe invisível (imune a bloqueador de pop-ups)
   const handlePrintEstimate = (layout: 'A4' | 'THERMAL_80MM' = 'A4') => {
     const todayStr = new Date().toLocaleDateString('pt-BR');
+    let printerConfig: any = {
+      printCompanyHeader: true,
+      printCompanyLogo: true,
+      printClientSignatureLine: true,
+      printWarrantyTerms: true,
+    };
+    try {
+      const saved = localStorage.getItem('vollen_printer_config');
+      if (saved) printerConfig = { ...printerConfig, ...JSON.parse(saved) };
+    } catch {}
 
     const generateHtml = () => {
       if (layout === 'THERMAL_80MM') {
@@ -1011,10 +1131,12 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
               </style>
             </head>
             <body>
-              <div class="center bold title">${companyInfo.name || 'ASSISTÊNCIA TÉCNICA'}</div>
-              <div class="center" style="font-size: 10px;">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `| Whats: ${companyInfo.whatsapp}` : ''}</div>
-              <div class="center" style="font-size: 9.5px;">${companyInfo.address || ''}</div>
-              <div class="divider"></div>
+              ${printerConfig.printCompanyHeader !== false ? `
+                <div class="center bold title">${companyInfo.name || 'ASSISTÊNCIA TÉCNICA'}</div>
+                <div class="center" style="font-size: 10px;">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `| Whats: ${companyInfo.whatsapp}` : ''}</div>
+                <div class="center" style="font-size: 9.5px;">${companyInfo.address || ''}</div>
+                <div class="divider"></div>
+              ` : ''}
 
               <div class="center bold" style="font-size: 12px;">ORÇAMENTO #${activeCode}</div>
               <div class="row" style="font-size: 10px;">
@@ -1062,10 +1184,12 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
               <div style="font-size: 10px; margin-top: 3px;"><strong>Pagamento:</strong> ${paymentConditions || 'À Vista / PIX / Cartão'}</div>
 
               <div class="footer">
-                <p>Validade de ${validityDays} dias.<br/>Agradecemos a preferência!</p>
-                <br/><br/>
-                ____________________________<br/>
-                Assinatura do Cliente
+                ${printerConfig.printWarrantyTerms !== false ? `<p>Validade de ${validityDays} dias.<br/>Agradecemos a preferência!</p>` : ''}
+                ${printerConfig.printClientSignatureLine !== false ? `
+                  <br/><br/>
+                  ____________________________<br/>
+                  Assinatura do Cliente
+                ` : ''}
               </div>
             </body>
           </html>
@@ -1112,9 +1236,12 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
             <table class="header-table">
               <tr>
                 <td>
-                  <div class="company-name">${companyInfo.name || 'VOLLEN ASSISTÊNCIA TÉCNICA'}</div>
-                  <div class="company-sub">${companyInfo.cnpj ? `CNPJ: ${companyInfo.cnpj} • ` : ''}${companyInfo.address || ''}</div>
-                  <div class="company-sub">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `• WhatsApp: ${companyInfo.whatsapp}` : ''}</div>
+                  ${printerConfig.printCompanyLogo !== false && companyInfo.logoUrl ? `<img src="${companyInfo.logoUrl}" alt="Logo" style="max-height: 48px; max-width: 140px; object-fit: contain; margin-bottom: 4px; display: block;" />` : ''}
+                  ${printerConfig.printCompanyHeader !== false ? `
+                    <div class="company-name">${companyInfo.name || 'VOLLEN ASSISTÊNCIA TÉCNICA'}</div>
+                    <div class="company-sub">${companyInfo.cnpj ? `CNPJ: ${companyInfo.cnpj} • ` : ''}${companyInfo.address || ''}</div>
+                    <div class="company-sub">${companyInfo.phone ? `Tel: ${companyInfo.phone}` : ''} ${companyInfo.whatsapp ? `• WhatsApp: ${companyInfo.whatsapp}` : ''}</div>
+                  ` : ''}
                 </td>
                 <td class="doc-title-box">
                   <div class="doc-title">ORÇAMENTO</div>
@@ -1207,18 +1334,22 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
               </div>
             </div>
 
-            <div class="footer-terms">
-              <strong>Condições Gerais:</strong> Este orçamento possui validade de ${validityDays || 10} dias a contar da data de emissão. A aprovação pode ser feita via WhatsApp ou diretamente no balcão. Após aprovação, as peças serão reservadas e o serviço executado nos prazos acordados.
-            </div>
+            ${printerConfig.printWarrantyTerms !== false ? `
+              <div class="footer-terms">
+                <strong>Condições Gerais:</strong> Este orçamento possui validade de ${validityDays || 10} dias a contar da data de emissão. A aprovação pode ser feita via WhatsApp ou diretamente no balcão. Após aprovação, as peças serão reservadas e o serviço executado nos prazos acordados.
+              </div>
+            ` : ''}
 
-            <div class="signatures">
-              <div>
-                <div class="sig-line">ASSINATURA DA EMPRESA / TÉCNICO</div>
+            ${printerConfig.printClientSignatureLine !== false ? `
+              <div class="signatures">
+                <div>
+                  <div class="sig-line">ASSINATURA DA EMPRESA / TÉCNICO</div>
+                </div>
+                <div>
+                  <div class="sig-line">APROVAÇÃO DO CLIENTE</div>
+                </div>
               </div>
-              <div>
-                <div class="sig-line">APROVAÇÃO DO CLIENTE</div>
-              </div>
-            </div>
+            ` : ''}
           </body>
         </html>
       `;
@@ -1340,15 +1471,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
             </div>
 
             {/* Histórico do Orçamento no Cabeçalho */}
-            <button
-              type="button"
-              onClick={() => setIsAuditHistoryModalOpen(true)}
-              className="h-7 px-2.5 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs border border-white/30 shadow-2xs"
-              title="Visualizar histórico de edições e salvamentos deste orçamento"
-            >
-              <History className="w-3.5 h-3.5 text-amber-200 shrink-0" />
-              <span>Histórico ({auditHistory.length})</span>
-            </button>
+            {getCurrentFeatures().hasAuditHistoryInOSAndEstimate && (
+              <button
+                type="button"
+                onClick={() => setIsAuditHistoryModalOpen(true)}
+                className="h-7 px-2.5 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs border border-white/30 shadow-2xs"
+                title="Visualizar histórico de edições e salvamentos deste orçamento"
+              >
+                <History className="w-3.5 h-3.5 text-amber-200 shrink-0" />
+                <span>Histórico ({auditHistory.length})</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1382,15 +1515,26 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                 )}
               </div>
 
+              {clientData.hasRestriction && (
+                <div className="bg-rose-600 text-white p-2 rounded-lg text-[11px] font-bold flex items-center gap-2 shadow-sm animate-pulse">
+                  <AlertTriangle className="w-4 h-4 text-amber-200 shrink-0" />
+                  <div>
+                    <span className="uppercase text-[10.5px]">⚠️ Cliente com Restrição:</span>{' '}
+                    <span className="text-rose-100 font-semibold">{clientData.restrictionReason || 'Sem motivo informado'}</span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
                 <div className="col-span-2">
                   <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Nome do Cliente *</label>
                   <input
                     type="text"
+                    maxLength={60}
                     required
                     value={clientData.name}
                     onChange={(e) => {
-                      setClientData({ ...clientData, name: e.target.value });
+                      setClientData({ ...clientData, name: e.target.value.slice(0, 60) });
                       setIsDirty(true);
                     }}
                     placeholder="Digite o nome do cliente..."
@@ -1467,66 +1611,152 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Tipo *</label>
-                  <select
-                    required
-                    value={equipmentData.type}
-                    onChange={(e) => {
-                      setEquipmentData({ ...equipmentData, type: e.target.value });
-                      setIsDirty(true);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase cursor-pointer text-xs"
-                  >
-                    <option value="">SELECIONE O TIPO...</option>
-                    {Array.from(
-                      new Set(
-                        (Array.isArray(availableEquipments) ? availableEquipments : [])
-                          .map((eq) => (eq ? (eq.type || eq.name || '') : '').trim().toUpperCase())
-                          .filter(Boolean)
-                      )
-                    ).map((typeName, idx) => (
-                      <option key={idx} value={typeName} className="uppercase font-bold">
-                        {typeName}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between h-4 mb-0.5">
+                    <label className="block text-[10.5px] font-bold text-slate-700 leading-none">Tipo *</label>
+                  </div>
+                  {getCurrentFeatures().hasEquipmentTypeSelect ? (
+                    <select
+                      required
+                      value={equipmentData.type}
+                      onChange={(e) => {
+                        setEquipmentData({ ...equipmentData, type: e.target.value });
+                        setIsDirty(true);
+                      }}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase cursor-pointer text-xs"
+                    >
+                      <option value="">SELECIONE O TIPO...</option>
+                      {Array.from(
+                        new Set(
+                          (Array.isArray(availableEquipments) ? availableEquipments : [])
+                            .map((eq) => (eq ? (eq.type || eq.name || '') : '').trim().toUpperCase())
+                            .filter(Boolean)
+                        )
+                      ).map((typeName, idx) => (
+                        <option key={idx} value={typeName} className="uppercase font-bold">
+                          {typeName}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      value={equipmentData.type}
+                      onChange={(e) => {
+                        setEquipmentData({ ...equipmentData, type: e.target.value });
+                        setIsDirty(true);
+                      }}
+                      placeholder="Ex: Lavadora, Refrigerador..."
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase text-xs"
+                    />
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Marca</label>
+                {/* Campo Marca com Sugestões */}
+                <div className="relative" ref={brandContainerRef}>
+                  <div className="flex items-center justify-between h-4 mb-0.5">
+                    <label className="block text-[10.5px] font-bold text-slate-700 leading-none">Marca</label>
+                  </div>
                   <input
                     type="text"
+                    maxLength={20}
                     value={equipmentData.brand}
+                    onFocus={() => setBrandSuggestionsOpen(true)}
                     onChange={(e) => {
-                      setEquipmentData({ ...equipmentData, brand: e.target.value });
+                      setEquipmentData({ ...equipmentData, brand: e.target.value.slice(0, 20) });
+                      setBrandSuggestionsOpen(true);
                       setIsDirty(true);
                     }}
                     placeholder="Ex: Brastemp, Electrolux"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase text-xs"
                   />
+                  {brandSuggestionsOpen && filteredBrandSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                        <span>Marcas Cadastradas</span>
+                        <span className="text-[9px] font-normal text-slate-400">Clique para selecionar</span>
+                      </div>
+                      {filteredBrandSuggestions.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setEquipmentData((prev) => ({ ...prev, brand: b.name }));
+                            setBrandSuggestionsOpen(false);
+                            setIsDirty(true);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 hover:text-amber-700 text-xs font-bold text-slate-700 flex items-center justify-between transition-colors border-b border-slate-50 last:border-0 cursor-pointer"
+                        >
+                          <span>{b.name}</span>
+                          <span className="text-[10px] font-normal text-slate-400">Selecionar</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Modelo</label>
+                {/* Campo Modelo com Sugestões filtradas pela Marca */}
+                <div className="relative" ref={modelContainerRef}>
+                  <div className="flex items-center justify-between h-4 mb-0.5">
+                    <label className="block text-[10.5px] font-bold text-slate-700 leading-none">Modelo</label>
+                    {equipmentData.brand && (
+                      <span className="text-[9px] text-amber-600 font-normal leading-none">Marca: {equipmentData.brand}</span>
+                    )}
+                  </div>
                   <input
                     type="text"
+                    maxLength={20}
                     value={equipmentData.model}
+                    onFocus={() => setModelSuggestionsOpen(true)}
                     onChange={(e) => {
-                      setEquipmentData({ ...equipmentData, model: e.target.value });
+                      setEquipmentData({ ...equipmentData, model: e.target.value.slice(0, 20) });
+                      setModelSuggestionsOpen(true);
                       setIsDirty(true);
                     }}
                     placeholder="Ex: BWH15, DF52"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:bg-white focus:outline-none focus:border-amber-600 uppercase text-xs"
                   />
+                  {modelSuggestionsOpen && filteredModelSuggestions.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto py-1 animate-in fade-in zoom-in-95 duration-100">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                        <span>Modelos ({equipmentData.brand || 'Geral'})</span>
+                        <span className="text-[9px] font-normal text-slate-400">Clique para selecionar</span>
+                      </div>
+                      {filteredModelSuggestions.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setEquipmentData((prev) => ({
+                              ...prev,
+                              model: m.name,
+                              brand: prev.brand || m.brandName || prev.brand,
+                            }));
+                            setModelSuggestionsOpen(false);
+                            setIsDirty(true);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 hover:text-amber-700 text-xs font-bold text-slate-700 flex items-center justify-between transition-colors border-b border-slate-50 last:border-0 cursor-pointer"
+                        >
+                          <span className="font-bold">{m.name}</span>
+                          <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                            {m.brandName || 'Geral'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="col-span-3">
                   <label className="block text-[10.5px] font-bold text-slate-700 mb-0.5">Número de Série do Equipamento</label>
                   <input
                     type="text"
+                    maxLength={30}
                     value={equipmentData.serialNumber || ''}
                     onChange={(e) => {
-                      setEquipmentData({ ...equipmentData, serialNumber: e.target.value });
+                      setEquipmentData({ ...equipmentData, serialNumber: e.target.value.slice(0, 30) });
                       setIsDirty(true);
                     }}
                     placeholder="Ex: SN-987654321, 2026-XYZ"
@@ -1547,7 +1777,7 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
                     <Wrench className="w-3.5 h-3.5 text-sky-600" /> Serviços / Mão de Obra
                   </span>
                   <div className="flex items-center gap-2">
-                    {onOpenServicesModal && (
+                    {getCurrentFeatures().hasEstimateSearchServicesButton && onOpenServicesModal && (
                       <button
                         type="button"
                         onClick={onOpenServicesModal}
@@ -1970,15 +2200,17 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
           )}
 
           {/* WhatsApp */}
-          <button
-            type="button"
-            onClick={handleSendWhatsApp}
-            className="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
-            title="Enviar orçamento formatado no WhatsApp do cliente"
-          >
-            <Phone className="w-4 h-4 text-emerald-200 shrink-0" />
-            <span>WhatsApp</span>
-          </button>
+          {getCurrentFeatures().hasWhatsApp && (
+            <button
+              type="button"
+              onClick={handleSendWhatsApp}
+              className="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs"
+              title="Enviar orçamento formatado no WhatsApp do cliente"
+            >
+              <Phone className="w-4 h-4 text-emerald-200 shrink-0" />
+              <span>WhatsApp</span>
+            </button>
+          )}
 
           {/* Menu Dropdown de Impressão */}
           <div className="relative" ref={printMenuRef}>
@@ -2040,16 +2272,18 @@ export const CreateEstimateModal: React.FC<CreateEstimateModalProps> = ({
           </button>
 
           {/* Gerar OS a partir do Orçamento */}
-          <button
-            type="button"
-            onClick={handleGenerateOS}
-            className="h-9 px-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs hover:scale-102 active:scale-98"
-            title="Abre a ficha de OS preenchida com este cliente, aparelho, peças e serviços. O orçamento será marcado como APROVADO após salvar a OS."
-          >
-            <Sparkles className="w-4 h-4 text-emerald-200 shrink-0" />
-            <span>Gerar OS</span>
-            <ArrowRight className="w-4 h-4 shrink-0" />
-          </button>
+          {getCurrentFeatures().hasGenerateOSFromEstimate && (
+            <button
+              type="button"
+              onClick={handleGenerateOS}
+              className="h-9 px-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer text-xs hover:scale-102 active:scale-98"
+              title="Abre a ficha de OS preenchida com este cliente, aparelho, peças e serviços. O orçamento será marcado como APROVADO após salvar a OS."
+            >
+              <Sparkles className="w-4 h-4 text-emerald-200 shrink-0" />
+              <span>Gerar OS</span>
+              <ArrowRight className="w-4 h-4 shrink-0" />
+            </button>
+          )}
 
           {/* Salvar Orçamento */}
           <button

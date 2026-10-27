@@ -166,14 +166,14 @@ export async function visitRoutes(fastify: FastifyInstance) {
   // Update Visit details (date, period, technicianName, notes, status)
   fastify.put('/visits/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = request.body as any;
+    const body = VisitSchema.partial().parse(request.body);
 
     const updatedVisit = await prisma.visit.update({
       where: { id },
       data: {
         ...(body.date ? { date: body.date } : {}),
         ...(body.period ? { period: body.period } : {}),
-        ...(body.technicianName !== undefined ? { technicianName: body.technicianName } : {}),
+        ...(body.technicianName !== undefined ? { technicianName: body.technicianName || '' } : {}),
         ...(body.notes !== undefined ? { notes: body.notes } : {}),
         ...(body.status ? { status: body.status } : {}),
       },

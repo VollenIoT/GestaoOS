@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, Search, CheckCircle2, Clock, FileText, Wrench, User, Calendar, MapPin } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 interface OrderListModalProps {
   isOpen: boolean;
@@ -16,17 +17,17 @@ export const OrderListModal: React.FC<OrderListModalProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('OrderListModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('OrderListModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

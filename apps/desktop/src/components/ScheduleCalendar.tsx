@@ -58,9 +58,19 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
     return () => modalStack.unregister('ScheduleCalendar');
   }, [isOpen, onClose, editingVisit, deletingVisitId]);
 
+  // Considera apenas visitas de OSs que não estejam finalizadas ou canceladas
+  const activeVisits = React.useMemo(() => {
+    return (visits || []).filter((v) => {
+      const order = v.order || orders.find((o) => o.id === v.orderId || o.code === v.orderId || o.code === v.orderCode);
+      if (!order) return true;
+      const status = (order.status || '').toUpperCase();
+      return status !== 'FINALIZADA' && status !== 'CANCELADA' && status !== 'CONCLUIDA';
+    });
+  }, [visits, orders]);
+
   // Enriquece cada visita com os dados da OS correspondente caso não venha embutido
   const enrichedVisits = React.useMemo(() => {
-    return visits.map((v) => {
+    return activeVisits.map((v) => {
       const order = v.order || orders.find((o) => o.id === v.orderId || o.code === v.orderId || o.code === v.orderCode);
       return {
         ...v,
@@ -68,7 +78,7 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
         technicianName: v.technicianName || order?.technician || order?.technicianName || '',
       };
     });
-  }, [visits, orders]);
+  }, [activeVisits, orders]);
 
   const filteredVisits = enrichedVisits.filter((v) => {
     if (!v.date) return false;
@@ -142,8 +152,8 @@ export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
     const dateStr = getLocalDateStr(d);
     const dayIdx = d.getDay();
 
-    // Normaliza v.date e compara estritamente em formato YYYY-MM-DD
-    const visitsCount = visits.filter((v) => {
+    // Normaliza v.date e compara estritamente em formato YYYY-MM-DD usando visitas ativas
+    const visitsCount = activeVisits.filter((v) => {
       if (!v.date) return false;
       const vDateClean = v.date.includes('T') ? v.date.split('T')[0] : v.date;
       return vDateClean === dateStr;

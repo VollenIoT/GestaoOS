@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, PlusCircle, FileText, CheckCircle2, Search, Wrench, User, MapPin } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { modalStack } from '../utils/modalStack';
 
 interface MenuOSModalProps {
   isOpen: boolean;
@@ -24,19 +25,23 @@ export const MenuOSModal: React.FC<MenuOSModalProps> = ({
   const [selectedView, setSelectedView] = useState<'FINALIZED' | 'SEARCH' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fechar com a tecla ESC
+  const handleCloseModal = () => {
+    setSelectedView(null);
+    setSearchTerm('');
+    onClose();
+  };
+
+  const handleCloseRef = useRef(handleCloseModal);
+  handleCloseRef.current = handleCloseModal;
+
+  // Fechar com a tecla ESC via modalStack
   useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleCloseModal();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    if (isOpen) {
+      modalStack.register('MenuOSModal', () => {
+        handleCloseRef.current();
+      });
+      return () => modalStack.unregister('MenuOSModal');
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -52,12 +57,6 @@ export const MenuOSModal: React.FC<MenuOSModalProps> = ({
     }
     return matchesSearch;
   });
-
-  const handleCloseModal = () => {
-    setSelectedView(null);
-    setSearchTerm('');
-    onClose();
-  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">

@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { X, DatabaseBackup, FolderOpen, CheckCircle, HardDrive, Loader2 } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
 
 interface BackupModalProps {
   isOpen: boolean;
@@ -75,19 +77,21 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
   }, [isOpen]);
 
-  React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isBackingUp) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isBackingUp, onClose]);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const isBackingUpRef = useRef(isBackingUp);
+  isBackingUpRef.current = isBackingUp;
 
-  if (!isOpen) return null;
+  React.useEffect(() => {
+    if (isOpen) {
+      modalStack.register('BackupModal', () => {
+        if (!isBackingUpRef.current) {
+          onCloseRef.current?.();
+        }
+      });
+      return () => modalStack.unregister('BackupModal');
+    }
+  }, [isOpen]);
 
   const handleSelectDirectory = async () => {
     try {
@@ -187,7 +191,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
         const fullBackupPayload = {
           system: 'Vollen - Gestão de OS',
-          version: '3.0.0',
+          version: getCurrentFeatures().edition || 'universal',
           createdAt: new Date().toISOString(),
           // Snapshot completo e irrestrito de todo o banco de dados e cadastros do sistema
           storage: allLocalStorageSnapshot,
@@ -261,6 +265,12 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           equipments: (() => {
             try {
               const saved = localStorage.getItem('system_equipments') || localStorage.getItem('vollen_equipments');
+              return saved ? JSON.parse(saved) : null;
+            } catch { return null; }
+          })(),
+          suppliers: (() => {
+            try {
+              const saved = localStorage.getItem('vollen_suppliers');
               return saved ? JSON.parse(saved) : null;
             } catch { return null; }
           })(),
@@ -418,6 +428,8 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       }
     }, 400);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">

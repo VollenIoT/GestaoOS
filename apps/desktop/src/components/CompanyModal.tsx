@@ -1,5 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { X, Building2, Save, Upload, Image, MapPin, Phone, Mail, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Building2, Save, Upload, Image, MapPin, Phone, Mail, FileText, CheckCircle2, Loader2, Search } from 'lucide-react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
+import { modalStack } from '../utils/modalStack';
+import { assertTerminalCanSave } from '../services/localNetworkService';
+import { getSavedTenantInfo } from '../services/licenseService';
+import { fetchAddressByCep } from '../services/api';
 
 export interface CompanyData {
   name: string;
@@ -25,22 +31,43 @@ export interface CompanyData {
 export const defaultCompanyData: CompanyData = {
   name: 'VOLLEN ASSISTÊNCIA TÉCNICA E SERVIÇOS LTDA',
   tradingName: 'VOLLEN ASSISTÊNCIA TÉCNICA',
-  cnpj: '00.000.000/0001-00',
-  ie: 'ISENTO',
+  cnpj: '',
+  ie: '',
   im: '',
-  phone: '(11) 3000-0000',
-  whatsapp: '(11) 99999-0000',
-  email: 'contato@assistenciavollen.com.br',
-  website: 'www.assistenciavollen.com.br',
-  cep: '01001-000',
-  address: 'AVENIDA PAULISTA',
-  number: '1000',
-  complement: 'SALA 101',
-  neighborhood: 'BELA VISTA',
-  city: 'SÃO PAULO',
-  state: 'SP',
+  phone: '',
+  whatsapp: '',
+  email: '',
+  website: '',
+  cep: '',
+  address: '',
+  number: '',
+  complement: '',
+  neighborhood: '',
+  city: '',
+  state: '',
   logoUrl: '',
-  slogan: 'ASSISTÊNCIA TÉCNICA ESPECIALIZADA E MANUTENÇÃO',
+  slogan: '',
+};
+
+// Função auxiliar para purgar mocks/exemplos antigos de versões anteriores gravados no LocalStorage ou Firestore
+export const sanitizeOldCompanyData = (data: Partial<CompanyData> | null | undefined): CompanyData => {
+  if (!data) return defaultCompanyData;
+  const cleaned: CompanyData = { ...defaultCompanyData, ...data };
+  if (cleaned.phone === '(11) 3000-0000') cleaned.phone = '';
+  if (cleaned.whatsapp === '(11) 99999-0000') cleaned.whatsapp = '';
+  if (cleaned.email === 'contato@assistenciavollen.com.br') cleaned.email = '';
+  if (cleaned.website === 'www.assistenciavollen.com.br') cleaned.website = '';
+  if (cleaned.cep === '01001-000') cleaned.cep = '';
+  if (cleaned.address === 'AVENIDA PAULISTA') cleaned.address = '';
+  if (cleaned.number === '1000') cleaned.number = '';
+  if (cleaned.complement === 'SALA 101') cleaned.complement = '';
+  if (cleaned.neighborhood === 'BELA VISTA') cleaned.neighborhood = '';
+  if (cleaned.city === 'SÃO PAULO') cleaned.city = '';
+  if (cleaned.state === 'SP') cleaned.state = '';
+  if (cleaned.cnpj === '00.000.000/0001-00') cleaned.cnpj = '';
+  if (cleaned.ie === 'ISENTO') cleaned.ie = '';
+  if (cleaned.slogan === 'ASSISTÊNCIA TÉCNICA ESPECIALIZADA E MANUTENÇÃO') cleaned.slogan = '';
+  return cleaned;
 };
 
 interface CompanyModalProps {
@@ -57,12 +84,13 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
   const [formData, setFormData] = useState<CompanyData>(() => {
     try {
       const saved = localStorage.getItem('vollen_company_data');
-      if (saved) return JSON.parse(saved);
+      if (saved) return sanitizeOldCompanyData(JSON.parse(saved));
     } catch (err) {}
     return defaultCompanyData;
   });
 
   const [successMsg, setSuccessMsg] = useState(false);
+  const [loadingCep, setLoadingCep] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -71,15 +99,14 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
       try {
         const saved = localStorage.getItem('vollen_company_data');
         if (saved) {
-          baseData = { ...defaultCompanyData, ...JSON.parse(saved) };
+          baseData = sanitizeOldCompanyData(JSON.parse(saved));
         }
       } catch (err) {}
 
       // Aplica os nomes oficiais da licença ativa
       try {
-        const rawTenant = localStorage.getItem('system_tenant_info');
-        if (rawTenant) {
-          const tenant = JSON.parse(rawTenant);
+        const tenant = getSavedTenantInfo();
+        if (tenant) {
           if (tenant.tradeName) baseData.tradingName = tenant.tradeName;
           else if (tenant.companyName) baseData.tradingName = tenant.companyName;
 
@@ -89,43 +116,51 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
           baseData.tradingName = 'Vollen Assistência Técnica';
           baseData.name = 'Vollen Assistência Técnica';
         }
-      } catch {}
+      } catch {
+        try {
+          const rawTenant = localStorage.getItem('system_tenant_info');
+          if (rawTenant) {
+            const tenant = JSON.parse(rawTenant);
+            if (tenant.tradeName) baseData.tradingName = tenant.tradeName;
+            else if (tenant.companyName) baseData.tradingName = tenant.companyName;
+
+            if (tenant.legalName) baseData.name = tenant.legalName;
+            else if (tenant.companyName) baseData.name = tenant.companyName;
+          }
+        } catch {}
+      }
 
       setFormData(baseData);
 
-      // 2. Busca a versão mais atualizada do Firestore (mantendo os nomes da licença)
-      import('../services/firebase').then(({ db }) => {
-        import('firebase/firestore').then(({ doc, getDoc }) => {
-          if (db) {
-            getDoc(doc(db, 'system_config', 'company_data'))
-              .then((snap) => {
-                if (snap.exists()) {
-                  const cloudData = snap.data() as CompanyData;
-                  const merged = { ...cloudData, tradingName: baseData.tradingName, name: baseData.name };
-                  setFormData(merged);
-                  try {
-                    localStorage.setItem('vollen_company_data', JSON.stringify(merged));
-                  } catch (e) {}
-                }
-              })
-              .catch(() => {});
-          }
-        });
-      });
+      // 2. Busca a versão mais atualizada do Firestore (se disponível, sanitizando mocks antigos)
+      if (db) {
+        getDoc(doc(db, 'system_config', 'company_data'))
+          .then((snap) => {
+            if (snap.exists()) {
+              const cloudData = snap.data() as CompanyData;
+              const merged = sanitizeOldCompanyData({ ...cloudData, tradingName: baseData.tradingName, name: baseData.name });
+              setFormData(merged);
+              try {
+                localStorage.setItem('vollen_company_data', JSON.stringify(merged));
+              } catch (e) {}
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, [isOpen]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('CompanyModal', () => {
+        onCloseRef.current?.();
+      });
+      return () => modalStack.unregister('CompanyModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -144,25 +179,44 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    try {
+      await assertTerminalCanSave('alterar dados da empresa');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível alterar os dados da empresa no terminal.');
+      return;
+    }
     
     // Obtém o nome oficial protegido da licença ativa ou o padrão
     let protectedTradeName = 'Vollen Assistência Técnica';
     let protectedLegalName = 'Vollen Assistência Técnica';
 
     try {
-      const savedTenantInfo = localStorage.getItem('system_tenant_info');
-      if (savedTenantInfo) {
-        const parsed = JSON.parse(savedTenantInfo);
-        if (parsed.tradeName || parsed.companyName) {
-          protectedTradeName = parsed.tradeName || parsed.companyName;
+      const tenant = getSavedTenantInfo();
+      if (tenant) {
+        if (tenant.tradeName || tenant.companyName) {
+          protectedTradeName = tenant.tradeName || tenant.companyName || '';
         }
-        if (parsed.legalName || parsed.companyName) {
-          protectedLegalName = parsed.legalName || parsed.companyName;
+        if (tenant.legalName || tenant.companyName) {
+          protectedLegalName = tenant.legalName || tenant.companyName || '';
         }
       }
-    } catch {}
+    } catch {
+      try {
+        const savedTenantInfo = localStorage.getItem('system_tenant_info');
+        if (savedTenantInfo) {
+          const parsed = JSON.parse(savedTenantInfo);
+          if (parsed.tradeName || parsed.companyName) {
+            protectedTradeName = parsed.tradeName || parsed.companyName || '';
+          }
+          if (parsed.legalName || parsed.companyName) {
+            protectedLegalName = parsed.legalName || parsed.companyName || '';
+          }
+        }
+      } catch {}
+    }
 
     const finalData = {
       ...formData,
@@ -172,15 +226,14 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
 
     try {
       localStorage.setItem('vollen_company_data', JSON.stringify(finalData));
-      window.dispatchEvent(new Event('storage'));
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('companyData', finalData);
+      }).catch(() => {});
 
-      import('../services/firebase').then(({ db }) => {
-        import('firebase/firestore').then(({ doc, setDoc }) => {
-          if (db) {
-            setDoc(doc(db, 'system_config', 'company_data'), finalData, { merge: true }).catch(() => {});
-          }
-        });
-      });
+      if (db) {
+        setDoc(doc(db, 'system_config', 'company_data'), finalData, { merge: true }).catch(() => {});
+      }
     } catch (err) {
       console.error('Erro ao salvar no localStorage:', err);
     }
@@ -191,6 +244,33 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
       setSuccessMsg(false);
       onClose();
     }, 600);
+  };
+
+  const formatCpfCnpj = (val: string) => {
+    const nums = val.replace(/\D/g, '').slice(0, 14);
+    if (nums.length <= 11) {
+      // Formata como CPF: 000.000.000-00
+      if (nums.length > 9) {
+        return `${nums.slice(0, 3)}.${nums.slice(3, 6)}.${nums.slice(6, 9)}-${nums.slice(9)}`;
+      } else if (nums.length > 6) {
+        return `${nums.slice(0, 3)}.${nums.slice(3, 6)}.${nums.slice(6)}`;
+      } else if (nums.length > 3) {
+        return `${nums.slice(0, 3)}.${nums.slice(3)}`;
+      }
+      return nums;
+    } else {
+      // Formata como CNPJ: 00.000.000/0001-00
+      if (nums.length > 12) {
+        return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5, 8)}/${nums.slice(8, 12)}-${nums.slice(12)}`;
+      } else if (nums.length > 8) {
+        return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5, 8)}/${nums.slice(8)}`;
+      } else if (nums.length > 5) {
+        return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5)}`;
+      } else if (nums.length > 2) {
+        return `${nums.slice(0, 2)}.${nums.slice(2)}`;
+      }
+      return nums;
+    }
   };
 
   const formatPhone = (val: string) => {
@@ -204,6 +284,34 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
       return `(${nums.slice(0, 2)}) ${nums.slice(2)}`;
     }
     return nums;
+  };
+
+  const handleCepChange = async (val: string) => {
+    const nums = val.replace(/\D/g, '').slice(0, 8);
+    const formatted = nums.length > 5 ? `${nums.slice(0, 5)}-${nums.slice(5)}` : nums;
+
+    setFormData((prev) => ({ ...prev, cep: formatted }));
+
+    if (nums.length === 8) {
+      setLoadingCep(true);
+      try {
+        const addr = await fetchAddressByCep(nums);
+        if (addr) {
+          setFormData((prev) => ({
+            ...prev,
+            cep: formatted,
+            address: addr.address || prev.address,
+            neighborhood: addr.neighborhood || prev.neighborhood,
+            city: addr.city || prev.city,
+            state: addr.state || prev.state,
+          }));
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar CEP:', err);
+      } finally {
+        setLoadingCep(false);
+      }
+    }
   };
 
   return (
@@ -268,7 +376,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                 <label className="block text-[11px] font-bold text-slate-700 mb-0.5">Slogan / Especialidade</label>
                 <input
                   type="text"
-                  value={formData.slogan}
+                  value={formData.slogan || ''}
                   onChange={(e) => setFormData({ ...formData, slogan: e.target.value })}
                   placeholder="Ex: Assistência Técnica Especializada"
                   className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-medium text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -317,13 +425,12 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">CNPJ / CPF *</label>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-0.5">CNPJ / CPF</label>
                     <input
                       type="text"
-                      required
-                      value={formData.cnpj}
-                      onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                      placeholder="00.000.000/0001-00"
+                      value={formData.cnpj || ''}
+                      onChange={(e) => setFormData({ ...formData, cnpj: formatCpfCnpj(e.target.value) })}
+                      placeholder="000.000.000-00 ou 00.000.000/0001-00"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
                     />
                   </div>
@@ -360,7 +467,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Telefone</label>
                     <input
                       type="text"
-                      value={formData.phone}
+                      value={formData.phone || ''}
                       onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
                       placeholder="(00) 0000-0000"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -370,7 +477,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">WhatsApp</label>
                     <input
                       type="text"
-                      value={formData.whatsapp}
+                      value={formData.whatsapp || ''}
                       onChange={(e) => setFormData({ ...formData, whatsapp: formatPhone(e.target.value) })}
                       placeholder="(00) 90000-0000"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -380,7 +487,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">E-mail</label>
                     <input
                       type="email"
-                      value={formData.email}
+                      value={formData.email || ''}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       placeholder="contato@empresa.com"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-medium text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -398,20 +505,36 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">CEP</label>
-                    <input
-                      type="text"
-                      value={formData.cep || ''}
-                      onChange={(e) => setFormData({ ...formData, cep: e.target.value })}
-                      placeholder="00000-000"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
-                    />
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5 flex items-center justify-between">
+                      <span>CEP</span>
+                      {loadingCep && (
+                        <span className="text-[10px] text-sky-600 flex items-center gap-1 font-bold animate-pulse">
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" /> Buscando...
+                        </span>
+                      )}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formData.cep || ''}
+                        onChange={(e) => handleCepChange(e.target.value)}
+                        placeholder="00000-000"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs pr-7"
+                      />
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        {loadingCep ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                        ) : (
+                          <Search className="w-3.5 h-3.5" />
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Endereço</label>
                     <input
                       type="text"
-                      value={formData.address}
+                      value={formData.address || ''}
                       onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                       placeholder="Rua / Av..."
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -421,7 +544,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Número</label>
                     <input
                       type="text"
-                      value={formData.number}
+                      value={formData.number || ''}
                       onChange={(e) => setFormData({ ...formData, number: e.target.value })}
                       placeholder="1000"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -432,7 +555,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Bairro</label>
                     <input
                       type="text"
-                      value={formData.neighborhood}
+                      value={formData.neighborhood || ''}
                       onChange={(e) => setFormData({ ...formData, neighborhood: e.target.value })}
                       placeholder="Centro"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -442,7 +565,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Cidade</label>
                     <input
                       type="text"
-                      value={formData.city}
+                      value={formData.city || ''}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       placeholder="São Paulo"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 focus:outline-none focus:border-sky-600 text-xs"
@@ -453,7 +576,7 @@ export const CompanyModal: React.FC<CompanyModalProps> = ({
                     <input
                       type="text"
                       maxLength={2}
-                      value={formData.state}
+                      value={formData.state || ''}
                       onChange={(e) => setFormData({ ...formData, state: e.target.value.toUpperCase() })}
                       placeholder="SP"
                       className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-slate-800 uppercase focus:outline-none focus:border-sky-600 text-xs text-center"

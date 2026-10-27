@@ -57,11 +57,14 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     } catch (err) { }
     return [
       { id: 'code', label: 'Código', width: 80, visible: true, fixed: true },
-      { id: 'name', label: 'Nome do Cliente', width: 200, visible: true, fixed: true },
+      { id: 'name', label: 'Nome / Razão Social', width: 220, visible: true, fixed: true },
+      { id: 'doc', label: 'CPF / CNPJ', width: 140, visible: true },
+      { id: 'tradeName', label: 'Nome Fantasia', width: 160, visible: false },
       { id: 'phone', label: 'Telefone Fixo', width: 130, visible: true },
       { id: 'whatsapp', label: 'WhatsApp', width: 130, visible: true },
       { id: 'contactName', label: 'Contato', width: 150, visible: true },
       { id: 'contactPhone', label: 'Tel. Contato', width: 130, visible: true },
+      { id: 'ie', label: 'Inscrição Estadual', width: 130, visible: false },
       { id: 'address', label: 'Endereço', width: 200, visible: true },
       { id: 'number', label: 'Nº', width: 65, visible: true },
       { id: 'complement', label: 'Complemento', width: 120, visible: false },
@@ -122,8 +125,6 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
       setDragOverColId(null);
     };
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
     if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
@@ -239,33 +240,48 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     });
   };
 
-  const filteredClients = (clients || []).filter((c) => {
-    if (!c) return false;
-    if (!searchTerm.trim()) return true;
-    const nameMatch = matchesSearchTerm(c.name, searchTerm);
-    const phoneMatch = matchesSearchTerm(c.phone, searchTerm);
-    const whatsappMatch = matchesSearchTerm(c.whatsapp, searchTerm);
-    const addressMatch = matchesSearchTerm(c.address, searchTerm);
-    const numberMatch = matchesSearchTerm(String(c.number || ''), searchTerm);
-    const complementMatch = matchesSearchTerm(c.complement, searchTerm);
-    const referenceMatch = matchesSearchTerm(c.reference, searchTerm);
-    const cityMatch = matchesSearchTerm(c.city, searchTerm);
-    const neighborhoodMatch = matchesSearchTerm(c.neighborhood, searchTerm);
-    const codeMatch = matchesSearchTerm(String(c.code || ''), searchTerm);
+  const filteredClients = (clients || [])
+    .filter((c) => {
+      if (!c) return false;
+      if (!searchTerm.trim()) return true;
+      const nameMatch = matchesSearchTerm(c.name, searchTerm);
+      const tradeNameMatch = matchesSearchTerm(c.tradeName, searchTerm);
+      const docMatch =
+        matchesSearchTerm(c.cnpj, searchTerm) ||
+        matchesSearchTerm(c.cpf, searchTerm) ||
+        matchesSearchTerm(c.cpfCnpj, searchTerm);
+      const ieMatch = matchesSearchTerm(c.ie, searchTerm);
+      const phoneMatch = matchesSearchTerm(c.phone, searchTerm);
+      const whatsappMatch = matchesSearchTerm(c.whatsapp, searchTerm);
+      const addressMatch = matchesSearchTerm(c.address, searchTerm);
+      const numberMatch = matchesSearchTerm(String(c.number || ''), searchTerm);
+      const complementMatch = matchesSearchTerm(c.complement, searchTerm);
+      const referenceMatch = matchesSearchTerm(c.reference, searchTerm);
+      const cityMatch = matchesSearchTerm(c.city, searchTerm);
+      const neighborhoodMatch = matchesSearchTerm(c.neighborhood, searchTerm);
+      const codeMatch = matchesSearchTerm(String(c.code || ''), searchTerm);
 
-    return (
-      nameMatch ||
-      phoneMatch ||
-      whatsappMatch ||
-      addressMatch ||
-      numberMatch ||
-      complementMatch ||
-      referenceMatch ||
-      cityMatch ||
-      neighborhoodMatch ||
-      codeMatch
-    );
-  });
+      return (
+        nameMatch ||
+        tradeNameMatch ||
+        docMatch ||
+        ieMatch ||
+        phoneMatch ||
+        whatsappMatch ||
+        addressMatch ||
+        numberMatch ||
+        complementMatch ||
+        referenceMatch ||
+        cityMatch ||
+        neighborhoodMatch ||
+        codeMatch
+      );
+    })
+    .sort((a, b) => {
+      const nameA = String(a.name || '').trim();
+      const nameB = String(b.name || '').trim();
+      return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
+    });
 
   const selectedClient = clients.find((c) => c.id === selectedClientId);
 
@@ -284,27 +300,29 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
   };
 
   const handleDeleteClient = async () => {
-    if (!selectedClient) return alert('Por favor, selecione um cliente na tabela.');
+    if (!selectedClient) return alert('Por favor, selecione um cliente para excluir.');
+    if (!onDeleteClient) return;
+
     const ok = await dlgConfirm({
       title: 'Excluir Cliente',
-      message: `Deseja realmente EXCLUIR o cadastro do cliente "${selectedClient.name}"?`,
+      message: `Tem certeza que deseja excluir o cliente "${selectedClient.name}"? Esta ação não pode ser desfeita.`,
       variant: 'danger',
-      confirmText: 'Excluir',
+      confirmText: 'Sim, Excluir',
     });
+
     if (ok) {
-      if (onDeleteClient) {
-        onDeleteClient(selectedClient.id);
-      }
+      onDeleteClient(selectedClient.id);
       setSelectedClientId(null);
     }
   };
 
-  const renderCellContent = (c: any, columnId: string, index: number) => {
+  const renderCellContent = (c: any, columnId: string, rowIndex: number) => {
     switch (columnId) {
       case 'code':
         let formattedCode = '0001';
         if (c.code) {
-          const num = parseInt(String(c.code).replace(/\D/g, ''), 10);
+          const raw = String(c.code).replace('CLI-', '').replace(/\D/g, '');
+          const num = parseInt(raw, 10);
           if (!isNaN(num) && num > 0) {
             formattedCode = String(num).padStart(4, '0');
           } else {
@@ -322,7 +340,26 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
           </span>
         );
       case 'name':
-        return <span className="font-bold text-slate-900">{c.name}</span>;
+        return (
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="font-bold text-slate-900 truncate">{c.name}</span>
+            {c.hasRestriction && (
+              <span
+                className="bg-rose-100 border border-rose-300 text-rose-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded shrink-0 flex items-center gap-0.5"
+                title={`Cliente com Restrição: ${c.restrictionReason || 'Sem motivo informado'}`}
+              >
+                ⚠️ Restrição
+              </span>
+            )}
+          </div>
+        );
+      case 'doc':
+        const docVal = c.cnpj || c.cpf || c.cpfCnpj || '-';
+        return <span className="font-mono font-semibold text-slate-700">{docVal}</span>;
+      case 'tradeName':
+        return <span className="font-semibold text-slate-800">{c.tradeName || '-'}</span>;
+      case 'ie':
+        return <span className="font-mono text-slate-700">{c.ie || '-'}</span>;
       case 'phone':
         return <span className="font-semibold text-slate-800">{c.phone || '-'}</span>;
       case 'whatsapp':
@@ -361,6 +398,8 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
     .filter((c) => c.visible)
     .reduce((acc, col) => acc + col.width, 0);
 
+  if (!isOpen) return null;
+
   return (
     <div
       className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
@@ -369,10 +408,15 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col shadow-2xl overflow-hidden font-sans relative">
         {/* Header do Modal */}
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <User className="w-5 h-5 text-sky-700" />
-            Central de Clientes Cadastrados
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <User className="w-5 h-5 text-sky-700" />
+              Central de Clientes Cadastrados
+            </h2>
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-300/80 border border-slate-300 px-2.5 py-0.5 rounded-full">
+              {searchTerm.trim() ? `${filteredClients.length} de ${clients.length}` : `${clients.length}`} {clients.length === 1 ? 'cliente' : 'clientes'}
+            </span>
+          </div>
           <button onClick={onClose} className="text-slate-600 hover:text-slate-900 p-1 rounded-lg">
             <X className="w-5 h-5" />
           </button>
@@ -394,7 +438,7 @@ export const ClientsModal: React.FC<ClientsModalProps> = ({
 
         {/* Tabela em Modo Unset com Largura Explícita em Pixels (Nenhum campo à esquerda é afetado mesmo sem scroll) */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
+          className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50 select-none"
           onContextMenu={handleContextMenu}
           onClick={(e) => {
             // Desseleciona ao clicar em área vazia (fora das linhas da tabela)

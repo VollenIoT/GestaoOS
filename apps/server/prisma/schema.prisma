@@ -7,32 +7,142 @@ datasource db {
   url      = "file:./dev.db"
 }
 
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  role      String   @default("ADMIN") // ADMIN, TECNICO, ATENDENTE
+  password  String   // SHA-256 Hash
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
 model Client {
-  id           String         @id @default(uuid())
-  code         String?        @unique
-  name         String
-  phone        String
-  whatsapp     String?
-  email        String?
-  cep          String
-  address      String
-  number       String
-  complement   String?
-  neighborhood String
-  city         String
-  state        String
-  reference    String?
-  createdAt    DateTime       @default(now())
-  serviceOrders ServiceOrder[]
+  id                 String         @id @default(uuid())
+  code               String?        @unique
+  personType         String?        @default("PF") // PF, PJ
+  name               String
+  tradeName          String?
+  cpf                String?
+  cnpj               String?
+  rg                 String?
+  ie                 String?
+  im                 String?
+  phone              String
+  whatsapp           String?
+  contactName        String?
+  contactPhone       String?
+  email              String?
+  cep                String
+  address            String
+  number             String
+  complement         String?
+  neighborhood       String
+  city               String
+  state              String
+  reference          String?
+  additionalNotes    String?
+  isDeleted          Boolean        @default(false)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @default(now()) @updatedAt
+  serviceOrders      ServiceOrder[]
+  estimates          Estimate[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([cpf])
+  @@index([cnpj])
+  @@index([isDeleted])
 }
 
 model Equipment {
-  id           String         @id @default(uuid())
-  type         String
-  brand        String
-  model        String
-  serialNumber String?
+  id            String         @id @default(uuid())
+  code          String?        @unique
+  type          String
+  brand         String?
+  model         String?
+  serialNumber  String?
+  voltage       String?
+  accessories   String?
+  condition     String?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
   serviceOrders ServiceOrder[]
+  estimates     Estimate[]
+
+  @@index([type])
+  @@index([brand])
+  @@index([model])
+  @@index([serialNumber])
+}
+
+model Part {
+  id                  String   @id @default(uuid())
+  code                String?  @unique
+  name                String
+  manufacturerCode    String?
+  brand               String?
+  group               String?
+  location            String?
+  costPrice           Float    @default(0.0)
+  techPrice           Float    @default(0.0)
+  finalPrice          Float    @default(0.0)
+  profitMarginPercent Float    @default(0.0)
+  unit                String   @default("UN")
+  stockQuantity       Int      @default(0)
+  minStock            Int      @default(0)
+  supplierId          String?
+  supplierName        String?
+  application         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
+
+  @@index([name])
+  @@index([manufacturerCode])
+  @@index([group])
+}
+
+model Supplier {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  name         String
+  tradeName    String?
+  cnpj         String?
+  phone        String?
+  whatsapp     String?
+  contactName  String?
+  email        String?
+  cep          String?
+  address      String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  @@index([name])
+  @@index([cnpj])
+}
+
+model ServiceItem {
+  id             String   @id @default(uuid())
+  code           String?  @unique
+  name           String
+  price          Float    @default(0.0)
+  costPrice      Float    @default(0.0)
+  category       String?
+  estimatedHours Float?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
+
+  @@index([name])
+  @@index([category])
 }
 
 model ServiceOrder {
@@ -43,11 +153,16 @@ model ServiceOrder {
   equipmentId        String
   equipment          Equipment  @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
   problemDescription String
-  status             String     @default("ABERTA") // ABERTA, EM_ATENDIMENTO, AGUARDANDO_APROVACAO, FINALIZADA, CANCELADA
+  status             String     @default("ABERTA") // ABERTA, EM_ANALISE, EM_EXECUCAO, FINALIZADA, CANCELADA, RETORNO_GARANTIA
   type               String     @default("ORCAMENTO") // ORCAMENTO, AGENDAMENTO
   warrantyType       String     @default("NAO_SE_APLICA") // NAO_SE_APLICA, GARANTIA_LOJA, GARANTIA_FABRICA
+  technicianName     String?
+  technicianId       String?
+  attendant          String?
   travelCost         String?
   discountCost       String?
+  partsCost          Float      @default(0.0)
+  servicesCost       Float      @default(0.0)
   nfNumber           String?
   nfValue            String?
   purchaseDate       String?
@@ -56,25 +171,40 @@ model ServiceOrder {
   authorizedCode     String?
   guarantor          String?
   additionalNotes    String?
+  entryDate          String?
   exitDate           String?
   totalAmount        Float      @default(0.0)
+  isDeleted          Boolean    @default(false)
   createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @default(now()) @updatedAt
   visits             Visit[]
+
+  @@index([status])
+  @@index([clientId])
+  @@index([equipmentId])
+  @@index([isDeleted])
+  @@index([createdAt])
 }
 
 model Visit {
-  id             String    @id @default(uuid())
+  id             String       @id @default(uuid())
   orderId        String
   order          ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  date           String    // YYYY-MM-DD
-  period         String    // MANHA, TARDE
+  date           String       // YYYY-MM-DD
+  period         String       // MANHA, TARDE
   technicianName String
-  status         String    @default("AGENDADA") // AGENDADA, EM_ROTA, EM_ANDAMENTO, AGUARDANDO_PECA, CONCLUIDA, CANCELADA
+  status         String       @default("AGENDADA") // AGENDADA, EM_ROTA, EM_ANDAMENTO, AGUARDANDO_PECA, CONCLUIDA, CANCELADA
   notes          String?
-  photos         String?   // JSON stringified array of base64 or URLs
-  signatureUrl   String?   // Base64 string
-  createdAt      DateTime  @default(now())
+  photos         String?      // JSON stringified array
+  signatureUrl   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   partsUsed      PartUsed[]
+
+  @@index([orderId])
+  @@index([date])
+  @@index([status])
+  @@index([technicianName])
 }
 
 model PartUsed {
@@ -85,6 +215,53 @@ model PartUsed {
   code     String?
   price    Float
   quantity Int    @default(1)
+
+  @@index([visitId])
+}
+
+model Estimate {
+  id                 String     @id @default(uuid())
+  code               String     @unique
+  clientId           String?
+  client             Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  equipmentId        String?
+  equipment          Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  problemDescription String?
+  technicalReport    String?
+  totalAmount        Float      @default(0.0)
+  status             String     @default("PENDENTE") // PENDENTE, APROVADO, REPROVADO, EXPIRADO
+  validityDays       Int        @default(10)
+  notes              String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([status])
+  @@index([clientId])
+  @@index([equipmentId])
+}
+
+model AccountBill {
+  id             String   @id @default(uuid())
+  type           String   // PAGAR, RECEBER
+  description    String
+  entityName     String
+  entityId       String?
+  documentNumber String?
+  category       String?
+  amount         Float    @default(0.0)
+  amountPaid     Float?   @default(0.0)
+  dueDate        String   // YYYY-MM-DD
+  paymentDate    String?
+  paymentMethod  String?
+  status         String   @default("PENDENTE") // PENDENTE, PAGO, VENCIDO, CANCELADO
+  notes          String?
+  orderCode      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([dueDate])
 }
 
 model Counter {

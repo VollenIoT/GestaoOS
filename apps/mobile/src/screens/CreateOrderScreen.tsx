@@ -425,17 +425,16 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
     if (!clientSearchText.trim()) return true;
     const term = clientSearchText.toLowerCase().trim();
     const digitsSearch = term.replace(/\D/g, '');
+    const isPureDigits = /^\d+$/.test(term);
+    const isPhoneOrDoc = /^[\d\s().\-/]+$/.test(term) && digitsSearch.length >= 4 && !term.includes('/');
+
     const phoneDigits = (c.phone || '').replace(/\D/g, '');
     const whatsappDigits = (c.whatsapp || '').replace(/\D/g, '');
     const cpfCnpjDigits = (c.cpfCnpj || c.cpf || c.cnpj || '').replace(/\D/g, '');
     const codeDigits = (c.code || '').replace(/\D/g, '');
 
-    const matchesDigits = digitsSearch.length >= 1 && (
-      phoneDigits.includes(digitsSearch) ||
-      whatsappDigits.includes(digitsSearch) ||
-      cpfCnpjDigits.includes(digitsSearch) ||
-      codeDigits.includes(digitsSearch)
-    );
+    const matchesDigits = (isPureDigits && digitsSearch.length >= 1 && codeDigits.includes(digitsSearch)) ||
+      (isPhoneOrDoc && (phoneDigits.includes(digitsSearch) || whatsappDigits.includes(digitsSearch) || cpfCnpjDigits.includes(digitsSearch)));
 
     return (
       matchesDigits ||
@@ -724,6 +723,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       // Dados do Cliente
       const cClient = {
         name: selectedClient?.name || orderToUse.client?.name || '',
+        tradeName: selectedClient?.tradeName || orderToUse.client?.tradeName || '',
         address: selectedClient?.address || orderToUse.client?.address || '',
         number: selectedClient?.number || orderToUse.client?.number || '',
         neighborhood: selectedClient?.neighborhood || orderToUse.client?.neighborhood || '',
@@ -733,6 +733,10 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
         reference: selectedClient?.reference || orderToUse.client?.reference || '',
         phone: selectedClient?.phone || orderToUse.client?.phone || '',
         whatsapp: selectedClient?.whatsapp || orderToUse.client?.whatsapp || '',
+        cnpj: selectedClient?.cnpj || orderToUse.client?.cnpj || '',
+        cpf: selectedClient?.cpf || orderToUse.client?.cpf || '',
+        cpfCnpj: selectedClient?.cpfCnpj || orderToUse.client?.cpfCnpj || selectedClient?.doc || orderToUse.client?.doc || '',
+        personType: selectedClient?.personType || orderToUse.client?.personType || '',
       };
 
       // Dados do Equipamento
@@ -753,6 +757,12 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       const cEntry = orderToUse.entryDate || entryDate || todayFormatted;
       const cExit = orderToUse.exitDate || exitDate || todayFormatted;
 
+      // Valores Financeiros
+      const cAdvance = parseFloat(String(orderToUse.advancePayment || orderToUse.advance || '0').replace(',', '.')) || 0;
+      const cTravel = parseFloat(String(orderToUse.travelAmount || orderToUse.travel || '0').replace(',', '.')) || 0;
+      const cDiscount = parseFloat(String(orderToUse.discountAmount || orderToUse.discount || '0').replace(',', '.')) || 0;
+      const cTotal = parseFloat(String(orderToUse.totalAmount || grandTotal || 0)) || 0;
+
       // Defeito, Laudo, Serviço e Observações
       const cProblem = problemDescription || orderToUse.problemDescription || '';
       const cReport = technicalReport || orderToUse.technicalReport || '';
@@ -762,8 +772,8 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       // Garantia & Termos
       const cWarrantyType = warrantyType || orderToUse.warrantyType || 'NAO_SE_APLICA';
       const cDays = parseInt(String(warrantyDays || orderToUse.warrantyDays || orderToUse.warrantyTermsData?.periodDays || '90'), 10);
-      const cTerms = warrantyTerms || orderToUse.warrantyTerms || orderToUse.warrantyTermsData?.termsText || warrantyConfigData?.defaultExitTerms || warrantyConfigData?.defaultTerms || 'A garantia cobre defeitos de fabricação das peças substituídas e serviços executados pelo período especificado. Não cobre danos por mau uso, umidade, descargas elétricas ou intervenção de terceiros.';
-      const cEntryTerms = warrantyConfigData?.defaultEntryTerms || warrantyConfigData?.defaultEstimateTerms || 'O cliente autoriza a realização da avaliação e diagnóstico técnico no equipamento descrito neste comprovante. Equipamentos não retirados em até 90 dias após notificação estarão sujeitos a taxas de armazenamento ou descarte conforme a lei.';
+      const cTerms = warrantyTerms || orderToUse.warrantyTerms || orderToUse.warrantyTermsData?.termsText || warrantyConfigData?.defaultExitTerms || warrantyConfigData?.defaultTerms || 'A GARANTIA COBRE DEFEITOS DE FABRICAÇÃO DAS PEÇAS SUBSTITUÍDAS E SERVIÇOS EXECUTADOS PELO PERÍODO ESPECIFICADO. NÃO COBRE DANOS POR MAU USO, UMIDADE, DESCARGAS ELÉTRICAS OU INTERVENÇÃO DE TERCEIROS.';
+      const cEntryTerms = warrantyConfigData?.defaultEntryTerms || warrantyConfigData?.defaultEstimateTerms || 'O CLIENTE AUTORIZA A REALIZAÇÃO DA AVALIAÇÃO E DIAGNÓSTICO TÉCNICO NO EQUIPAMENTO DESCRITO NESTE COMPROVANTE. EQUIPAMENTOS NÃO RETIRADOS EM ATÉ 90 DIAS APÓS NOTIFICAÇÃO DE CONCLUSÃO/ORÇAMENTO ESTARÃO SUJEITOS A TAXAS DE ARMAZENAMENTO OU DESCARTE CONFORME A LEGISLAÇÃO VIGENTE.';
 
       // Itens (Peças e Serviços)
       const cParts = (orderToUse.parts || orderToUse.partsUsed || itemsList.filter((i: any) => i.itemType === 'PART') || []);
@@ -773,8 +783,10 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       const cNf = {
         nfNumber: orderToUse.nfNumber || orderToUse.nfData?.nfNumber || nfNumber || '',
         purchaseDate: orderToUse.purchaseDate || orderToUse.nfData?.purchaseDate || purchaseDate || '',
+        nfValue: orderToUse.nfValue || orderToUse.nfData?.nfValue || nfValue || '',
         retailerName: orderToUse.retailerName || orderToUse.nfData?.retailerName || retailerName || '',
         authorizedCode: orderToUse.authorizedCode || orderToUse.nfData?.authorizedCode || authorizedCode || '',
+        guarantor: orderToUse.guarantor || orderToUse.nfData?.guarantor || guarantor || 'NAO_SE_APLICA',
       };
 
       // Cálculo de Validade da Garantia da Loja
@@ -796,7 +808,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
       let htmlContent = '';
 
       if (isEntrada) {
-        // COMPROVANTE DE ENTRADA • VIA ÚNICA DO CLIENTE (FOLHA A4 COMPLETA E DETALHADA)
+        // COMPROVANTE DE ENTRADA • VIA ÚNICA DO CLIENTE (100% PRETO E BRANCO PADRONIZADO COM O DESKTOP)
         htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -804,141 +816,135 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
             <meta charset="utf-8">
             <title>Comprovante de Entrada - ${osDisplayCode}</title>
             <style>
-              @page { size: A4; margin: 8mm 10mm; }
+              @page { size: A4 portrait; margin: 10mm 12mm; }
               * { box-sizing: border-box; }
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #0f172a; margin: 0; padding: 0; line-height: 1.4; }
-              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; gap: 8px; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #000000; margin: 0; padding: 0; line-height: 1.35; background: #ffffff; }
+              .container { border: 1px solid #000000; padding: 12px; border-radius: 4px; }
+              .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #000000; padding-bottom: 8px; margin-bottom: 10px; }
               .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
-              .box { background: #f8fafc; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; }
-              .box-title { font-weight: bold; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
+              .box { border: 1px solid #000000; padding: 8px 10px; border-radius: 4px; font-size: 10.5px; }
+              .box-title { font-weight: 900; color: #000000; border-bottom: 1px solid #000000; padding-bottom: 2px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+              p { margin: 2px 0; }
             </style>
           </head>
           <body>
-            <!-- CABEÇALHO COM DADOS DA EMPRESA E IDENTIFICAÇÃO DA OS -->
-            <div class="header">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                ${compLogo}
-                <div>
-                  <div style="font-size: 16px; font-weight: 900; color: #0f172a; text-transform: uppercase; line-height: 1.1;">${compName}</div>
-                  <div style="font-size: 10px; color: #475569; font-weight: 500;">${compSlogan}</div>
-                  <div style="font-size: 9px; color: #64748b;">${compCnpj ? `CNPJ: ${compCnpj} | ` : ''}${compPhone ? `Tel: ${compPhone}` : ''}${compEmail ? ` | ${compEmail}` : ''}</div>
-                  <div style="font-size: 9px; color: #64748b;">${compAddress}</div>
+            <div class="container">
+              <!-- CABEÇALHO -->
+              <div class="header">
+                <div style="display: flex; align-items: flex-start; gap: 12px;">
+                  ${compLogo ? `<img src="${activeCompany?.logoUrl}" alt="Logo" style="height: 52px; width: auto; object-fit: contain; filter: grayscale(100%); margin-top: 2px;" />` : ''}
+                  <div>
+                    <h1 style="font-size: 16px; font-weight: 900; color: #000000; text-transform: uppercase; margin: 0; line-height: 1.1;">${compName}</h1>
+                    <div style="font-size: 10px; font-weight: bold; color: #000000; text-transform: uppercase; margin-top: 2px;">${compSlogan}</div>
+                    <div style="font-size: 9px; color: #000000; margin-top: 4px; line-height: 1.3;">
+                      <div><strong>CNPJ:</strong> ${compCnpj || '00.000.000/0001-00'} &nbsp;|&nbsp; <strong>TEL:</strong> ${compPhone || '(00) 0000-0000'}</div>
+                      <div><strong>ENDEREÇO:</strong> ${compAddress || 'Endereço não informado'}</div>
+                      ${compEmail ? `<div><strong>E-MAIL:</strong> ${compEmail}</div>` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; padding-left: 8px;">
+                  <div style="border: 1px solid #000000; padding: 2px 10px; border-radius: 3px; font-size: 9.5px; font-weight: 900; text-transform: uppercase; text-align: left; width: 100%; min-width: 150px; margin-bottom: 4px;">
+                    <span style="display: block; font-size: 8.5px; font-weight: bold;">VIA CLIENTE</span>
+                    <span style="display: block; font-size: 10px; font-weight: 900;">COMPROVANTE ENTRADA</span>
+                  </div>
+                  <div style="font-size: 18px; font-weight: 900; color: #000000; font-family: monospace; line-height: 1.1; margin-bottom: 2px;">${osDisplayCode}</div>
+                  <div style="font-size: 9px; font-weight: bold; color: #000000;">ENTRADA: ${cEntry}</div>
+                  <div style="font-size: 8.5px; font-weight: bold; color: #000000;">HORA: ${printTimeStr}</div>
                 </div>
               </div>
-              <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0;">
-                <span style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 9px; font-weight: 900; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; margin-bottom: 2px;">COMPROVANTE DE ENTRADA • VIA DO CLIENTE</span>
-                <div style="font-size: 18px; font-weight: 900; color: #0f172a; font-family: monospace; line-height: 1.1;">${osDisplayCode}</div>
-                <div style="font-size: 9.5px; font-weight: bold; color: #334155;">ENTRADA: ${cEntry}</div>
-                <div style="font-size: 8.5px; font-weight: 600; color: #64748b;">EMISSÃO: ${printTimeStr}</div>
-              </div>
-            </div>
 
-            <!-- DADOS DO CLIENTE & EQUIPAMENTO -->
-            <div class="grid-2">
-              <div class="box">
-                <div class="box-title">Dados do Cliente</div>
-                <div><strong>Nome:</strong> ${cClient.name || 'Não informado'}</div>
-                <div><strong>Endereço:</strong> ${cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : 'Endereço não informado'}</div>
-                <div><strong>Bairro:</strong> ${cClient.neighborhood || ''} ${cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state || ''}` : ''}</div>
-                ${cClient.complement ? `<div><strong>Complemento:</strong> ${cClient.complement}</div>` : ''}
-                ${cClient.reference ? `<div><strong>Referência:</strong> ${cClient.reference}</div>` : ''}
-                <div><strong>Telefone:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</div>
-              </div>
-              <div class="box">
-                <div class="box-title">Dados do Aparelho / Equipamento</div>
-                <div><strong>Equipamento:</strong> ${cEq.type || 'Equipamento Geral'}</div>
-                <div><strong>Marca:</strong> ${cEq.brand || 'N/A'} ${cEq.model ? `| <strong>Modelo:</strong> ${cEq.model}` : ''}</div>
-                <div><strong>Nº de Série:</strong> ${cEq.serialNumber || 'N/A'}</div>
-                <div><strong>Acessórios:</strong> ${cEq.accessories || 'Nenhum'}</div>
-              </div>
-            </div>
+              <!-- DADOS DO CLIENTE & DADOS DO EQUIPAMENTO -->
+              <div class="grid-2">
+                <div class="box">
+                  <div class="box-title">DADOS DO CLIENTE</div>
+                  <p><strong>NOME:</strong> ${cClient.name || ''}</p>
+                  ${cClient.tradeName ? `<p><strong>NOME FANTASIA:</strong> ${cClient.tradeName}</p>` : ''}
+                  <p><strong>ENDEREÇO:</strong> ${cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : ''}</p>
+                  <p><strong>BAIRRO / CIDADE:</strong> ${cClient.neighborhood || ''} ${cClient.city ? `• ${cClient.city}/${cClient.state || ''}` : ''}</p>
+                  <p><strong>TELEFONE:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</p>
+                  ${(cClient.cnpj || cClient.personType === 'PJ') ? `
+                    <p><strong>CNPJ:</strong> ${cClient.cnpj || cClient.cpfCnpj || ''}</p>
+                  ` : (cClient.cpf || cClient.cpfCnpj) ? `
+                    <p><strong>CPF:</strong> ${cClient.cpf || cClient.cpfCnpj || ''}</p>
+                  ` : ''}
+                </div>
 
-            <!-- RESPONSÁVEIS E DADOS DE GARANTIA / NOTA FISCAL -->
-            <div class="grid-2">
-              <div style="background: rgba(240, 249, 255, 0.7); padding: 8px 10px; border-radius: 8px; border: 1px solid #bae6fd;">
-                <span style="font-weight: bold; color: #082f49; text-transform: uppercase; font-size: 9px; display: block; border-bottom: 1px solid #bae6fd; padding-bottom: 2px; margin-bottom: 3px;">Responsáveis pelo Atendimento:</span>
-                <div style="font-size: 9.5px; color: #1e293b;">
-                  <div><strong>Atendente:</strong> ${cAttendant || 'Não informado'}</div>
-                  ${cTech ? `<div><strong>Técnico:</strong> ${cTech}</div>` : ''}
+                <div class="box">
+                  <div class="box-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>DADOS DO EQUIPAMENTO</span>
+                    ${(cWarrantyType === 'GARANTIA_FABRICA' || cNf.guarantor === 'FABRICANTE') ? `
+                      <span style="font-weight: 900; font-size: 9px; text-transform: uppercase;">[GARANTIA DE FÁBRICA]</span>
+                    ` : ''}
+                  </div>
+                  <p><strong>EQUIPAMENTO:</strong> ${cEq.type || ''}</p>
+                  <p><strong>MARCA / MODELO:</strong> ${cEq.brand || ''} ${cEq.model ? `• ${cEq.model}` : ''}</p>
+                  <p><strong>Nº DE SÉRIE:</strong> ${cEq.serialNumber || 'NÃO INFORMADO'}</p>
+                  <p style="white-space: pre-wrap;"><strong>ACESSÓRIOS:</strong> ${cEq.accessories || 'Nenhum'}</p>
+                  ${(cWarrantyType === 'GARANTIA_FABRICA' || cNf.guarantor === 'FABRICANTE') ? `
+                    <div style="padding-top: 3px; margin-top: 3px; border-top: 1px dotted #000000; font-size: 9px;">
+                      <p><strong>NF-e:</strong> ${cNf.nfNumber || '-'} &nbsp;|&nbsp; ${cNf.purchaseDate ? `<strong>COMPRA:</strong> ${new Date(cNf.purchaseDate).toLocaleDateString('pt-BR')} &nbsp;|&nbsp; ` : ''}${cNf.nfValue ? `<strong>VALOR:</strong> R$ ${cNf.nfValue}` : ''}</p>
+                      ${(cNf.authorizedCode || cNf.retailerName) ? `
+                        <p>${cNf.authorizedCode ? `<strong>AUTORIZAÇÃO:</strong> ${cNf.authorizedCode} &nbsp;|&nbsp; ` : ''}${cNf.retailerName ? `<strong>REVENDA:</strong> ${cNf.retailerName}` : ''}</p>
+                      ` : ''}
+                    </div>
+                  ` : ''}
                 </div>
               </div>
-              <div class="box">
-                <div class="box-title">Garantia / Nota Fiscal</div>
-                ${cWarrantyType === 'GARANTIA_FABRICA' ? `
-                  <div style="font-size: 9.5px; color: #334155;">
-                    <div><strong>Garantia:</strong> Fabricante</div>
-                    <div><strong>NF:</strong> ${cNf.nfNumber || '-'} | <strong>Compra:</strong> ${cNf.purchaseDate ? new Date(cNf.purchaseDate).toLocaleDateString('pt-BR') : '-'}</div>
-                    <div><strong>Revenda:</strong> ${cNf.retailerName || '-'} | <strong>Autoriz.:</strong> ${cNf.authorizedCode || '-'}</div>
-                  </div>
-                ` : cWarrantyType === 'GARANTIA_LOJA' ? `
-                  <div style="font-size: 9.5px; color: #334155;">
-                    <div><strong>Garantia:</strong> Loja / Empresa (${cDays} dias)</div>
-                    ${expiryStr ? `<div><strong>Válida até:</strong> ${expiryStr}</div>` : ''}
-                  </div>
-                ` : `
-                  <div style="font-size: 9.5px; color: #64748b;">GARANTIA FABRICA / EMPRESA: NÃO SE APLICA</div>
-                `}
-              </div>
-            </div>
 
-            <!-- OBSERVAÇÕES DO EQUIPAMENTO -->
-            ${printEquipmentObservations && cEq.observations ? `
-              <div class="box" style="margin-bottom: 8px;">
-                <div class="box-title">Obs. do Equipamento:</div>
-                <div style="color: #1e293b; min-height: 1.5em; white-space: pre-wrap;">${cEq.observations}</div>
-              </div>
-            ` : ''}
+              <!-- OBSERVAÇÕES DO EQUIPAMENTO -->
+              ${printEquipmentObservations && cEq.observations ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">OBS. DO EQUIPAMENTO:</p>
+                  <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em;">${cEq.observations}</p>
+                </div>
+              ` : ''}
 
-            <!-- DEFEITO RECLAMADO E LAUDO TÉCNICO INICIAL -->
-            ${(printProblemDescription || printTechnicalReport) ? `
-              <div class="box" style="margin-bottom: 8px;">
-                ${printProblemDescription ? `
-                  <div style="margin-bottom: 6px;">
-                    <div class="box-title">Defeito / Reclamação Relatada:</div>
-                    <div style="color: #334155; min-height: 2.2em; white-space: pre-wrap;">${cProblem || 'Não informado.'}</div>
-                  </div>
-                ` : ''}
-                ${printTechnicalReport ? `
-                  <div style="${printProblemDescription ? 'border-top: 1px solid #cbd5e1; padding-top: 5px; margin-top: 5px;' : ''}">
-                    <div class="box-title">Laudo Técnico Inicial:</div>
-                    <div style="color: #334155; min-height: 2.2em; white-space: pre-wrap;">${cReport || 'Não informado.'}</div>
-                  </div>
+              <!-- DEFEITO RECLAMADO -->
+              ${printProblemDescription ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">DEFEITO / RECLAMAÇÃO:</p>
+                  <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em;">${cProblem || ''}</p>
+                </div>
+              ` : ''}
+
+              <!-- LAUDO TÉCNICO INICIAL -->
+              ${printTechnicalReport ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">LAUDO TÉCNICO INICIAL:</p>
+                  <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em;">${cReport || ''}</p>
+                </div>
+              ` : ''}
+
+              <!-- TERMOS DE ENTRADA -->
+              <div style="padding-top: 6px; font-size: 8.5px; line-height: 1.3; color: #000000;">
+                <p style="font-weight: 900; text-transform: uppercase; font-size: 9px; margin-bottom: 2px;">TERMOS DE ENTRADA:</p>
+                <p style="white-space: pre-wrap; text-transform: uppercase;">${cEntryTerms}</p>
+              </div>
+
+              <!-- RESPONSÁVEIS: APENAS ATENDENTE NO COMPROVANTE DE ENTRADA -->
+              <div style="padding-top: 8px; font-size: 9.5px; display: flex; justify-content: space-between; align-items: center;">
+                <p><strong>ATENDENTE:</strong> ${cAttendant || '-'}</p>
+                ${cAdvance > 0 ? `
+                  <p style="font-weight: 900;">
+                    <strong>ADIANTAMENTO / SINAL:</strong> R$ ${cAdvance.toFixed(2).replace('.', ',')}
+                  </p>
                 ` : ''}
               </div>
-            ` : ''}
 
-            <!-- OBSERVAÇÕES GERAIS DA ORDEM DE SERVIÇO -->
-            ${cObs ? `
-              <div class="box" style="margin-bottom: 8px;">
-                <div class="box-title">Observações da Ordem de Serviço:</div>
-                <div style="color: #334155; min-height: 1.5em; white-space: pre-wrap;">${cObs}</div>
-              </div>
-            ` : ''}
-
-            <!-- TERMOS DE ENTRADA -->
-            <div class="box" style="margin-bottom: 8px;">
-              <div class="box-title">Termos de Entrada e Guarda do Equipamento:</div>
-              <div style="font-size: 9px; color: #475569; line-height: 1.35; white-space: pre-wrap;">${cEntryTerms}</div>
-            </div>
-
-            <!-- ASSINATURAS -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding-top: 25px; text-align: center; font-size: 11px;">
-              <div>
-                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
-                <div style="font-weight: bold; color: #1e293b;">Assinatura da Empresa</div>
-                <div style="font-size: 9.5px; color: #64748b;">${compName}</div>
-              </div>
-              <div>
-                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
-                <div style="font-weight: bold; color: #1e293b;">Assinatura do Cliente</div>
-                <div style="font-size: 9.5px; color: #64748b;">${cClient.name || 'Cliente'}</div>
+              <!-- ASSINATURA -->
+              <div style="padding-top: 24px; padding-bottom: 4px; text-align: center; font-size: 9px; display: flex; justify-content: center;">
+                <div style="width: 50%;">
+                  <div style="border-bottom: 1px solid #000000; width: 75%; margin: 0 auto 3px auto;"></div>
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 8.5px; margin: 0;">Assinatura da Empresa</p>
+                </div>
               </div>
             </div>
           </body>
           </html>
         `;
       } else {
-        // COMPROVANTE DE SAÍDA / ENTREGA IDÊNTICO AO DESKTOP (FOLHA A4 - 1 VIA COMPLETA)
+        // COMPROVANTE DE SAÍDA / ENTREGA (100% PRETO E BRANCO PADRONIZADO COM O DESKTOP)
         htmlContent = `
           <!DOCTYPE html>
           <html>
@@ -946,152 +952,180 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
             <meta charset="utf-8">
             <title>Comprovante de Saída - ${osDisplayCode}</title>
             <style>
-              @page { size: A4; margin: 8mm 10mm; }
+              @page { size: A4 portrait; margin: 10mm 12mm; }
               * { box-sizing: border-box; }
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #0f172a; margin: 0; padding: 0; line-height: 1.4; }
-              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; gap: 8px; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #000000; margin: 0; padding: 0; line-height: 1.35; background: #ffffff; }
+              .container { border: 1px solid #000000; padding: 12px; border-radius: 4px; }
+              .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #000000; padding-bottom: 8px; margin-bottom: 10px; }
               .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
-              .box { background: #f8fafc; padding: 8px 10px; border-radius: 8px; border: 1px solid #cbd5e1; }
-              .box-title { font-weight: bold; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
-              table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 10.5px; }
-              th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; }
-              th { background: #f1f5f9; font-size: 9.5px; text-transform: uppercase; font-weight: bold; }
+              .box { border: 1px solid #000000; padding: 8px 10px; border-radius: 4px; font-size: 10.5px; }
+              .box-title { font-weight: 900; color: #000000; border-bottom: 1px solid #000000; padding-bottom: 2px; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+              p { margin: 2px 0; }
             </style>
           </head>
           <body>
-            <!-- TOPO DA SAÍDA -->
-            <div class="header">
-              <div style="display: flex; align-items: center; gap: 12px;">
-                ${compLogo}
-                <div>
-                  <div style="font-size: 16px; font-weight: 900; color: #0f172a; text-transform: uppercase; line-height: 1.1;">${compName}</div>
-                  <div style="font-size: 10px; color: #475569; font-weight: 500;">${compSlogan}</div>
-                  <div style="font-size: 9px; color: #64748b;">${compCnpj ? `CNPJ: ${compCnpj} | ` : ''}${compPhone ? `Tel: ${compPhone}` : ''}${compEmail ? ` | ${compEmail}` : ''}</div>
-                  <div style="font-size: 9px; color: #64748b;">${compAddress}</div>
+            <div class="container">
+              <!-- CABEÇALHO -->
+              <div class="header">
+                <div style="display: flex; align-items: flex-start; gap: 12px;">
+                  ${compLogo ? `<img src="${activeCompany?.logoUrl}" alt="Logo" style="height: 52px; width: auto; object-fit: contain; filter: grayscale(100%); margin-top: 2px;" />` : ''}
+                  <div>
+                    <h1 style="font-size: 16px; font-weight: 900; color: #000000; text-transform: uppercase; margin: 0; line-height: 1.1;">${compName}</h1>
+                    <div style="font-size: 10px; font-weight: bold; color: #000000; text-transform: uppercase; margin-top: 2px;">${compSlogan}</div>
+                    <div style="font-size: 9px; color: #000000; margin-top: 4px; line-height: 1.3;">
+                      <div><strong>CNPJ:</strong> ${compCnpj || '00.000.000/0001-00'} &nbsp;|&nbsp; <strong>TEL:</strong> ${compPhone || '(00) 0000-0000'}</div>
+                      <div><strong>ENDEREÇO:</strong> ${compAddress || 'Endereço não informado'}</div>
+                      ${compEmail ? `<div><strong>E-MAIL:</strong> ${compEmail}</div>` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; padding-left: 8px;">
+                  <div style="border: 1px solid #000000; padding: 2px 10px; border-radius: 3px; font-size: 9.5px; font-weight: 900; text-transform: uppercase; text-align: left; width: 100%; min-width: 165px; margin-bottom: 4px;">
+                    <span style="display: block; font-size: 10px; font-weight: 900;">COMPROVANTE DE SAÍDA</span>
+                    <span style="display: block; font-size: 8.5px; font-weight: bold; letter-spacing: 0.5px;">ENTREGA DE EQUIPAMENTO</span>
+                  </div>
+                  <div style="font-size: 18px; font-weight: 900; color: #000000; font-family: monospace; line-height: 1.1; margin-bottom: 2px;">${osDisplayCode}</div>
+                  <div style="font-size: 9px; font-weight: bold; color: #000000;">SAÍDA: ${cExit}</div>
+                  <div style="font-size: 8.5px; font-weight: bold; color: #000000;">HORA: ${printTimeStr}</div>
                 </div>
               </div>
-              <div style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0;">
-                <span style="background: #dcfce7; color: #166534; border: 1px solid #86efac; font-size: 9px; font-weight: 900; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; margin-bottom: 2px;">COMPROVANTE DE SAÍDA / ENTREGA</span>
-                <div style="font-size: 18px; font-weight: 900; color: #0f172a; font-family: monospace; line-height: 1.1;">${osDisplayCode}</div>
-                <div style="font-size: 9.5px; font-weight: bold; color: #334155;">SAÍDA: ${cExit}</div>
-                <div style="font-size: 8.5px; font-weight: 600; color: #64748b;">EMISSÃO: ${printTimeStr}</div>
-              </div>
-            </div>
 
-            <!-- DADOS DO CLIENTE & EQUIPAMENTO -->
-            <div class="grid-2">
-              <div class="box">
-                <div class="box-title">Dados do Cliente</div>
-                <div><strong>Nome:</strong> ${cClient.name}</div>
-                <div><strong>Endereço:</strong> ${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}</div>
-                <div><strong>Bairro:</strong> ${cClient.neighborhood} ${cClient.city ? `| Cidade/UF: ${cClient.city}/${cClient.state}` : ''}</div>
-                ${cClient.complement ? `<div><strong>Complemento:</strong> ${cClient.complement}</div>` : ''}
-                <div><strong>Telefone:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</div>
-              </div>
-              <div class="box">
-                <div class="box-title">Dados do Aparelho / Equipamento</div>
-                <div><strong>Equipamento:</strong> ${cEq.type}</div>
-                <div><strong>Marca:</strong> ${cEq.brand} ${cEq.model ? `| <strong>Modelo:</strong> ${cEq.model}` : ''}</div>
-                <div><strong>Nº de Série:</strong> ${cEq.serialNumber || 'N/A'}</div>
-                <div><strong>Acessórios:</strong> ${cEq.accessories || 'Nenhum'}</div>
-              </div>
-            </div>
+              <!-- DADOS DO CLIENTE & DADOS DO EQUIPAMENTO -->
+              <div class="grid-2">
+                <div class="box">
+                  <div class="box-title">DADOS DO CLIENTE</div>
+                  <p><strong>NOME:</strong> ${cClient.name || ''}</p>
+                  ${cClient.tradeName ? `<p><strong>NOME FANTASIA:</strong> ${cClient.tradeName}</p>` : ''}
+                  <p><strong>ENDEREÇO:</strong> ${cClient.address ? `${cClient.address}${cClient.number ? `, ${cClient.number}` : ''}` : ''}</p>
+                  <p><strong>BAIRRO / CIDADE:</strong> ${cClient.neighborhood || ''} ${cClient.city ? `• ${cClient.city}/${cClient.state || ''}` : ''}</p>
+                  <p><strong>TELEFONE:</strong> ${cClient.phone || ''} ${cClient.whatsapp ? `| WhatsApp: ${cClient.whatsapp}` : ''}</p>
+                  ${(cClient.cnpj || cClient.personType === 'PJ') ? `
+                    <p><strong>CNPJ:</strong> ${cClient.cnpj || cClient.cpfCnpj || ''}</p>
+                  ` : (cClient.cpf || cClient.cpfCnpj) ? `
+                    <p><strong>CPF:</strong> ${cClient.cpf || cClient.cpfCnpj || ''}</p>
+                  ` : ''}
+                </div>
 
-            <!-- RESPONSÁVEIS -->
-            <div style="background: rgba(240, 249, 255, 0.7); padding: 6px 10px; border-radius: 8px; border: 1px solid #bae6fd; margin-bottom: 8px;">
-              <span style="font-weight: bold; color: #082f49; text-transform: uppercase; font-size: 9px; display: block; border-bottom: 1px solid #bae6fd; padding-bottom: 2px; margin-bottom: 3px;">Responsáveis pelo Atendimento:</span>
-              <span style="font-size: 9.5px; color: #1e293b;">
-                <strong>Atendente:</strong> ${cAttendant || 'Não informado'} &nbsp;|&nbsp; <strong>Técnico:</strong> ${cTech || 'Não informado'}
-              </span>
-            </div>
-
-            <!-- DEFEITO E LAUDO TÉCNICO -->
-            ${(printProblemDescription || printTechnicalReport) ? `
-              <div class="box" style="margin-bottom: 8px;">
-                ${printProblemDescription ? `
-                  <div style="margin-bottom: 4px;">
-                    <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 2px;">Defeito / Reclamação Relatada:</div>
-                    <div style="color: #334155; min-height: 2.2em;">${cProblem || 'Não informado.'}</div>
-                  </div>
-                ` : ''}
-                ${printTechnicalReport ? `
-                  <div style="${printProblemDescription ? 'border-top: 1px solid #cbd5e1; padding-top: 3px; margin-top: 3px;' : ''}">
-                    <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 2px;">Laudo Técnico Inicial:</div>
-                    <div style="color: #334155; min-height: 2.2em;">${cReport || 'Não informado.'}</div>
-                  </div>
-                ` : ''}
-              </div>
-            ` : ''}
-
-            <!-- SERVIÇO EXECUTADO -->
-            ${printExecutedService ? `
-              <div style="background: #f0fdf4; padding: 8px 10px; border-radius: 8px; border: 1px solid #86efac; margin-bottom: 8px;">
-                <div style="font-weight: bold; color: #14532d; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid #bbf7d0; padding-bottom: 2px; margin-bottom: 3px;">Serviço Executado / Realizado:</div>
-                <div style="color: #0f172a; font-weight: 500; min-height: 2.4em;">${cExecuted || 'Manutenção técnica executada.'}</div>
-              </div>
-            ` : ''}
-
-            <!-- DISCRIMINAÇÃO DE SERVIÇOS E PEÇAS -->
-            ${(cServices.length > 0 || cParts.length > 0) ? `
-              <div class="box" style="background: #ffffff; margin-bottom: 8px;">
-                <div class="grid-2" style="margin-bottom: 0;">
-                  ${cServices.length > 0 ? `
-                    <div>
-                      <span style="font-weight: bold; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 3px; display: block;">Serviços Realizados:</span>
-                      <ul style="margin: 0; padding-left: 14px; font-size: 10px; color: #334155;">
-                        ${cServices.map((s: any) => `<li>${s.name || s.description} - <strong>R$ ${(parseFloat(String(s.price || 0).replace(',', '.')) || 0).toFixed(2).replace('.', ',')}</strong></li>`).join('')}
-                      </ul>
-                    </div>
-                  ` : '<div></div>'}
-                  ${cParts.length > 0 ? `
-                    <div>
-                      <span style="font-weight: bold; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; margin-bottom: 3px; display: block;">Peças Trocadas:</span>
-                      <ul style="margin: 0; padding-left: 14px; font-size: 10px; color: #334155;">
-                        ${cParts.map((p: any) => `<li>${p.name || p.description} (Qtd: ${p.qty || 1}) - <strong>R$ ${(parseFloat(String(p.price || 0).replace(',', '.')) || 0).toFixed(2).replace('.', ',')}</strong></li>`).join('')}
-                      </ul>
-                    </div>
-                  ` : '<div></div>'}
+                <div class="box">
+                  <div class="box-title">DADOS DO EQUIPAMENTO</div>
+                  <p><strong>EQUIPAMENTO:</strong> ${cEq.type || ''}</p>
+                  <p><strong>MARCA / MODELO:</strong> ${cEq.brand || ''} ${cEq.model ? `• ${cEq.model}` : ''}</p>
+                  <p><strong>Nº DE SÉRIE:</strong> ${cEq.serialNumber || 'NÃO INFORMADO'}</p>
+                  <p style="white-space: pre-wrap;"><strong>ACESSÓRIOS:</strong> ${cEq.accessories || 'Nenhum'}</p>
                 </div>
               </div>
-            ` : ''}
 
-            <!-- TOTAL E FORMA DE PAGAMENTO -->
-            <div class="box" style="background: #ffffff; margin-bottom: 8px;">
-              <div style="display: flex; justify-content: flex-end; align-items: center; gap: 24px; font-size: 13px; font-weight: 900; color: #0f172a;">
-                <span style="font-size: 11px; font-weight: 600; color: #334155;">
-                  Forma de Pagamento: <strong>${orderToUse.paymentMethod || paymentMethod || 'Dinheiro / PIX'}</strong>
-                  ${orderToUse.secondaryPaymentMethod ? ` + <strong>${orderToUse.secondaryPaymentMethod} (R$ ${orderToUse.secondaryPaymentAmount || '0,00'})</strong>` : ''}
-                </span>
-                <span>VALOR TOTAL: R$ ${Number(grandTotal).toFixed(2).replace('.', ',')}</span>
-              </div>
-            </div>
-
-            <!-- DADOS DA GARANTIA + CLÁUSULAS E TERMOS -->
-            <div class="box" style="margin-bottom: 8px;">
-              ${cWarrantyType === 'GARANTIA_LOJA' ? `
-                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 6px 10px; display: flex; gap: 20px; font-size: 10px; color: #065f46; font-weight: 600; margin-bottom: 5px;">
-                  <span>🛡️ <strong>Tempo de Garantia:</strong> ${cDays} dias</span>
-                  ${expiryStr ? `<span><strong>Válida até:</strong> ${expiryStr}</span>` : ''}
+              <!-- OBSERVAÇÕES DO EQUIPAMENTO -->
+              ${printEquipmentObservations && cEq.observations ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">OBSERVAÇÕES DO EQUIPAMENTO:</p>
+                  <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.2em;">${cEq.observations}</p>
                 </div>
               ` : ''}
 
-              <div style="font-weight: bold; color: #1e293b; font-size: 9.5px; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; padding-bottom: 2px; margin-bottom: 3px;">
-                ${cWarrantyType === 'GARANTIA_LOJA' ? 'Cláusulas e Termos de Garantia da Empresa:' : 'Termos de Entrega do Equipamento:'}
-              </div>
-              <div style="font-size: 9px; color: #475569; line-height: 1.35; white-space: pre-wrap;">${cTerms}</div>
-            </div>
+              <!-- DEFEITO E LAUDO -->
+              ${(printProblemDescription || printTechnicalReport) ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  ${printProblemDescription ? `
+                    <div style="margin-bottom: 4px;">
+                      <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">DEFEITO / RECLAMAÇÃO RELATADA:</p>
+                      <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em;">${cProblem || ''}</p>
+                    </div>
+                  ` : ''}
+                  ${printTechnicalReport ? `
+                    <div>
+                      <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">LAUDO TÉCNICO INICIAL:</p>
+                      <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em;">${cReport || ''}</p>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
 
-            <!-- ASSINATURAS -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; padding-top: 15px; text-align: center; font-size: 11px;">
-              <div>
-                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
-                <div style="font-weight: bold; color: #1e293b;">Assinatura da Empresa / Técnico</div>
-                <div style="font-size: 9.5px; color: #64748b;">${compName}</div>
+              <!-- SERVIÇO EXECUTADO -->
+              ${printExecutedService ? `
+                <div style="padding-top: 4px; font-size: 10px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; margin-bottom: 2px;">SERVIÇO EXECUTADO / REALIZADO:</p>
+                  <p style="white-space: pre-wrap; line-height: 1.3; min-height: 2.5em; font-weight: 500;">${cExecuted || ''}</p>
+                </div>
+              ` : ''}
+
+              <!-- DISCRIMINAÇÃO DE SERVIÇOS E PEÇAS (DIVIDIDO EM MEIA TELA CADA) -->
+              ${(cServices.length > 0 || cParts.length > 0) ? `
+                <div style="border: 1px solid #000000; padding: 6px 8px; border-radius: 4px; font-size: 9.5px; margin-top: 6px;">
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 9.5px; border-bottom: 1px solid #000000; padding-bottom: 2px; margin-bottom: 4px;">
+                    DISCRIMINAÇÃO DE SERVIÇOS E PEÇAS APLICADAS
+                  </p>
+                  <div style="display: grid; grid-template-columns: ${cServices.length > 0 && cParts.length > 0 ? '1fr 1fr' : '1fr'}; gap: 8px;">
+                    ${cServices.length > 0 ? `
+                      <div style="padding-right: 4px;">
+                        <p style="font-weight: 900; text-transform: uppercase; font-size: 9px; border-bottom: 1px dotted #000000; padding-bottom: 2px; margin-bottom: 4px;">
+                          SERVIÇOS REALIZADOS:
+                        </p>
+                        ${cServices.map((s: any) => `
+                          <div style="display: flex; justify-content: space-between; font-size: 9px; margin-bottom: 2px;">
+                            <span>• ${s.name || s.description}</span>
+                            <span style="font-weight: bold; white-space: nowrap;">R$ ${(parseFloat(String(s.price || 0).replace(',', '.')) || 0).toFixed(2).replace('.', ',')}</span>
+                          </div>
+                        `).join('')}
+                      </div>
+                    ` : ''}
+                    ${cParts.length > 0 ? `
+                      <div style="padding-left: ${cServices.length > 0 ? '8px; border-left: 1px solid #000000;' : '0'};">
+                        <p style="font-weight: 900; text-transform: uppercase; font-size: 9px; border-bottom: 1px dotted #000000; padding-bottom: 2px; margin-bottom: 4px;">
+                          PEÇAS / MATERIAIS APLICADOS:
+                        </p>
+                        ${cParts.map((p: any) => `
+                          <div style="display: flex; justify-content: space-between; font-size: 9px; margin-bottom: 2px;">
+                            <span>• ${p.name || p.description} (Qtd: ${p.qty || 1})</span>
+                            <span style="font-weight: bold; white-space: nowrap;">R$ ${((parseFloat(String(p.price || 0).replace(',', '.')) || 0) * (p.qty || 1)).toFixed(2).replace('.', ',')}</span>
+                          </div>
+                        `).join('')}
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              ` : ''}
+
+              <!-- FORMA DE PAGAMENTO E TOTAL -->
+              <div style="border: 1px solid #000000; border-radius: 4px; padding: 6px 8px; display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; margin-top: 6px;">
+                <div>
+                  <p><strong>FORMA DE PAGAMENTO:</strong> ${orderToUse.paymentMethod || paymentMethod || 'Dinheiro / Pix'}</p>
+                  ${(cTravel > 0 || cDiscount > 0 || cAdvance > 0) ? `
+                    <p style="font-size: 9px; font-weight: 500; margin-top: 2px;">
+                      ${cTravel > 0 ? `<strong>DESLOC.:</strong> R$ ${cTravel.toFixed(2).replace('.', ',')} &nbsp;|&nbsp; ` : ''}
+                      ${cDiscount > 0 ? `<strong>DESC.:</strong> R$ ${cDiscount.toFixed(2).replace('.', ',')} &nbsp;|&nbsp; ` : ''}
+                      ${cAdvance > 0 ? `<strong>ADIANTADO:</strong> R$ ${cAdvance.toFixed(2).replace('.', ',')} &nbsp;|&nbsp; <strong>RESTANTE:</strong> R$ ${Math.max(0, cTotal - cAdvance).toFixed(2).replace('.', ',')}` : ''}
+                    </p>
+                  ` : ''}
+                </div>
+                <div style="text-align: right; font-weight: 900; font-size: 13px;">
+                  VALOR TOTAL: R$ ${cTotal.toFixed(2).replace('.', ',')}
+                </div>
               </div>
-              <div>
-                <div style="border-bottom: 1px solid #94a3b8; width: 75%; margin: 0 auto 4px auto;"></div>
-                <div style="font-weight: bold; color: #1e293b;">Assinatura do Cliente</div>
-                <div style="font-size: 9.5px; color: #64748b;">${cClient.name || 'Cliente'}</div>
+
+              <!-- DADOS DE GARANTIA E TERMOS -->
+              <div style="font-size: 9px; margin-top: 6px;">
+                ${cWarrantyType === 'GARANTIA_LOJA' ? `
+                  <div style="border: 1px solid #000000; padding: 2px 8px; border-radius: 3px; font-weight: bold; font-size: 9.5px; display: inline-block; margin-bottom: 4px;">
+                    GARANTIA DA EMPRESA: ${isNaN(cDays) ? '90' : cDays} DIAS ${expiryStr ? `(VÁLIDA ATÉ: ${expiryStr})` : ''}
+                  </div>
+                ` : ''}
+                <p style="font-weight: 900; text-transform: uppercase; font-size: 9px; margin-bottom: 2px;">TERMOS DE ENTREGA E GARANTIA:</p>
+                <p style="line-height: 1.3; font-size: 8.5px; white-space: pre-wrap;">${cTerms}</p>
+              </div>
+
+              <!-- RESPONSÁVEIS: ATENDENTE E TÉCNICO ALINHADOS À ESQUERDA -->
+              <div style="padding-top: 6px; font-size: 9px; text-align: left;">
+                <p><strong>ATENDENTE:</strong> ${cAttendant || '-'}</p>
+                <p><strong>TÉCNICO RESPONSÁVEL:</strong> ${cTech || '-'}</p>
+              </div>
+
+              <!-- ASSINATURA DA EMPRESA APENAS -->
+              <div style="padding-top: 24px; padding-bottom: 4px; text-align: center; font-size: 9px; display: flex; justify-content: center;">
+                <div style="width: 50%;">
+                  <div style="border-bottom: 1px solid #000000; width: 75%; margin: 0 auto 3px auto;"></div>
+                  <p style="font-weight: 900; text-transform: uppercase; font-size: 8.5px; margin: 0;">Assinatura da Empresa</p>
+                </div>
               </div>
             </div>
           </body>
@@ -1268,6 +1302,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
     : [
         'ABERTA',
         'ORCAMENTO_APROVADO',
+        'ORCAMENTO_CONCLUIDO',
         'EM_ATENDIMENTO',
         'AGUARDANDO_PECA',
         'APARELHO_LIBERADO',
@@ -1611,6 +1646,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                 const u = (stName || '').toUpperCase();
                 if (u === 'ABERTA') return 'Aberta';
                 if (u === 'ORCAMENTO_APROVADO') return 'Orçamento Aprovado';
+                if (u === 'ORCAMENTO_CONCLUIDO') return 'Orçamento Concluído';
                 if (u === 'EM_ATENDIMENTO') return 'Em Atendimento';
                 if (u === 'APROVADO') return 'Aprovado';
                 if (u === 'AGUARDANDO_PECA') return 'Aguardando Peça';
@@ -1660,6 +1696,7 @@ export const CreateOrderScreen: React.FC<CreateOrderScreenProps> = ({
                       const u = (stName || '').toUpperCase();
                       if (u === 'ABERTA') return 'Aberta';
                       if (u === 'ORCAMENTO_APROVADO') return 'Orçamento Aprovado';
+                      if (u === 'ORCAMENTO_CONCLUIDO') return 'Orçamento Concluído';
                       if (u === 'EM_ATENDIMENTO') return 'Em Atendimento';
                       if (u === 'APROVADO') return 'Aprovado';
                       if (u === 'AGUARDANDO_PECA') return 'Aguardando Peça';

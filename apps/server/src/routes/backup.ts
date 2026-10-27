@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import path from 'path';
 import fs from 'fs';
 import { prisma } from '../db';
-import { USERS, verifyPassword } from './auth';
+import { DEFAULT_USERS, verifyPassword } from './auth';
 
 export async function backupRoutes(fastify: FastifyInstance) {
   // Download do arquivo de backup do banco de dados SQLite
@@ -37,10 +37,18 @@ export async function backupRoutes(fastify: FastifyInstance) {
       resetOrders?: boolean;
     };
 
-    // ✅ Segurança (CORRIGIDO): busca o usuário EXATAMENTE pelo userId informado.
-    // Antes, a condição "u.role === 'ADMIN'" permitia que qualquer userId
-    // encontrasse o admin, ignorando completamente o campo userId.
-    const user = USERS.find((u) => u.id === userId || u.name === userId);
+    let user: any = null;
+    try {
+      user = await prisma.user.findFirst({
+        where: {
+          OR: [{ id: userId }, { name: userId }],
+        },
+      });
+    } catch {}
+
+    if (!user) {
+      user = DEFAULT_USERS.find((u: any) => u.id === userId || u.name === userId);
+    }
     if (!user) {
       return reply.status(404).send({ error: 'Usuário não encontrado.' });
     }
@@ -50,7 +58,8 @@ export async function backupRoutes(fastify: FastifyInstance) {
     }
 
     // ✅ Segurança: comparação via hash — suporte à migração progressiva de senhas
-    if (!password || !verifyPassword(password, user.pass)) {
+    const isPasswordValid = password ? await verifyPassword(password, user.password || user.pass) : false;
+    if (!isPasswordValid) {
       return reply.status(401).send({ error: 'Senha de administrador incorreta.' });
     }
 

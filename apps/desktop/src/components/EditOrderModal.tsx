@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, User, Phone, Wrench, Clock, Eye, PlusCircle } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
+import { getRegisteredOSStatuses, formatStatusLabel } from '../utils/orderStatusUtils';
 
 interface EditOrderModalProps {
   isOpen: boolean;
@@ -22,6 +24,18 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
   onViewClientProfile,
   onOpenClientsModal,
 }) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('EditOrderModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('EditOrderModal');
+    }
+  }, [isOpen]);
+
   if (!isOpen || !order) return null;
 
   const selectedClient =
@@ -210,13 +224,24 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600 cursor-pointer"
                 >
-                  <option value="ABERTA">ABERTA</option>
-                  <option value="EM_ATENDIMENTO">EM ATENDIMENTO</option>
-                  <option value="AGUARDANDO_APROVACAO">AGUARDANDO APROVAÇÃO</option>
-                  <option value="FINALIZADA">FINALIZADA</option>
-                  <option value="CANCELADA">CANCELADA</option>
+                  {(() => {
+                    const allStatuses = getRegisteredOSStatuses();
+                    const currentUpper = String(status || '').trim().toUpperCase();
+                    const hasCurrent = allStatuses.some(
+                      (s) => String(s.name || s.id || '').trim().toUpperCase() === currentUpper
+                    );
+                    const listToRender = hasCurrent || !currentUpper
+                      ? allStatuses
+                      : [...allStatuses, { id: `legacy_${currentUpper}`, name: status, code: '9999', color: '#0284c7' }];
+
+                    return listToRender.map((st) => (
+                      <option key={st.id || st.name} value={st.name}>
+                        {formatStatusLabel(st.name)}
+                      </option>
+                    ));
+                  })()}
                 </select>
               </div>
 

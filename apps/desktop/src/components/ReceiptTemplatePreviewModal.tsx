@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, Eye, Check, Printer, FileText } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 interface ReceiptTemplatePreviewModalProps {
   isOpen: boolean;
@@ -14,6 +15,18 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
   type,
   templateId,
 }) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('ReceiptTemplatePreviewModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('ReceiptTemplatePreviewModal');
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   let savedCompany: any = {};
@@ -43,10 +56,14 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
     entryDate: '27/08/2026',
     exitDate: '27/08/2026',
     client: {
-      name: 'Carlos Eduardo Ferreira da Silva',
+      name: 'Eletro Peças & Serviços Ltda',
+      tradeName: 'EletroTech Soluções',
+      personType: 'PJ',
+      cnpj: '12.345.678/0001-90',
+      cpf: '',
       phone: '(11) 3322-4455',
       whatsapp: '(11) 99887-1122',
-      email: 'carlos.eduardo@email.com',
+      email: 'contato@eletrotech.com.br',
       address: 'Rua das Flores, 120 - Apto 42B',
       neighborhood: 'Jardim Primavera',
       city: 'São Paulo',
@@ -126,6 +143,12 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-300 space-y-1">
                 <span className="font-black text-slate-900 uppercase text-[9px] block border-b border-slate-200 pb-0.5">DADOS DO CLIENTE</span>
                 <p><strong>Nome:</strong> {mockOrder.client.name}</p>
+                {mockOrder.client.tradeName && <p><strong>Nome Fantasia:</strong> {mockOrder.client.tradeName}</p>}
+                {(mockOrder.client.personType === 'PJ' || mockOrder.client.cnpj) ? (
+                  <p><strong>CNPJ:</strong> {mockOrder.client.cnpj}</p>
+                ) : mockOrder.client.cpf ? (
+                  <p><strong>CPF:</strong> {mockOrder.client.cpf}</p>
+                ) : null}
                 <p><strong>Telefone:</strong> {mockOrder.client.phone} | <strong>Whats:</strong> {mockOrder.client.whatsapp}</p>
                 <p><strong>Endereço:</strong> {mockOrder.client.address} - {mockOrder.client.neighborhood}, {mockOrder.client.city}</p>
               </div>
@@ -342,6 +365,12 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
                   <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-300 space-y-0.5">
                     <p className="font-black text-slate-900 uppercase border-b border-slate-200 pb-0.5 text-[8px]">Cliente</p>
                     <p><strong>Nome:</strong> {mockOrder.client.name}</p>
+                    {mockOrder.client.tradeName && <p><strong>Nome Fantasia:</strong> {mockOrder.client.tradeName}</p>}
+                    {(mockOrder.client.personType === 'PJ' || mockOrder.client.cnpj) ? (
+                      <p><strong>CNPJ:</strong> {mockOrder.client.cnpj}</p>
+                    ) : mockOrder.client.cpf ? (
+                      <p><strong>CPF:</strong> {mockOrder.client.cpf}</p>
+                    ) : null}
                     <p><strong>Telefone:</strong> {mockOrder.client.phone} | Whats: {mockOrder.client.whatsapp}</p>
                     <p><strong>Endereço:</strong> {mockOrder.client.address}</p>
                   </div>
@@ -475,6 +504,12 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-300 space-y-1">
                 <span className="font-black text-slate-900 uppercase text-[9px] block border-b border-slate-200 pb-0.5">DADOS DO CLIENTE</span>
                 <p><strong>Nome:</strong> {mockOrder.client.name}</p>
+                {mockOrder.client.tradeName && <p><strong>Nome Fantasia:</strong> {mockOrder.client.tradeName}</p>}
+                {(mockOrder.client.personType === 'PJ' || mockOrder.client.cnpj) ? (
+                  <p><strong>CNPJ:</strong> {mockOrder.client.cnpj}</p>
+                ) : mockOrder.client.cpf ? (
+                  <p><strong>CPF:</strong> {mockOrder.client.cpf}</p>
+                ) : null}
                 <p><strong>Telefone:</strong> {mockOrder.client.phone}</p>
                 <p><strong>Endereço:</strong> {mockOrder.client.address}</p>
               </div>
@@ -570,6 +605,12 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
                 <p className="font-bold uppercase text-[10px] text-slate-800 border-b pb-0.5">Cliente</p>
                 <p><strong>Nome:</strong> {mockOrder.client.name}</p>
+                {mockOrder.client.tradeName && <p><strong>Nome Fantasia:</strong> {mockOrder.client.tradeName}</p>}
+                {(mockOrder.client.personType === 'PJ' || mockOrder.client.cnpj) ? (
+                  <p><strong>CNPJ:</strong> {mockOrder.client.cnpj}</p>
+                ) : mockOrder.client.cpf ? (
+                  <p><strong>CPF:</strong> {mockOrder.client.cpf}</p>
+                ) : null}
                 <p><strong>Telefone:</strong> {mockOrder.client.phone}</p>
                 <p><strong>Atendente:</strong> {mockOrder.attendant}</p>
               </div>
@@ -643,6 +684,12 @@ export const ReceiptTemplatePreviewModal: React.FC<ReceiptTemplatePreviewModalPr
                   Dados do Cliente
                 </h3>
                 <p><strong>Nome:</strong> {mockOrder.client.name}</p>
+                {mockOrder.client.tradeName && <p><strong>Nome Fantasia:</strong> {mockOrder.client.tradeName}</p>}
+                {(mockOrder.client.personType === 'PJ' || mockOrder.client.cnpj) ? (
+                  <p><strong>CNPJ:</strong> {mockOrder.client.cnpj}</p>
+                ) : mockOrder.client.cpf ? (
+                  <p><strong>CPF:</strong> {mockOrder.client.cpf}</p>
+                ) : null}
                 <p><strong>Telefone:</strong> {mockOrder.client.phone}</p>
                 <p><strong>Endereço:</strong> {mockOrder.client.address}</p>
               </div>

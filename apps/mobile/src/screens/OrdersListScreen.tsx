@@ -76,89 +76,87 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
     (currentUser?.username || '').toLowerCase() === 'admin'
   );
 
-  const filteredOrders = orders.filter((o) => {
-    // Se não for Admin, restringe a visualização para as OS atribuídas a ele ou sem técnico atribuído
-    if (!isAdmin && currentUser) {
-      const orderTech = (o.technician || o.technicianName || o.assignedTechnician || '').toLowerCase().trim();
-      const techId = String(o.technicianId || '').toLowerCase().trim();
-      const myName = (currentUser.name || '').toLowerCase().trim();
-      const myUser = (currentUser.username || '').toLowerCase().trim();
-      const myId = String(currentUser.id || '').toLowerCase().trim();
+  const filteredOrders = React.useMemo(() => {
+    return orders.filter((o) => {
+      // Se não for Admin, restringe a visualização para as OS atribuídas a ele ou sem técnico atribuído
+      if (!isAdmin && currentUser) {
+        const orderTech = (o.technician || o.technicianName || o.assignedTechnician || '').toLowerCase().trim();
+        const techId = String(o.technicianId || '').toLowerCase().trim();
+        const myName = (currentUser.name || '').toLowerCase().trim();
+        const myUser = (currentUser.username || '').toLowerCase().trim();
+        const myId = String(currentUser.id || '').toLowerCase().trim();
 
-      if (orderTech || techId) {
-        const isMine =
-          (orderTech && myName && orderTech === myName) ||
-          (orderTech && myUser && orderTech === myUser) ||
-          (techId && myId && techId === myId);
+        if (orderTech || techId) {
+          const isMine =
+            (orderTech && myName && orderTech === myName) ||
+            (orderTech && myUser && orderTech === myUser) ||
+            (techId && myId && techId === myId);
 
-        if (!isMine) return false;
+          if (!isMine) return false;
+        }
       }
-    }
 
-    const stUpper = (o.status || '').toUpperCase();
-    const isCancelled = stUpper === 'CANCELADA';
-    // Se showCancelled estiver falso, oculta as ordens canceladas em todas as abas
-    if (isCancelled && !showCancelled) {
-      return false;
-    }
+      const stUpper = (o.status || '').toUpperCase();
+      const isCancelled = stUpper === 'CANCELADA';
+      // Se showCancelled estiver falso, oculta as ordens canceladas em todas as abas
+      if (isCancelled && !showCancelled) {
+        return false;
+      }
 
-    const term = searchTerm.toLowerCase().trim();
-    const digitsSearch = term.replace(/\D/g, '');
-    const orderCodeDigits = (o.code || '').replace(/\D/g, '');
-    const clientPhoneDigits = (o.client?.phone || '').replace(/\D/g, '');
-    const clientWhatsappDigits = (o.client?.whatsapp || '').replace(/\D/g, '');
-    const clientCpfCnpjDigits = (o.client?.cpfCnpj || o.client?.cpf || o.client?.cnpj || '').replace(/\D/g, '');
-    const serialDigits = (o.equipment?.serialNumber || '').replace(/\D/g, '');
+      const term = searchTerm.toLowerCase().trim();
+      const digitsSearch = term.replace(/\D/g, '');
+      const isPureDigits = /^\d+$/.test(term);
+      const isPhoneOrDoc = /^[\d\s().\-/]+$/.test(term) && digitsSearch.length >= 4 && !term.includes('/');
 
-    const matchesDigits = digitsSearch.length >= 1 && (
-      orderCodeDigits.includes(digitsSearch) ||
-      clientPhoneDigits.includes(digitsSearch) ||
-      clientWhatsappDigits.includes(digitsSearch) ||
-      clientCpfCnpjDigits.includes(digitsSearch) ||
-      serialDigits.includes(digitsSearch)
-    );
+      const orderCodeDigits = (o.code || '').replace(/\D/g, '');
+      const clientPhoneDigits = (o.client?.phone || '').replace(/\D/g, '');
+      const clientWhatsappDigits = (o.client?.whatsapp || '').replace(/\D/g, '');
+      const clientCpfCnpjDigits = (o.client?.cpfCnpj || o.client?.cpf || o.client?.cnpj || '').replace(/\D/g, '');
+      const serialDigits = (o.equipment?.serialNumber || '').replace(/\D/g, '');
 
-    const matchesSearch =
-      matchesDigits ||
-      (o.code || '').toLowerCase().includes(term) ||
-      (o.client?.name || '').toLowerCase().includes(term) ||
-      (o.client?.phone || '').toLowerCase().includes(term) ||
-      (o.client?.whatsapp || '').toLowerCase().includes(term) ||
-      (o.equipment?.type || '').toLowerCase().includes(term) ||
-      (o.equipment?.brand || '').toLowerCase().includes(term) ||
-      (o.equipment?.model || '').toLowerCase().includes(term) ||
-      (o.technician || o.technicianName || '').toLowerCase().includes(term);
+      const matchesDigits = (isPureDigits && digitsSearch.length >= 1 && (orderCodeDigits.includes(digitsSearch) || serialDigits.includes(digitsSearch))) ||
+        (isPhoneOrDoc && (clientPhoneDigits.includes(digitsSearch) || clientWhatsappDigits.includes(digitsSearch) || clientCpfCnpjDigits.includes(digitsSearch)));
 
-    const isFinished = stUpper === 'FINALIZADA' || stUpper === 'CONCLUIDA' || stUpper === 'GARANTIA_FINALIZADA' || stUpper === 'GARANTIA/FINALIZADA';
-    if (activeFilter === 'ABERTA') {
-      return matchesSearch && !isFinished && !isCancelled;
-    }
-    if (activeFilter === 'FINALIZADA') {
-      return matchesSearch && isFinished;
-    }
-    return matchesSearch;
-  }).filter((o, idx, arr) => {
-    // Deduplicação estrita: se for código temporário de espera (ex: 'Aguardando...'), deduplica APENAS por ID
-    const isTempCode = !o.code || String(o.code).includes('Aguardando');
-    if (isTempCode) {
-      return arr.findIndex((item) => item.id === o.id) === idx;
-    }
-    // Para OS com número oficial definitivo, deduplica por ID ou Código
-    return arr.findIndex((item) => (item.id && item.id === o.id) || (item.code && item.code === o.code)) === idx;
-  }).sort((a, b) => {
-    // Ordenação: a última OS gerada deve aparecer no topo
-    // 1. Pelo timestamp de criação (createdAt ou data)
-    const timeA = new Date(a.createdAt || a.entryDate || 0).getTime();
-    const timeB = new Date(b.createdAt || b.entryDate || 0).getTime();
-    if (timeA && timeB && timeA !== timeB) return timeB - timeA;
+      const matchesSearch =
+        matchesDigits ||
+        (o.code || '').toLowerCase().includes(term) ||
+        (o.client?.name || '').toLowerCase().includes(term) ||
+        (o.client?.phone || '').toLowerCase().includes(term) ||
+        (o.client?.whatsapp || '').toLowerCase().includes(term) ||
+        (o.equipment?.type || '').toLowerCase().includes(term) ||
+        (o.equipment?.brand || '').toLowerCase().includes(term) ||
+        (o.equipment?.model || '').toLowerCase().includes(term) ||
+        (o.technician || o.technicianName || '').toLowerCase().includes(term);
 
-    // 2. Fallback pelo número da OS (ex: OS-0005 vs OS-0004)
-    const numA = parseInt(String(a.code || '').replace(/\D/g, ''), 10) || 0;
-    const numB = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0;
-    if (numA !== numB) return numB - numA;
+      const isFinished = stUpper === 'FINALIZADA' || stUpper === 'CONCLUIDA' || stUpper === 'GARANTIA_FINALIZADA' || stUpper === 'GARANTIA/FINALIZADA';
+      if (activeFilter === 'ABERTA') {
+        return matchesSearch && !isFinished && !isCancelled;
+      }
+      if (activeFilter === 'FINALIZADA') {
+        return matchesSearch && isFinished;
+      }
+      return matchesSearch;
+    }).filter((o, idx, arr) => {
+      // Deduplicação estrita: se for código temporário de espera (ex: 'Aguardando...'), deduplica APENAS por ID
+      const isTempCode = !o.code || String(o.code).includes('Aguardando');
+      if (isTempCode) {
+        return arr.findIndex((item) => item.id === o.id) === idx;
+      }
+      // Para OS com número oficial definitivo, deduplica por ID ou Código
+      return arr.findIndex((item) => (item.id && item.id === o.id) || (item.code && item.code === o.code)) === idx;
+    }).sort((a, b) => {
+      // Ordenação: a última OS gerada deve aparecer no topo
+      const timeA = new Date(a.createdAt || a.entryDate || 0).getTime();
+      const timeB = new Date(b.createdAt || b.entryDate || 0).getTime();
+      if (timeA && timeB && timeA !== timeB) return timeB - timeA;
 
-    return 0;
-  });
+      const numA = parseInt(String(a.code || '').replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0;
+      if (numA !== numB) return numB - numA;
+
+      return 0;
+    });
+  }, [orders, isAdmin, currentUser, showCancelled, searchTerm, activeFilter]);
 
   const formatCurrency = (val: any) => {
     if (val === undefined || val === null || val === '') return '0,00';
@@ -391,6 +389,7 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
                   : st === 'APARELHO_LIBERADO' ? '#059669'
                   : st === 'CANCELADA' ? '#dc2626'
                   : st === 'ORCAMENTO_APROVADO' ? '#7c3aed'
+                  : st === 'ORCAMENTO_CONCLUIDO' ? '#6366f1'
                   : st === 'VISITA_TECNICA' ? '#6b21a8'
                   : st === 'AGUARDANDO_PECA' ? '#ea580c'
                   : st === 'RETORNO_GARANTIA' ? '#d97706'
@@ -399,6 +398,7 @@ export const OrdersListScreen: React.FC<OrdersListScreenProps> = ({
 
                 const label =
                   st === 'ORCAMENTO_APROVADO' ? 'Orçamento Aprovado'
+                  : st === 'ORCAMENTO_CONCLUIDO' ? 'Orçamento Concluído'
                   : st === 'VISITA_TECNICA' ? 'Visita Técnica'
                   : st === 'AGUARDANDO_PECA' ? 'Aguardando Peça'
                   : st === 'APARELHO_LIBERADO' ? 'Aparelho Liberado'

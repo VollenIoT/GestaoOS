@@ -70,24 +70,24 @@ export async function orderRoutes(fastify: FastifyInstance) {
 
     const equipment = await prisma.equipment.create({
       data: {
-        type: body.equipment.type || '',
-        brand: body.equipment.brand || '',
-        model: body.equipment.model || '',
-        serialNumber: body.equipment.serialNumber || null,
+        type: body.equipment?.type || '',
+        brand: body.equipment?.brand || '',
+        model: body.equipment?.model || '',
+        serialNumber: body.equipment?.serialNumber || null,
       },
     });
 
     const order = await prisma.serviceOrder.create({
       data: {
         code,
-        clientId: body.clientId,
+        clientId: body.clientId || '',
         equipmentId: equipment.id,
         problemDescription: body.problemDescription || '',
         status: body.status || 'ABERTA',
         type: body.type || 'ORCAMENTO',
         warrantyType: body.warrantyType || 'NAO_SE_APLICA',
-        travelCost: body.travelCost || null,
-        discountCost: body.discountCost || null,
+        travelCost: body.travelCost !== undefined ? String(body.travelCost) : null,
+        discountCost: body.discountCost !== undefined ? String(body.discountCost) : null,
         nfNumber: body.nfNumber || null,
         nfValue: body.nfValue || null,
         purchaseDate: body.purchaseDate || null,
@@ -121,6 +121,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
 
     if (!existingOrder) return reply.status(404).send({ error: 'Ordem de serviço não encontrada' });
 
+    let equipmentId = existingOrder.equipmentId;
     if (body.equipment && existingOrder.equipmentId) {
       await prisma.equipment.update({
         where: { id: existingOrder.equipmentId },
@@ -140,8 +141,8 @@ export async function orderRoutes(fastify: FastifyInstance) {
         status: body.status !== undefined ? body.status : existingOrder.status,
         type: body.type !== undefined ? (body.type || 'ORCAMENTO') : existingOrder.type,
         warrantyType: body.warrantyType !== undefined ? (body.warrantyType || 'NAO_SE_APLICA') : existingOrder.warrantyType,
-        travelCost: body.travelCost !== undefined ? body.travelCost : existingOrder.travelCost,
-        discountCost: body.discountCost !== undefined ? body.discountCost : existingOrder.discountCost,
+        travelCost: body.travelCost !== undefined ? String(body.travelCost ?? '') : existingOrder.travelCost,
+        discountCost: body.discountCost !== undefined ? String(body.discountCost ?? '') : existingOrder.discountCost,
         nfNumber: body.nfNumber !== undefined ? body.nfNumber : existingOrder.nfNumber,
         nfValue: body.nfValue !== undefined ? body.nfValue : existingOrder.nfValue,
         purchaseDate: body.purchaseDate !== undefined ? body.purchaseDate : existingOrder.purchaseDate,
@@ -209,7 +210,7 @@ export async function orderRoutes(fastify: FastifyInstance) {
     const orders = await prisma.serviceOrder.findMany({
       select: { totalAmount: true },
     });
-    const totalBilling = orders.reduce((acc, curr) => acc + curr.totalAmount, 0);
+    const totalBilling = orders.reduce((acc: number, curr: { totalAmount: number }) => acc + curr.totalAmount, 0);
 
     return reply.send({
       todayVisitsCount,

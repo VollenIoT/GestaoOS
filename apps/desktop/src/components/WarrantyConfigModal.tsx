@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, ShieldCheck, Save, Clock, FileText, ArrowDownLeft, ArrowUpRight, Calculator } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
+import { assertTerminalCanSave } from '../services/localNetworkService';
 
 export interface WarrantyConfigData {
   defaultDays: string;
@@ -55,20 +57,28 @@ export const WarrantyConfigModal: React.FC<WarrantyConfigModalProps> = ({
     }
   }, [isOpen, defaultDays, defaultTerms, defaultCoverage, defaultEntryTerms, defaultEstimateTerms, defaultExitTerms, initialTab]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('WarrantyConfigModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('WarrantyConfigModal');
+    }
+  }, [isOpen]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    try {
+      await assertTerminalCanSave('alterar termos de garantia e comprovantes');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível alterar termos de garantia no terminal.');
+      return;
+    }
+
     const configPayload = {
       defaultDays: days,
       defaultTerms: terms,
@@ -80,9 +90,19 @@ export const WarrantyConfigModal: React.FC<WarrantyConfigModalProps> = ({
     };
 
     try {
+      localStorage.setItem('warranty_config', JSON.stringify(configPayload));
+      localStorage.setItem('vollen_warranty_terms', JSON.stringify(configPayload));
+
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('warrantyTerms', configPayload);
+      }).catch(() => {});
+
       const { setDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../services/firebase');
-      await setDoc(doc(db, 'system_config', 'warranty_config'), configPayload, { merge: true }).catch(() => null);
+      if (db) {
+        await setDoc(doc(db, 'system_config', 'warranty_config'), configPayload, { merge: true }).catch(() => null);
+      }
     } catch (err) {
       console.warn('Erro ao salvar termos no Firestore:', err);
     }

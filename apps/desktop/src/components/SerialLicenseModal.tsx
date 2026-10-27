@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   KeyRound,
@@ -16,7 +16,9 @@ import {
   Lock,
   User,
   AlertCircle,
+  Trash2,
 } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 import {
   getSavedSerial,
   getSavedTenantInfo,
@@ -48,6 +50,9 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [companyData, setCompanyData] = useState<any>(null);
+  const [isEditingSerial, setIsEditingSerial] = useState(false); // permite inserir nova serial quando já tem uma ativa
+  const [showNewSerialConfirm, setShowNewSerialConfirm] = useState(false); // alerta de confirmação antes de inserir nova serial
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false); // alerta de confirmação para remoção de serial
 
   // Estado para o diálogo de decisão de sincronização
   const [pendingLicenseData, setPendingLicenseData] = useState<LicenseTenantData | null>(null);
@@ -107,19 +112,64 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const serialInputRef = useRef<HTMLInputElement>(null);
   const isConnected = isCloudModeActive();
 
-  const handleFormatSerial = (val: string) => {
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('SerialLicenseModal', () => {
+        if (showConfirmOverwrite) {
+          setShowConfirmOverwrite(false);
+        } else if (showSyncDecision) {
+          setShowSyncDecision(false);
+        } else if (isDeauthModalOpen) {
+          setIsDeauthModalOpen(false);
+        } else {
+          onCloseRef.current();
+        }
+      });
+      return () => modalStack.unregister('SerialLicenseModal');
+    }
+  }, [isOpen, showConfirmOverwrite, showSyncDecision, isDeauthModalOpen]);
+
+  if (!isOpen) return null;
+
+  const handleFormatSerial = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const val = input.value;
+    const oldCursor = input.selectionStart || 0;
+
+    // Conta quantos caracteres válidos (não hífen) estavam antes do cursor
+    const rawBeforeCursor = val.slice(0, oldCursor).replace(/[^A-Z0-9a-z]/g, '').length;
+
     // Formata em 4 blocos de 5 caracteres ex: XXXXX-XXXXX-XXXXX-XXXXX (23 caracteres no total com hífens)
     const raw = val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
     const chunks = raw.match(/.{1,5}/g);
-    if (chunks) {
-      setSerialInput(chunks.join('-'));
-    } else {
-      setSerialInput(raw);
+    const formatted = chunks ? chunks.join('-') : raw;
+
+    setSerialInput(formatted);
+
+    // Calcula a nova posição do cursor baseada na quantidade de caracteres úteis antes do cursor
+    let newCursor = 0;
+    let countedChars = 0;
+    for (let i = 0; i < formatted.length; i++) {
+      if (countedChars >= rawBeforeCursor) {
+        newCursor = i;
+        break;
+      }
+      if (formatted[i] !== '-') {
+        countedChars++;
+      }
+      newCursor = i + 1;
     }
+
+    requestAnimationFrame(() => {
+      if (serialInputRef.current) {
+        serialInputRef.current.setSelectionRange(newCursor, newCursor);
+      }
+    });
   };
 
   const handleStartActivation = async () => {
@@ -157,7 +207,34 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
         return;
       }
 
-      // Abre o diálogo de escolha de sincronização com o usuário
+      // Verifica se a edição atual suporta nuvem (Apenas Versão 3.0.0 possui nuvem)
+      const { getCurrentFeatures } = await import('../config/appFeatures');
+      const isCloudEdition = getCurrentFeatures().hasCloud;
+
+      // Se a versão do app NÃO for V3 (V1 ou V2) ou se a serial não possuir nuvem: ativa direto no modo local puro
+      if (!isCloudEdition || !res.data.hasCloud) {
+        const { activateLicense } = await import('../services/licenseService');
+        const { activatePermanentLicense } = await import('../services/trialProtectionService');
+        activateLicense(res.data);
+        // Marca o sistema como licenciado permanentemente (elimina o banner de trial)
+        await activatePermanentLicense(res.data.serial).catch(() => {});
+        setSavedSerial(res.data.serial);
+        setTenantInfo(res.data);
+        setIsEditingSerial(false);
+        setShowNewSerialConfirm(false);
+        // Mensagem com data de validade
+        const validityMsg = res.data.expiresAt
+          ? `válida até ${new Date(res.data.expiresAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}`
+          : 'com validade Vitalícia (sem data de expiração)';
+        setSuccessMsg(`✅ Chave serial ativada com sucesso! Sua licença é ${validityMsg}.`);
+        setTimeout(() => {
+          if (onLicenseChanged) onLicenseChanged();
+          window.location.reload();
+        }, 1200);
+        return;
+      }
+
+      // Versão 3.0.0 (Nuvem): abre o diálogo de escolha de sincronização (Baixar dados da Nuvem ou Enviar Locais)
       setPendingLicenseData(res.data);
       setShowSyncDecision(true);
     } catch (err: any) {
@@ -181,9 +258,17 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
 
     try {
       // 1. Salva e ativa a licença
+      const { activatePermanentLicense } = await import('../services/trialProtectionService');
+      const { saveLocalNetworkConfig, getLocalNetworkConfig } = await import('../services/localNetworkService');
       activateLicense(pendingLicenseData);
+      // Marca o sistema como licenciado permanentemente (elimina o banner de trial)
+      await activatePermanentLicense(pendingLicenseData.serial).catch(() => {});
       setSavedSerial(pendingLicenseData.serial);
       setTenantInfo(pendingLicenseData);
+
+      // Define automaticamente o modo de sincronização como Modo Nuvem (Online)
+      const currentNetConfig = getLocalNetworkConfig();
+      saveLocalNetworkConfig({ ...currentNetConfig, syncStrategy: 'cloud', mode: 'standalone' });
 
       if (pendingLicenseData.firebaseConfig && pendingLicenseData.firebaseConfig.projectId) {
         const { initializeApp, getApps } = await import('firebase/app');
@@ -196,182 +281,292 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
         const tenantDb = getFirestore(tenantApp);
 
         if (syncAction === 'DOWNLOAD_CLOUD') {
-          // OPÇÃO 1: BAIXAR DADOS DA NUVEM (SOBRESCREVE O LOCAL)
+          // OPÇÃO 1: BAIXAR DADOS DA NUVEM (SOBRESCREVE E LIMPA 100% OS DADOS LOCAIS ANTERIORES)
+          const localKeysToWipe = [
+            'vollen_clients',
+            'selected_client',
+            'vollen_orders',
+            'vollen_parts',
+            'vollen_parts_stock',
+            'vollen_services',
+            'vollen_custom_services',
+            'vollen_equipments',
+            'system_equipments',
+            'vollen_estimates',
+            'vollen_visits',
+            'vollen_cash_movements',
+            'vollen_current_cash_session',
+            'vollen_cash_register_columns',
+            'cash_registers_history',
+            'vollen_sales_history',
+            'vollen_saved_carts',
+            'custom_os_statuses_v3',
+            'vollen_custom_next_os_number',
+            'vollen_users',
+            'vollen_technicians',
+          ];
+          for (const key of localKeysToWipe) {
+            localStorage.removeItem(key);
+          }
+
+          // Limpa chaves dinâmicas locais de auditoria de OS antigas
+          try {
+            const auditKeys: string[] = [];
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i);
+              if (k && (k.startsWith('os_audit_') || k.startsWith('audit_'))) {
+                auditKeys.push(k);
+              }
+            }
+            auditKeys.forEach((k) => localStorage.removeItem(k));
+          } catch (e) {}
+
           // 1. Clientes
-          const snapClients = await getDocs(collection(tenantDb, 'clients'));
-          const cloudClients = snapClients.docs.map((d) => ({ id: d.id, ...d.data() }));
-          localStorage.setItem('vollen_clients', JSON.stringify(cloudClients));
+          try {
+            const snapClients = await getDocs(collection(tenantDb, 'clients'));
+            const cloudClients = snapClients.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_clients', JSON.stringify(cloudClients));
+          } catch (e) {}
 
           // 2. Ordens de Serviço
-          const snapOrders = await getDocs(collection(tenantDb, 'orders'));
-          const cloudOrders = snapOrders.docs.map((d) => ({ id: d.id, ...d.data() }));
-          localStorage.setItem('vollen_orders', JSON.stringify(cloudOrders));
+          try {
+            const snapOrders = await getDocs(collection(tenantDb, 'orders'));
+            const cloudOrders = snapOrders.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_orders', JSON.stringify(cloudOrders));
+          } catch (e) {}
 
-          // 3. Peças
-          const snapParts = await getDocs(collection(tenantDb, 'parts'));
-          const cloudParts = snapParts.docs.map((d) => ({ id: d.id, ...d.data() }));
-          localStorage.setItem('vollen_parts_stock', JSON.stringify(cloudParts));
+          // 3. Peças / Estoque
+          try {
+            const snapParts = await getDocs(collection(tenantDb, 'parts'));
+            const cloudParts = snapParts.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_parts_stock', JSON.stringify(cloudParts));
+            localStorage.setItem('vollen_parts', JSON.stringify(cloudParts));
+          } catch (e) {}
 
           // 4. Serviços
-          const snapServices = await getDocs(collection(tenantDb, 'services'));
-          const cloudServices = snapServices.docs.map((d) => ({ id: d.id, ...d.data() }));
-          localStorage.setItem('vollen_services', JSON.stringify(cloudServices));
+          try {
+            const snapServices = await getDocs(collection(tenantDb, 'services'));
+            const cloudServices = snapServices.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_services', JSON.stringify(cloudServices));
+          } catch (e) {}
 
           // 5. Equipamentos
-          const snapEquipments = await getDocs(collection(tenantDb, 'equipments'));
-          const cloudEquipments = snapEquipments.docs.map((d) => ({ id: d.id, ...d.data() }));
-          localStorage.setItem('vollen_equipments', JSON.stringify(cloudEquipments));
+          try {
+            const snapEquipments = await getDocs(collection(tenantDb, 'equipments'));
+            const cloudEquipments = snapEquipments.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_equipments', JSON.stringify(cloudEquipments));
+            localStorage.setItem('system_equipments', JSON.stringify(cloudEquipments));
+          } catch (e) {}
 
-          // 6. Dados da Empresa (Aplica os dados da licença no Nome Fantasia e Razão Social)
-          const snapCompany = await getDoc(doc(tenantDb, 'system_config', 'company_data'));
-          let companyObj: any = snapCompany.exists() ? snapCompany.data() : {};
+          // 6. Orçamentos
+          try {
+            const snapEstimates = await getDocs(collection(tenantDb, 'estimates'));
+            const cloudEstimates = snapEstimates.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_estimates', JSON.stringify(cloudEstimates));
+          } catch (e) {}
+
+          // 7. Visitas Técnicas
+          try {
+            const snapVisits = await getDocs(collection(tenantDb, 'visits'));
+            const cloudVisits = snapVisits.docs.map((d) => ({ id: d.id, ...d.data() }));
+            localStorage.setItem('vollen_visits', JSON.stringify(cloudVisits));
+          } catch (e) {}
+
+          // 8. Dados da Empresa (Aplica os dados da licença no Nome Fantasia e Razão Social)
+          let companyObj: any = {};
+          try {
+            const snapCompany = await getDoc(doc(tenantDb, 'system_config', 'company_data'));
+            if (snapCompany.exists()) companyObj = snapCompany.data();
+          } catch (e) {}
           companyObj.tradingName = pendingLicenseData.tradeName || pendingLicenseData.companyName || 'Vollen Assistência Técnica';
           companyObj.name = pendingLicenseData.legalName || pendingLicenseData.companyName || companyObj.tradingName;
           localStorage.setItem('vollen_company_data', JSON.stringify(companyObj));
           await setDoc(doc(tenantDb, 'system_config', 'company_data'), companyObj, { merge: true }).catch(() => {});
 
-          // 7. Configurações de Termos de Entrada, Saída, Orçamento e Garantia
-          const snapWarranty = await getDoc(doc(tenantDb, 'system_config', 'warranty_config'));
-          if (snapWarranty.exists()) {
-            localStorage.setItem('vollen_os_config', JSON.stringify(snapWarranty.data()));
+          // 9. Configurações de Termos de Entrada, Saída, Orçamento e Garantia
+          try {
+            const snapWarranty = await getDoc(doc(tenantDb, 'system_config', 'warranty_config'));
+            if (snapWarranty.exists()) {
+              localStorage.setItem('vollen_os_config', JSON.stringify(snapWarranty.data()));
+            }
+          } catch (e) {}
+
+          // 10. Configurações Gerais e Preferências de OS
+          try {
+            const snapOsPref = await getDoc(doc(tenantDb, 'system_config', 'os_preferences'));
+            if (snapOsPref.exists()) {
+              localStorage.setItem('vollen_os_preferences', JSON.stringify(snapOsPref.data()));
+              localStorage.setItem('vollen_os_general_config', JSON.stringify(snapOsPref.data()));
+            }
+          } catch (e) {}
+
+          // 11. Status Personalizados de OS
+          try {
+            const snapStatuses = await getDocs(collection(tenantDb, 'os_statuses'));
+            if (!snapStatuses.empty) {
+              const listStatuses = snapStatuses.docs.map((d) => ({ id: d.id, ...d.data() }));
+              localStorage.setItem('custom_os_statuses_v3', JSON.stringify(listStatuses));
+            }
+          } catch (e) {}
+
+          // 12. Usuários e Técnicos Cadastrados
+          try {
+            const snapUsers = await getDocs(collection(tenantDb, 'users'));
+            if (!snapUsers.empty) {
+              const listUsers = snapUsers.docs.map((d) => ({ id: d.id, ...d.data() }));
+              localStorage.setItem('vollen_users', JSON.stringify(listUsers));
+            } else {
+              localStorage.setItem('vollen_users', JSON.stringify([
+                { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' }
+              ]));
+            }
+          } catch (e) {
+            localStorage.setItem('vollen_users', JSON.stringify([
+              { id: '1', username: 'admin', name: 'Administrador', role: 'Admin', password: '1234' }
+            ]));
           }
 
-          // 8. Configurações Gerais e Preferências de OS
-          const snapOsPref = await getDoc(doc(tenantDb, 'system_config', 'os_preferences'));
-          if (snapOsPref.exists()) {
-            localStorage.setItem('vollen_os_preferences', JSON.stringify(snapOsPref.data()));
-            localStorage.setItem('vollen_os_general_config', JSON.stringify(snapOsPref.data()));
-          }
+          try {
+            const snapTechs = await getDocs(collection(tenantDb, 'technicians'));
+            if (!snapTechs.empty) {
+              const listTechs = snapTechs.docs.map((d) => ({ id: d.id, ...d.data() }));
+              localStorage.setItem('vollen_technicians', JSON.stringify(listTechs));
+            }
+          } catch (e) {}
 
-          // 9. Status Personalizados de OS
-          const snapStatuses = await getDocs(collection(tenantDb, 'os_statuses'));
-          if (!snapStatuses.empty) {
-            const listStatuses = snapStatuses.docs.map((d) => ({ id: d.id, ...d.data() }));
-            localStorage.setItem('custom_os_statuses_v3', JSON.stringify(listStatuses));
-          }
-
-          // 10. Orçamentos
-          // 11. Usuários e Técnicos Cadastrados
-          const snapUsers = await getDocs(collection(tenantDb, 'users'));
-          if (!snapUsers.empty) {
-            const listUsers = snapUsers.docs.map((d) => ({ id: d.id, ...d.data() }));
-            localStorage.setItem('vollen_users', JSON.stringify(listUsers));
-          }
-
-          const snapTechs = await getDocs(collection(tenantDb, 'technicians'));
-          if (!snapTechs.empty) {
-            const listTechs = snapTechs.docs.map((d) => ({ id: d.id, ...d.data() }));
-            localStorage.setItem('vollen_technicians', JSON.stringify(listTechs));
-          }
-
-          setSuccessMsg('Todos os dados da empresa, termos, usuários e configurações foram baixados com sucesso!');
+          setSuccessMsg('Dados da empresa ativados com sucesso! Reiniciando sessão...');
         } else {
           // OPÇÃO 2: ENVIAR DADOS LOCAIS PARA A NUVEM (SOBRESCREVE A NUVEM)
-          // Função auxiliar para esvaziar coleções existentes na nuvem antes de subir os dados locais
-          const wipeCloudCollection = async (collName: string) => {
-            try {
-              const snap = await getDocs(collection(tenantDb, collName));
-              for (const docSnap of snap.docs) {
-                await deleteDoc(doc(tenantDb, collName, docSnap.id)).catch(() => {});
-              }
-            } catch (err) {
-              console.warn(`Aviso ao limpar coleção ${collName} na nuvem:`, err);
-            }
-          };
-
-          // Limpa coleções antigas da nuvem para garantir substituição limpa
-          await wipeCloudCollection('clients');
-          await wipeCloudCollection('orders');
-          await wipeCloudCollection('parts');
-          await wipeCloudCollection('services');
-          await wipeCloudCollection('equipments');
-          await wipeCloudCollection('os_statuses');
-          await wipeCloudCollection('estimates');
-          await wipeCloudCollection('users');
-          await wipeCloudCollection('technicians');
-
           // 1. Clientes
-          const localClients = JSON.parse(localStorage.getItem('vollen_clients') || '[]');
-          for (const c of localClients) {
-            if (c.id) await setDoc(doc(tenantDb, 'clients', String(c.id)), c).catch(() => {});
-          }
+          try {
+            const localClients = JSON.parse(localStorage.getItem('vollen_clients') || '[]');
+            for (const c of localClients) {
+              const docId = String(c.id || Date.now());
+              await setDoc(doc(tenantDb, 'clients', docId), { ...c, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 2. Ordens de Serviço
-          const localOrders = JSON.parse(localStorage.getItem('vollen_orders') || '[]');
-          for (const o of localOrders) {
-            if (o.id) await setDoc(doc(tenantDb, 'orders', String(o.id)), o).catch(() => {});
-          }
+          try {
+            const localOrders = JSON.parse(localStorage.getItem('vollen_orders') || '[]');
+            let maxOsNum = 0;
+            for (const o of localOrders) {
+              const docId = String(o.id || Date.now());
+              await setDoc(doc(tenantDb, 'orders', docId), { ...o, id: docId }, { merge: true });
+              if (o.code) {
+                const num = parseInt(String(o.code).replace(/\D/g, ''), 10);
+                if (!isNaN(num) && num > maxOsNum) maxOsNum = num;
+              }
+            }
+            if (maxOsNum > 0) {
+              await setDoc(doc(tenantDb, 'system_config', 'order_counter'), {
+                lastOrderNumber: maxOsNum,
+                updatedAt: new Date().toISOString()
+              }, { merge: true }).catch(() => {});
+            }
+          } catch (e) {}
 
           // 3. Peças
-          const localParts = JSON.parse(localStorage.getItem('vollen_parts_stock') || '[]');
-          for (const p of localParts) {
-            if (p.id) await setDoc(doc(tenantDb, 'parts', String(p.id)), p).catch(() => {});
-          }
+          try {
+            const localParts = JSON.parse(localStorage.getItem('vollen_parts_stock') || '[]');
+            for (const p of localParts) {
+              const docId = String(p.id || Date.now());
+              await setDoc(doc(tenantDb, 'parts', docId), { ...p, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 4. Serviços
-          const localServices = JSON.parse(localStorage.getItem('vollen_services') || '[]');
-          for (const s of localServices) {
-            if (s.id) await setDoc(doc(tenantDb, 'services', String(s.id)), s).catch(() => {});
-          }
+          try {
+            const localServices = JSON.parse(localStorage.getItem('vollen_services') || '[]');
+            for (const s of localServices) {
+              const docId = String(s.id || Date.now());
+              await setDoc(doc(tenantDb, 'services', docId), { ...s, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 5. Equipamentos
-          const localEquipments = JSON.parse(localStorage.getItem('vollen_equipments') || '[]');
-          for (const e of localEquipments) {
-            if (e.id) await setDoc(doc(tenantDb, 'equipments', String(e.id)), e).catch(() => {});
-          }
+          try {
+            const localEquipments = JSON.parse(localStorage.getItem('vollen_equipments') || '[]');
+            for (const e of localEquipments) {
+              const docId = String(e.id || Date.now());
+              await setDoc(doc(tenantDb, 'equipments', docId), { ...e, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 6. Dados da Empresa
-          const localCompany = JSON.parse(localStorage.getItem('vollen_company_data') || '{}');
-          localCompany.tradingName = pendingLicenseData.tradeName || pendingLicenseData.companyName || 'Vollen Assistência Técnica';
-          localCompany.name = pendingLicenseData.legalName || pendingLicenseData.companyName || localCompany.tradingName;
-          localStorage.setItem('vollen_company_data', JSON.stringify(localCompany));
-          await setDoc(doc(tenantDb, 'system_config', 'company_data'), localCompany).catch(() => {});
+          try {
+            const localCompany = JSON.parse(localStorage.getItem('vollen_company_data') || '{}');
+            localCompany.tradingName = pendingLicenseData.tradeName || pendingLicenseData.companyName || 'Vollen Assistência Técnica';
+            localCompany.name = pendingLicenseData.legalName || pendingLicenseData.companyName || localCompany.tradingName;
+            localStorage.setItem('vollen_company_data', JSON.stringify(localCompany));
+            await setDoc(doc(tenantDb, 'system_config', 'company_data'), localCompany, { merge: true });
+          } catch (e) {}
 
           // 7. Termos de Entrada, Saída, Orçamento e Garantia
-          const localWarranty = JSON.parse(localStorage.getItem('vollen_os_config') || 'null');
-          if (localWarranty) {
-            await setDoc(doc(tenantDb, 'system_config', 'warranty_config'), localWarranty).catch(() => {});
-          }
+          try {
+            const localWarranty = JSON.parse(localStorage.getItem('vollen_os_config') || 'null');
+            if (localWarranty) {
+              await setDoc(doc(tenantDb, 'system_config', 'warranty_config'), localWarranty, { merge: true });
+            }
+          } catch (e) {}
 
           // 8. Configurações Gerais e Preferências de OS
-          const localOsConfig = JSON.parse(localStorage.getItem('vollen_os_preferences') || localStorage.getItem('vollen_os_general_config') || 'null');
-          if (localOsConfig) {
-            await setDoc(doc(tenantDb, 'system_config', 'os_preferences'), localOsConfig).catch(() => {});
-          }
+          try {
+            const localOsConfig = JSON.parse(localStorage.getItem('vollen_os_preferences') || localStorage.getItem('vollen_os_general_config') || 'null');
+            if (localOsConfig) {
+              await setDoc(doc(tenantDb, 'system_config', 'os_preferences'), localOsConfig, { merge: true });
+            }
+          } catch (e) {}
 
           // 9. Status Personalizados de OS
-          const localStatuses = JSON.parse(localStorage.getItem('custom_os_statuses_v3') || '[]');
-          for (const st of localStatuses) {
-            if (st.id) await setDoc(doc(tenantDb, 'os_statuses', String(st.id)), st).catch(() => {});
-          }
+          try {
+            const localStatuses = JSON.parse(localStorage.getItem('custom_os_statuses_v3') || '[]');
+            for (const st of localStatuses) {
+              const docId = String(st.id || Date.now());
+              await setDoc(doc(tenantDb, 'os_statuses', docId), { ...st, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 10. Orçamentos
-          const localEstimates = JSON.parse(localStorage.getItem('vollen_estimates') || '[]');
-          for (const est of localEstimates) {
-            if (est.id) await setDoc(doc(tenantDb, 'estimates', String(est.id)), est).catch(() => {});
-          }
+          try {
+            const localEstimates = JSON.parse(localStorage.getItem('vollen_estimates') || '[]');
+            for (const est of localEstimates) {
+              const docId = String(est.id || Date.now());
+              await setDoc(doc(tenantDb, 'estimates', docId), { ...est, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
           // 11. Usuários e Técnicos
-          const localUsers = JSON.parse(localStorage.getItem('vollen_users') || '[]');
-          for (const u of localUsers) {
-            if (u.id) await setDoc(doc(tenantDb, 'users', String(u.id)), u).catch(() => {});
-          }
+          try {
+            const localUsers = JSON.parse(localStorage.getItem('vollen_users') || '[]');
+            for (const u of localUsers) {
+              const docId = String(u.id || Date.now());
+              await setDoc(doc(tenantDb, 'users', docId), { ...u, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
-          const localTechs = JSON.parse(localStorage.getItem('vollen_technicians') || '[]');
-          for (const t of localTechs) {
-            if (t.id) await setDoc(doc(tenantDb, 'technicians', String(t.id)), t).catch(() => {});
-          }
+          try {
+            const localTechs = JSON.parse(localStorage.getItem('vollen_technicians') || '[]');
+            for (const t of localTechs) {
+              const docId = String(t.id || Date.now());
+              await setDoc(doc(tenantDb, 'technicians', docId), { ...t, id: docId }, { merge: true });
+            }
+          } catch (e) {}
 
-          setSuccessMsg('Nuvem limpa e todos os novos dados locais gravados com sucesso!');
+          setSuccessMsg('Dados da empresa ativados com sucesso! Reiniciando sessão...');
         }
       }
+
+      // Limpa a sessão atual do usuário para exigir novo login com os usuários da nova empresa
+      sessionStorage.clear();
+      localStorage.removeItem('vollen_current_user');
 
       setTimeout(() => {
         if (onLicenseChanged) onLicenseChanged();
         window.location.reload();
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Erro inesperado durante a sincronização dos dados.');
+      setErrorMsg(err?.message || 'Erro inesperado durante a ativação da licença.');
     } finally {
       setLoading(false);
     }
@@ -420,47 +615,54 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
       : '';
 
     if (savedPwd !== '') {
-      if (savedPwd === inputPwd) {
-        proceedDeactivate();
-        return;
-      }
-      // Fallback para senha mestre caso o usuário seja admin
-      if (inputPwd === '1234' || inputPwd === 'admin') {
+      if (savedPwd.toLowerCase() === inputPwd.toLowerCase()) {
         proceedDeactivate();
         return;
       }
       setAuthError('Senha incorreta! Digite a senha cadastrada para este usuário.');
       return;
     } else {
-      // Se não há senha gravada para o usuário
-      if (inputPwd === '1234' || inputPwd === 'admin') {
+      // Se não há senha gravada para o usuário (usuário padrão inicial sem senha alterada)
+      if (inputPwd.toLowerCase() === '1234' || inputPwd.toLowerCase() === 'admin') {
         proceedDeactivate();
         return;
       }
-      setAuthError('Senha incorreta!');
+      setAuthError('Senha incorreta! Digite a senha cadastrada.');
       return;
     }
   };
 
-  const proceedDeactivate = () => {
+  const proceedDeactivate = async () => {
     setIsDeauthModalOpen(false);
     deactivateLicense();
+    
+    // Retoma a contagem de demonstração da máquina calculando os dias restantes
+    const { deactivatePermanentLicense } = await import('../services/trialProtectionService');
+    await deactivatePermanentLicense().catch(() => {});
+
     setSavedSerial(null);
     setTenantInfo(null);
     setSerialInput('');
 
-    // Limpa a sessão do usuário atual para forçar o retorno à tela de login
+    // Limpa apenas a sessão do usuário atual para voltar ao login mantendo todos os usuários e dados locais intactos
     try {
-      sessionStorage.removeItem('vollen_current_user');
+      sessionStorage.clear();
       localStorage.removeItem('vollen_current_user');
     } catch {}
 
-    setSuccessMsg('Chave desvinculada com sucesso pelo administrador. Retornando à tela de Login...');
+    setSuccessMsg('Chave desvinculada com sucesso. Todos os seus dados e usuários foram mantidos no sistema.');
 
     setTimeout(() => {
       if (onLicenseChanged) onLicenseChanged();
       window.location.reload();
     }, 1200);
+  };
+
+  const handleOpenRemoveSerialAuth = () => {
+    setShowRemoveConfirm(false);
+    setAuthError('');
+    setAdminPassword('');
+    setIsDeauthModalOpen(true);
   };
 
   const handleCopySerial = () => {
@@ -558,11 +760,11 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
             </div>
           )}
 
-          {/* Form Input */}
+          {/* Form Input - bloqueado quando serial já está ativa */}
           <div className="space-y-2">
             <label className="font-bold text-slate-800 flex items-center justify-between">
               <span>Chave Serial do Sistema:</span>
-              {savedSerial && (
+              {savedSerial && !isEditingSerial && (
                 <button
                   onClick={handleCopySerial}
                   className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-semibold cursor-pointer"
@@ -573,19 +775,47 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
               )}
             </label>
 
-            <div className="relative">
-              <input
-                type="text"
-                value={serialInput}
-                onChange={(e) => handleFormatSerial(e.target.value)}
-                placeholder="Ex: VOLL1-89A23-99F10-00234"
-                disabled={loading}
-                className="w-full bg-slate-50 border-2 border-slate-200 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-3 font-mono font-bold text-slate-800 text-sm tracking-wider outline-none transition-all placeholder:text-slate-400 disabled:opacity-50"
-              />
-            </div>
-            <p className="text-[11px] text-slate-500 leading-tight">
-              Uma vez inserida e ativada, a chave serial permanecerá salva no seu sistema sem a necessidade de redigitar.
-            </p>
+            {/* Campo bloqueado quando serial está ativa e não está editando */}
+            {savedSerial && !isEditingSerial ? (
+              <div className="relative">
+                <div className="w-full bg-emerald-50 border-2 border-emerald-200 rounded-xl px-4 py-3 font-mono font-bold text-emerald-800 text-sm tracking-wider flex items-center justify-between">
+                  <span>{savedSerial}</span>
+                  <Lock className="w-4 h-4 text-emerald-500 shrink-0 ml-2" />
+                </div>
+                <p className="text-[11px] text-emerald-700 leading-tight mt-1.5 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                  <span>Chave serial verificada e ativa. O campo está protegido contra alterações acidentais.</span>
+                </p>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  ref={serialInputRef}
+                  type="text"
+                  value={serialInput}
+                  onChange={handleFormatSerial}
+                  placeholder="Ex: VOLL1-89A23-99F10-00234"
+                  disabled={loading}
+                  autoFocus
+                  className="w-full bg-slate-50 border-2 border-indigo-300 focus:border-indigo-600 focus:bg-white rounded-xl px-4 py-3 font-mono font-bold text-slate-800 text-sm tracking-wider outline-none transition-all placeholder:text-slate-400 disabled:opacity-50"
+                />
+                {isEditingSerial && (
+                  <button
+                    type="button"
+                    onClick={() => { setIsEditingSerial(false); setSerialInput(savedSerial || ''); setErrorMsg(null); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title="Cancelar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+            {!savedSerial && (
+              <p className="text-[11px] text-slate-500 leading-tight">
+                Uma vez inserida e ativada, a chave serial permanecerá salva no seu sistema sem a necessidade de redigitar.
+              </p>
+            )}
           </div>
 
           {/* License Info Details if Active */}
@@ -608,6 +838,42 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
                     {tenantInfo.tradeName || companyData?.tradingName || tenantInfo.companyName || 'Não informado'}
                   </span>
                 </div>
+                {/* Validade da licença */}
+                <div className={`p-2 rounded-lg border col-span-full ${
+                  tenantInfo.expiresAt
+                    ? (() => {
+                        const expDate = new Date(tenantInfo.expiresAt);
+                        const today = new Date();
+                        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+                        const startOfExpDay = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate()).getTime();
+                        const days = Math.round((startOfExpDay - startOfToday) / 86400000);
+                        return days <= 30 ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-200';
+                      })()
+                    : 'bg-emerald-50 border-emerald-200'
+                }`}>
+                  <span className="text-slate-400 block font-semibold text-[10px]">Validade da Licença:</span>
+                  {tenantInfo.expiresAt ? (() => {
+                    const expDate = new Date(tenantInfo.expiresAt);
+                    const today = new Date();
+                    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+                    const startOfExpDay = new Date(expDate.getFullYear(), expDate.getMonth(), expDate.getDate()).getTime();
+                    const daysLeft = Math.round((startOfExpDay - startOfToday) / 86400000);
+                    return (
+                      <span className={`font-black text-xs break-words ${
+                        daysLeft <= 30 ? 'text-amber-700' : 'text-indigo-700'
+                      }`}>
+                        {expDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                        {daysLeft > 0 ? (
+                          <span className="font-semibold text-slate-500 ml-1">({daysLeft} dia{daysLeft !== 1 ? 's' : ''} restante{daysLeft !== 1 ? 's' : ''})</span>
+                        ) : (
+                          <span className="font-bold text-rose-600 ml-1">(Expirada)</span>
+                        )}
+                      </span>
+                    );
+                  })() : (
+                    <span className="font-black text-xs text-emerald-700">🟢 Vitalícia — sem data de expiração</span>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -623,24 +889,64 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
             Fechar
           </button>
 
-          <button
-            type="button"
-            onClick={handleStartActivation}
-            disabled={loading || !serialInput.trim()}
-            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-2"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Validando Serial...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{savedSerial ? 'Atualizar Conexão' : 'Ativar e Conectar'}</span>
-              </>
+          <div className="flex items-center gap-2">
+            {/* Alerta de confirmação antes de remover a serial */}
+            {showRemoveConfirm && savedSerial && (
+              <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 rounded-xl px-3 py-2 text-xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span className="text-rose-800 font-semibold">Remover serial registrado deste sistema?</span>
+                <button
+                  type="button"
+                  onClick={handleOpenRemoveSerialAuth}
+                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold cursor-pointer"
+                >
+                  Confirmar e Autenticar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRemoveConfirm(false)}
+                  className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-bold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+              </div>
             )}
-          </button>
+
+            {/* Botão para remover serial quando já existe uma ativa */}
+            {savedSerial && !showRemoveConfirm && (
+              <button
+                type="button"
+                onClick={() => setShowRemoveConfirm(true)}
+                className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 text-xs"
+                title="Remover o serial registrado e deixar o sistema sem nenhuma chave vinculada"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remover Serial</span>
+              </button>
+            )}
+
+            {/* Botão de ativar/atualizar (visível só quando campo desbloqueado / sem serial) */}
+            {!savedSerial && (
+              <button
+                type="button"
+                onClick={handleStartActivation}
+                disabled={loading || !serialInput.trim()}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Validando Serial...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Ativar e Conectar</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -792,8 +1098,11 @@ export const SerialLicenseModal: React.FC<SerialLicenseModalProps> = ({
             </div>
 
             <form onSubmit={handleConfirmDeactivate} className="p-5 space-y-4 bg-slate-50">
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-[11px] leading-relaxed">
+                ✅ <strong>Seus dados estão seguros:</strong> Ao desvincular, todos os clientes, ordens de serviço, peças e configurações <strong>serão mantidos intactos</strong>. Ao inserir uma nova chave serial, tudo continuará presente.
+              </div>
               <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-950 text-[11px] leading-relaxed">
-                ⚠️ <strong>Atenção:</strong> Desvincular a Chave Serial desconectará este computador da nuvem da empresa e retornará o sistema ao <strong>Modo Local</strong>.
+                🔒 <strong>Atenção:</strong> Desvincular a Chave Serial desconectará este computador da nuvem da empresa e retornará o sistema ao <strong>Modo Local</strong>.
               </div>
 
               {authError && (

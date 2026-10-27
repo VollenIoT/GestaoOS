@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Hash, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 interface OrderSequenceModalProps {
   isOpen: boolean;
@@ -34,17 +35,17 @@ export const OrderSequenceModal: React.FC<OrderSequenceModalProps> = ({
     }
   }, [isOpen]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('OrderSequenceModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('OrderSequenceModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

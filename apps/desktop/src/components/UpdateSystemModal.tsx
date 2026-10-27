@@ -8,8 +8,9 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { modalStack } from '../utils/modalStack';
+import { getCurrentEdition } from '../config/appFeatures';
 
-export const CURRENT_SYSTEM_VERSION = '3.0.0';
+export const CURRENT_SYSTEM_VERSION = getCurrentEdition().replace(/^v/, '');
 
 export interface AppVersionInfo {
   version: string;
@@ -111,16 +112,11 @@ export const UpdateSystemModal: React.FC<UpdateSystemModalProps> = ({
       const masterDb = getMasterFirestore();
       const currentMajor = CURRENT_SYSTEM_VERSION.split('.')[0] || '1';
 
-      // 1. Consulta metadados da versão no canal da nuvem (título, notas, data)
+      // 1. Consulta metadados da versão no canal da nuvem da respectiva versão (v1, v2 ou v3)
       let cloudInfo: AppVersionInfo | null = null;
       try {
         const docRef = doc(masterDb, 'system_config', `app_version_v${currentMajor}`);
-        let docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-          const globalDoc = doc(masterDb, 'system_config', 'app_version');
-          docSnap = await getDoc(globalDoc);
-        }
+        const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           cloudInfo = docSnap.data() as AppVersionInfo;

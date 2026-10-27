@@ -1,9 +1,54 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Edit3, User, Phone, Package, Wrench, Cpu, FileCheck, MessageSquare, FileText, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { X, Save, Edit3, Edit2, User, Phone, Package, Wrench, Cpu, FileCheck, MessageSquare, FileText, ChevronRight, Plus, Trash2, Building2, UserCheck, Barcode, Sparkles, Tag, AlertTriangle, Camera, Image as ImageIcon, FolderOpen, Ruler, Zap, Layers } from 'lucide-react';
 import { fetchAddressByCep } from '../services/api';
 import { ClientOrdersHistoryModal } from './ClientOrdersHistoryModal';
 import { useDialog } from './DialogContext';
 import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
+import { generateAutoBarcode } from '../utils/barcodeUtils';
+import { useImageSource } from '../utils/imageUtils';
+
+const PartPhotoRegisterPreview: React.FC<{ imageUrl?: string }> = ({ imageUrl }) => {
+  const { displaySrc, hasError, setHasError, isLoading } = useImageSource(imageUrl);
+
+  if (!imageUrl || !imageUrl.trim()) {
+    return (
+      <div className="text-slate-400 text-center flex flex-col items-center justify-center p-4">
+        <ImageIcon className="w-12 h-12 text-slate-300 mb-2" />
+        <span className="text-xs font-bold text-slate-600">Nenhuma foto adicionada</span>
+        <span className="text-[11px] text-slate-400 mt-0.5">Cole o caminho do arquivo acima ou clique em Buscar</span>
+      </div>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <div className="text-rose-500 text-center flex flex-col items-center justify-center p-4">
+        <AlertTriangle className="w-8 h-8 text-rose-400 mb-1.5 mx-auto" />
+        <span className="text-xs font-bold">Imagem não encontrada</span>
+        <span className="text-[10.5px] text-slate-500 mt-0.5">Verifique se o arquivo existe e o caminho informado</span>
+      </div>
+    );
+  }
+
+  if (isLoading && !displaySrc) {
+    return (
+      <div className="text-slate-400 text-center flex flex-col items-center justify-center p-4">
+        <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin mb-2" />
+        <span className="text-xs font-medium text-slate-500">Carregando imagem...</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={displaySrc}
+      alt="Foto da Peça"
+      onError={() => setHasError(true)}
+      className="w-full h-full object-cover"
+    />
+  );
+};
 
 interface RegisterModalProps {
   isOpen: boolean;
@@ -13,10 +58,13 @@ interface RegisterModalProps {
   equipmentDataToView?: any;
   serviceDataToView?: any;
   availableEquipments?: any[];
+  availableSuppliers?: any[];
+  existingParts?: any[];
   startInEditMode?: boolean;
   isExclusiveClientMode?: boolean;
   clientOrders?: any[];
   nextClientCode?: string;
+  nextPartCode?: string;
   onClose: () => void;
   onSaveClient?: (updatedClient: any) => void;
   onSavePart?: (partData: any) => void;
@@ -34,10 +82,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   equipmentDataToView,
   serviceDataToView,
   availableEquipments = [],
+  availableSuppliers = [],
+  existingParts = [],
   startInEditMode = false,
   isExclusiveClientMode = false,
   clientOrders = [],
   nextClientCode = '0001',
+  nextPartCode = '0001',
   onClose,
   onSaveClient,
   onSavePart,
@@ -50,6 +101,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   const [activeTab, setActiveTab] = useState<
     'CLIENT' | 'PART' | 'TECHNICIAN' | 'EQUIPMENT' | 'SERVICE'
   >(initialType);
+  const [partSubTab, setPartSubTab] = useState<'DATA' | 'DIMENSIONS' | 'SPECS' | 'ATTRIBUTES' | 'PHOTOS'>('DATA');
+  const [isEditingPartCode, setIsEditingPartCode] = useState(false);
+  const [newAttrName, setNewAttrName] = useState('');
+  const [newAttrValue, setNewAttrValue] = useState('');
+  const partFileInputRef = useRef<HTMLInputElement>(null);
+  const partCodeInputRef = useRef<HTMLInputElement>(null);
 
   const [equipmentForm, setEquipmentForm] = useState({
     id: '',
@@ -94,11 +151,59 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [partData, setPartData] = useState({
+  const [partData, setPartData] = useState<{
+    id: string;
+    name: string;
+    code: string;
+    manufacturerCode: string;
+    barcode: string;
+    brand: string;
+    group: string;
+    location: string;
+    costPrice: string;
+    techPrice: string;
+    finalPrice: string;
+    profitMarginPercent: string;
+    application: string;
+    unit: string;
+    stockQuantity: string;
+    minStock: string;
+    supplierId: string;
+    supplierName: string;
+    imageUrl: string;
+    updatedAt: string;
+
+    // 1. Medidas & Dimensões
+    length: string;
+    width: string;
+    height: string;
+    innerDiameter: string;
+    outerDiameter: string;
+    threadFitting: string;
+    weight: string;
+
+    // 2. Elétrica & Técnica
+    voltage: string;
+    power: string;
+    current: string;
+    capacitance: string;
+    frequency: string;
+    resistance: string;
+    material: string;
+
+    // 3. Compatibilidade & OEM
+    compatibleModels: string;
+    oemCrossReference: string;
+    colorFinish: string;
+
+    // 5. Atributos Extras
+    customAttributes: Array<{ name: string; value: string }>;
+  }>({
     id: '',
     name: '',
     code: '',
     manufacturerCode: '',
+    barcode: '',
     brand: '',
     group: '',
     location: '',
@@ -108,14 +213,46 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     profitMarginPercent: '',
     application: '',
     unit: 'UN',
-    stockQuantity: '10',
-    minStock: '2',
+    stockQuantity: '0',
+    minStock: '0',
+    supplierId: '',
+    supplierName: '',
+    imageUrl: '',
+    updatedAt: '',
+
+    length: '',
+    width: '',
+    height: '',
+    innerDiameter: '',
+    outerDiameter: '',
+    threadFitting: '',
+    weight: '',
+
+    voltage: '',
+    power: '',
+    current: '',
+    capacitance: '',
+    frequency: '',
+    resistance: '',
+    material: '',
+
+    compatibleModels: '',
+    oemCrossReference: '',
+    colorFinish: '',
+
+    customAttributes: [],
   });
 
   const [clientData, setClientData] = useState<{
     id: string;
     code: string;
-    name: string;
+    personType?: 'PF' | 'PJ';
+    name: string; // Nome Completo (PF) ou Razão Social (PJ)
+    tradeName?: string; // Nome Fantasia
+    cpf?: string;
+    cnpj?: string;
+    ie?: string; // Inscrição Estadual
+    im?: string; // Inscrição Municipal
     phone: string;
     whatsapp: string;
     contactName: string;
@@ -132,10 +269,18 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     email: string;
     additionalNotes: string;
     isTechnician: boolean;
+    hasRestriction: boolean;
+    restrictionReason: string;
   }>({
     id: '',
     code: '',
+    personType: 'PF',
     name: '',
+    tradeName: '',
+    cpf: '',
+    cnpj: '',
+    ie: '',
+    im: '',
     phone: '',
     whatsapp: '',
     contactName: '',
@@ -152,9 +297,16 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     email: '',
     additionalNotes: '',
     isTechnician: false,
+    hasRestriction: false,
+    restrictionReason: '',
   });
 
   const nameRef = useRef<HTMLInputElement>(null);
+  const tradeNameRef = useRef<HTMLInputElement>(null);
+  const docRef = useRef<HTMLInputElement>(null);
+  const cnpjRef = useRef<HTMLInputElement>(null);
+  const ieRef = useRef<HTMLInputElement>(null);
+  const imRef = useRef<HTMLInputElement>(null);
   const phoneRef = useRef<HTMLInputElement>(null);
   const whatsappRef = useRef<HTMLInputElement>(null);
   const contactNameRef = useRef<HTMLInputElement>(null);
@@ -201,6 +353,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
   useEffect(() => {
     setIsDirty(false);
+    setIsEditingPartCode(false);
     setActiveTab(initialType);
     setSuccessMessage(null);
 
@@ -225,11 +378,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     }
 
     if (serviceDataToView) {
+      const sPrice = serviceDataToView.price !== undefined && serviceDataToView.price !== null ? String(serviceDataToView.price).replace('.', ',') : '';
       setServiceForm({
         id: serviceDataToView.id || '',
         code: serviceDataToView.code || '',
         name: serviceDataToView.name || serviceDataToView.description || '',
-        price: serviceDataToView.price || '',
+        price: sPrice,
       });
     } else {
       setServiceForm({
@@ -241,9 +395,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     }
 
     if (partDataToView) {
-      const costVal = parseFloat((partDataToView.costPrice || '0').replace(',', '.')) || 0;
-      const finalVal = parseFloat((partDataToView.finalPrice || '0').replace(',', '.')) || 0;
-      let marginStr = partDataToView.profitMarginPercent || '';
+      const rawCost = partDataToView.costPrice !== undefined && partDataToView.costPrice !== null ? String(partDataToView.costPrice) : '0';
+      const rawFinal = (partDataToView.finalPrice !== undefined && partDataToView.finalPrice !== null ? String(partDataToView.finalPrice) : (partDataToView.price !== undefined && partDataToView.price !== null ? String(partDataToView.price) : '0'));
+      const rawTech = partDataToView.techPrice !== undefined && partDataToView.techPrice !== null ? String(partDataToView.techPrice) : '';
+
+      const costVal = parseFloat(rawCost.replace(',', '.')) || 0;
+      const finalVal = parseFloat(rawFinal.replace(',', '.')) || 0;
+      let marginStr = partDataToView.profitMarginPercent !== undefined && partDataToView.profitMarginPercent !== null ? String(partDataToView.profitMarginPercent) : '';
       if (!marginStr && costVal > 0 && finalVal > 0) {
         const pct = ((finalVal - costVal) / costVal) * 100;
         marginStr = pct.toFixed(1).replace('.0', '');
@@ -254,24 +412,53 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         name: partDataToView.name || '',
         code: partDataToView.code || '',
         manufacturerCode: partDataToView.manufacturerCode || '',
+        barcode: partDataToView.barcode || '',
         brand: partDataToView.brand || '',
         group: partDataToView.group || '',
         location: partDataToView.location || '',
-        costPrice: partDataToView.costPrice || '',
-        techPrice: partDataToView.techPrice || '',
-        finalPrice: partDataToView.finalPrice || '',
+        costPrice: rawCost === '0' ? '' : rawCost.replace('.', ','),
+        techPrice: rawTech ? rawTech.replace('.', ',') : '',
+        finalPrice: rawFinal === '0' ? '' : rawFinal.replace('.', ','),
         profitMarginPercent: marginStr,
         application: partDataToView.application || '',
         unit: partDataToView.unit || 'UN',
-        stockQuantity: partDataToView.stockQuantity !== undefined ? String(partDataToView.stockQuantity) : '10',
-        minStock: partDataToView.minStock !== undefined ? String(partDataToView.minStock) : '2',
+        stockQuantity: partDataToView.stockQuantity !== undefined ? String(partDataToView.stockQuantity) : '0',
+        minStock: partDataToView.minStock !== undefined ? String(partDataToView.minStock) : '0',
+        supplierId: partDataToView.supplierId || '',
+        supplierName: partDataToView.supplierName || '',
+        imageUrl: partDataToView.imageUrl || '',
+        updatedAt: partDataToView.updatedAt || '',
+
+        length: (partDataToView as any).length || '',
+        width: (partDataToView as any).width || '',
+        height: (partDataToView as any).height || '',
+        innerDiameter: (partDataToView as any).innerDiameter || '',
+        outerDiameter: (partDataToView as any).outerDiameter || '',
+        threadFitting: (partDataToView as any).threadFitting || '',
+        weight: (partDataToView as any).weight || '',
+
+        voltage: (partDataToView as any).voltage || '',
+        power: (partDataToView as any).power || '',
+        current: (partDataToView as any).current || '',
+        capacitance: (partDataToView as any).capacitance || '',
+        frequency: (partDataToView as any).frequency || '',
+        resistance: (partDataToView as any).resistance || '',
+        material: (partDataToView as any).material || '',
+
+        compatibleModels: (partDataToView as any).compatibleModels || '',
+        oemCrossReference: (partDataToView as any).oemCrossReference || '',
+        colorFinish: (partDataToView as any).colorFinish || '',
+
+        customAttributes: Array.isArray((partDataToView as any).customAttributes) ? [...(partDataToView as any).customAttributes] : [],
       });
+      setPartSubTab('DATA');
     } else {
       setPartData({
         id: '',
         name: '',
-        code: '',
+        code: nextPartCode || '0001',
         manufacturerCode: '',
+        barcode: '',
         brand: '',
         group: '',
         location: '',
@@ -281,16 +468,50 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         profitMarginPercent: '',
         application: '',
         unit: 'UN',
-        stockQuantity: '10',
-        minStock: '2',
+        stockQuantity: '0',
+        minStock: '0',
+        supplierId: '',
+        supplierName: '',
+        imageUrl: '',
+        updatedAt: '',
+
+        length: '',
+        width: '',
+        height: '',
+        innerDiameter: '',
+        outerDiameter: '',
+        threadFitting: '',
+        weight: '',
+
+        voltage: '',
+        power: '',
+        current: '',
+        capacitance: '',
+        frequency: '',
+        resistance: '',
+        material: '',
+
+        compatibleModels: '',
+        oemCrossReference: '',
+        colorFinish: '',
+
+        customAttributes: [],
       });
+      setPartSubTab('DATA');
     }
 
     if (clientDataToView) {
+      const isPj = clientDataToView.personType === 'PJ' || Boolean(clientDataToView.cnpj);
       setClientData({
         id: clientDataToView.id || '',
         code: clientDataToView.code || '',
+        personType: isPj ? 'PJ' : 'PF',
         name: clientDataToView.name || '',
+        tradeName: clientDataToView.tradeName || '',
+        cpf: clientDataToView.cpf || '',
+        cnpj: clientDataToView.cnpj || '',
+        ie: clientDataToView.ie || '',
+        im: clientDataToView.im || '',
         phone: clientDataToView.phone || '',
         whatsapp: clientDataToView.whatsapp || '',
         contactName: clientDataToView.contactName || clientDataToView.contact1 || '',
@@ -309,13 +530,21 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         email: clientDataToView.email || '',
         additionalNotes: clientDataToView.additionalNotes || clientDataToView.notes || '',
         isTechnician: Boolean(clientDataToView.isTechnician),
+        hasRestriction: Boolean(clientDataToView.hasRestriction),
+        restrictionReason: clientDataToView.restrictionReason || '',
       });
       setIsEditing(!clientDataToView || startInEditMode);
     } else {
       setClientData({
         id: '',
         code: '',
+        personType: 'PF',
         name: '',
+        tradeName: '',
+        cpf: '',
+        cnpj: '',
+        ie: '',
+        im: '',
         phone: '',
         whatsapp: '',
         contactName: '',
@@ -332,6 +561,8 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         email: '',
         additionalNotes: '',
         isTechnician: false,
+        hasRestriction: false,
+        restrictionReason: '',
       });
       setIsEditing(true);
     }
@@ -367,6 +598,32 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     return nums;
   };
 
+  const formatCpf = (value: string) => {
+    const nums = value.replace(/\D/g, '').slice(0, 11);
+    if (nums.length > 9) {
+      return `${nums.slice(0, 3)}.${nums.slice(3, 6)}.${nums.slice(6, 9)}-${nums.slice(9)}`;
+    } else if (nums.length > 6) {
+      return `${nums.slice(0, 3)}.${nums.slice(3, 6)}.${nums.slice(6)}`;
+    } else if (nums.length > 3) {
+      return `${nums.slice(0, 3)}.${nums.slice(3)}`;
+    }
+    return nums;
+  };
+
+  const formatCnpj = (value: string) => {
+    const nums = value.replace(/\D/g, '').slice(0, 14);
+    if (nums.length > 12) {
+      return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5, 8)}/${nums.slice(8, 12)}-${nums.slice(12)}`;
+    } else if (nums.length > 8) {
+      return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5, 8)}/${nums.slice(8)}`;
+    } else if (nums.length > 5) {
+      return `${nums.slice(0, 2)}.${nums.slice(2, 5)}.${nums.slice(5)}`;
+    } else if (nums.length > 2) {
+      return `${nums.slice(0, 2)}.${nums.slice(2)}`;
+    }
+    return nums;
+  };
+
   const formatPhone = (value: string) => {
     const nums = value.replace(/\D/g, '').slice(0, 11);
     if (nums.length > 6) {
@@ -385,7 +642,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     setClientData((prev) => ({ ...prev, cep: formatted }));
 
     const numsOnly = formatted.replace(/\D/g, '');
-    if (numsOnly.length === 8 && isEditing) {
+    if (getCurrentFeatures().hasAutoCepSearch && numsOnly.length === 8 && isEditing) {
       const res = await fetchAddressByCep(numsOnly);
       if (res && res.address) {
         setClientData((prev) => ({
@@ -424,17 +681,69 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
     }
   };
 
+  const handleBrowsePartImage = async () => {
+    try {
+      if ((window as any).__TAURI_INTERNALS__) {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({
+          multiple: false,
+          directory: false,
+          title: 'Selecione a Foto da Peça',
+          filters: [
+            {
+              name: 'Imagens (*.jpg, *.jpeg, *.png, *.webp, *.bmp)',
+              extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'],
+            },
+          ],
+        });
+
+        if (selected && typeof selected === 'string') {
+          setPartData((prev) => ({ ...prev, imageUrl: selected }));
+          setIsDirty(true);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Fallback para input de arquivo web:', err);
+    }
+    partFileInputRef.current?.click();
+  };
+
+  const handlePartFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        if (base64) {
+          setPartData((prev) => ({ ...prev, imageUrl: base64 }));
+          setIsDirty(true);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
+  };
+
   const handleSubmitClient = (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientData.name.trim()) {
-      alert('Por favor, informe o Nome do Cliente.');
+      alert(clientData.personType === 'PJ' ? 'Por favor, informe a Razão Social do Cliente PJ.' : 'Por favor, informe o Nome Completo do Cliente.');
       return;
     }
+
+    const isPj = clientData.personType === 'PJ';
 
     const savedClient = {
       id: clientData.id || clientDataToView?.id || String(Date.now()),
       code: clientData.code || clientDataToView?.code || nextClientCode,
-      name: clientData.name.trim(),
+      personType: clientData.personType || 'PF',
+      name: clientData.name.trim().slice(0, 60),
+      tradeName: isPj ? (clientData.tradeName || '').trim().slice(0, 60) : '',
+      cpf: !isPj ? (clientData.cpf || '').trim() : '',
+      cnpj: isPj ? (clientData.cnpj || '').trim() : '',
+      ie: isPj ? (clientData.ie || '').trim() : '',
+      im: isPj ? (clientData.im || '').trim() : '',
       phone: clientData.phone.trim(),
       whatsapp: clientData.whatsapp.trim(),
       contactName: clientData.contactName.trim(),
@@ -446,13 +755,15 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
       address: clientData.address.trim(),
       number: clientData.number.trim(),
       complement: clientData.complement.trim(),
-      neighborhood: clientData.neighborhood.trim(),
+      neighborhood: clientData.neighborhood.trim().slice(0, 30),
       city: clientData.city.trim(),
-      state: clientData.state.trim(),
+      state: clientData.state.trim().slice(0, 3).toUpperCase(),
       reference: clientData.reference.trim(),
       email: clientData.email.trim(),
       additionalNotes: clientData.additionalNotes ? clientData.additionalNotes.trim() : '',
       isTechnician: Boolean(clientData.isTechnician),
+      hasRestriction: Boolean(clientData.hasRestriction),
+      restrictionReason: clientData.hasRestriction ? (clientData.restrictionReason || '').trim() : '',
     };
 
     if (onSaveClient) {
@@ -506,10 +817,10 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden font-sans">
+    <div className="fixed inset-0 z-[80] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className={`bg-white border border-slate-300 rounded-2xl w-full ${activeTab === 'CLIENT' ? 'max-w-5xl' : 'max-w-4xl'} max-h-[92vh] flex flex-col shadow-2xl overflow-hidden font-sans`}>
         {/* Header do Modal Exclusivo */}
-        <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
+        <div className="px-4 py-2.5 bg-slate-200 border-b border-slate-300 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             {renderIcon()}
             <h2 className="text-base font-bold text-slate-800">{renderTitle()}</h2>
@@ -521,10 +832,10 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
 
         {/* Abas de Navegação */}
         {!hideTabs && (
-          <div className="flex border-b border-slate-200 bg-slate-100 text-xs font-bold text-slate-700">
+          <div className="flex border-b border-slate-200 bg-slate-100 text-xs font-bold text-slate-700 shrink-0">
             <button
               onClick={() => setActiveTab('CLIENT')}
-              className={`flex-1 py-3 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'CLIENT'
+              className={`flex-1 py-2 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'CLIENT'
                 ? 'border-sky-600 text-sky-700 bg-white'
                 : 'border-transparent hover:bg-slate-200'
                 }`}
@@ -533,7 +844,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('PART')}
-              className={`flex-1 py-3 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'PART'
+              className={`flex-1 py-2 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'PART'
                 ? 'border-sky-600 text-sky-700 bg-white'
                 : 'border-transparent hover:bg-slate-200'
                 }`}
@@ -542,7 +853,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('TECHNICIAN')}
-              className={`flex-1 py-3 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'TECHNICIAN'
+              className={`flex-1 py-2 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'TECHNICIAN'
                 ? 'border-sky-600 text-sky-700 bg-white'
                 : 'border-transparent hover:bg-slate-200'
                 }`}
@@ -551,7 +862,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('EQUIPMENT')}
-              className={`flex-1 py-3 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'EQUIPMENT'
+              className={`flex-1 py-2 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'EQUIPMENT'
                 ? 'border-sky-600 text-sky-700 bg-white'
                 : 'border-transparent hover:bg-slate-200'
                 }`}
@@ -560,7 +871,7 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('SERVICE')}
-              className={`flex-1 py-3 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'SERVICE'
+              className={`flex-1 py-2 flex items-center justify-center gap-1.5 border-b-2 ${activeTab === 'SERVICE'
                 ? 'border-sky-600 text-sky-700 bg-white'
                 : 'border-transparent hover:bg-slate-200'
                 }`}
@@ -571,9 +882,9 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
         )}
 
         {/* Formulário do Cliente */}
-        <div className="p-4 overflow-hidden flex-1 bg-slate-50 text-xs flex flex-col justify-between min-h-0">
+        <div className="p-3 overflow-hidden flex-1 bg-slate-50 text-xs flex flex-col justify-between min-h-0">
           {successMessage && (
-            <div className="mb-2 p-2 bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold rounded-xl flex items-center gap-2 shadow-sm text-xs shrink-0">
+            <div className="mb-1.5 p-1.5 bg-emerald-100 border border-emerald-300 text-emerald-950 font-bold rounded-lg flex items-center gap-2 shadow-sm text-xs shrink-0">
               <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
               {successMessage}
             </div>
@@ -588,34 +899,87 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               onChange={() => setIsDirty(true)}
               className="flex-1 flex flex-col justify-between overflow-hidden"
             >
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 gap-2 shrink-0">
-                <span className="font-bold text-slate-700 flex items-center gap-2">
-                  {clientDataToView ? (
-                    <>
-                      <span>Dados do Cliente:</span>
-                      <span className="font-mono text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded text-xs font-bold">
-                        {clientDataToView.code ? String(clientDataToView.code).replace('CLI-', '').padStart(4, '0') : '0001'}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Cadastrando Novo Cliente:</span>
-                      <span className="font-mono text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded text-xs font-bold">
-                        {nextClientCode}
-                      </span>
-                    </>
+              {/* BARRA SUPERIOR DE INFORMAÇÕES E TAGS */}
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 gap-2 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5 text-xs">
+                    {clientDataToView ? (
+                      <>
+                        <span>Cliente:</span>
+                        <span className="font-mono text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded text-[11px] font-bold">
+                          {clientDataToView.code ? String(clientDataToView.code).replace('CLI-', '').padStart(4, '0') : '0001'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Novo Cliente:</span>
+                        <span className="font-mono text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded text-[11px] font-bold">
+                          {nextClientCode}
+                        </span>
+                      </>
+                    )}
+                  </span>
+
+                  {/* CHECKBOX TÉCNICO / REVENDEDOR */}
+                  {getCurrentFeatures().hasClientTechnicianType && (
+                    <label
+                      htmlFor="isTechnicianCheck"
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold transition-all cursor-pointer select-none ${
+                        clientData.isTechnician
+                          ? 'bg-amber-100 border-amber-300 text-amber-950'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        id="isTechnicianCheck"
+                        disabled={!isEditing}
+                        checked={clientData.isTechnician}
+                        onChange={(e) => {
+                          setClientData({ ...clientData, isTechnician: e.target.checked });
+                          setIsDirty(true);
+                        }}
+                        className="w-3 h-3 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <Wrench className={`w-3 h-3 ${clientData.isTechnician ? 'text-amber-700' : 'text-slate-400'}`} />
+                      <span>Técnico/Revendedor</span>
+                    </label>
                   )}
-                </span>
+
+                  {/* CHECKBOX CLIENTE COM RESTRIÇÃO */}
+                  <label
+                    htmlFor="hasRestrictionCheck"
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold transition-all cursor-pointer select-none ${
+                      clientData.hasRestriction
+                        ? 'bg-rose-100 border-rose-400 text-rose-950 ring-1 ring-rose-400'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-rose-50 hover:border-rose-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      id="hasRestrictionCheck"
+                      disabled={!isEditing}
+                      checked={clientData.hasRestriction}
+                      onChange={(e) => {
+                        setClientData({ ...clientData, hasRestriction: e.target.checked });
+                        setIsDirty(true);
+                      }}
+                      className="w-3 h-3 text-rose-600 rounded border-slate-300 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <AlertTriangle className={`w-3 h-3 ${clientData.hasRestriction ? 'text-rose-600' : 'text-slate-400'}`} />
+                    <span className={clientData.hasRestriction ? 'text-rose-900 font-extrabold' : ''}>Cliente com Restrição</span>
+                  </label>
+                </div>
 
                 <div className="flex items-center gap-2">
                   {(clientDataToView || clientData.name) && (
                     <button
                       type="button"
                       onClick={() => setIsLocalHistoryOpen(true)}
-                      className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-xl font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer text-xs"
+                      className="bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer text-[11px]"
                     >
-                      <FileText className="w-3.5 h-3.5" />
-                      Buscar todas as OS deste Cliente ({filteredClientOrders.length})
+                      <FileText className="w-3 h-3" />
+                      OS do Cliente ({filteredClientOrders.length})
                     </button>
                   )}
 
@@ -623,35 +987,212 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-xl font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer text-xs"
+                      className="bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer text-[11px]"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3 h-3" />
                       Editar Cadastro
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 my-2 overflow-y-auto pr-1 flex-1 max-h-[60vh]">
-                <div className="col-span-3">
-                  <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
-                    Nome Completo do Cliente <span className="text-red-500 font-extrabold">*</span>
+              {/* GRID UNIFICADO DE CAMPOS (12 COLUNAS - COMPACTO SEM ROLAGEM) */}
+              <div className="grid grid-cols-12 gap-x-2 gap-y-1.5 my-1.5 flex-1 content-start">
+                {/* MOTIVO DA RESTRIÇÃO (EXIBIDO INLINE QUANDO MARCADO) */}
+                {clientData.hasRestriction && (
+                  <div className="col-span-12 bg-rose-50 border border-rose-300 px-2 py-1 rounded-lg flex items-center gap-2 text-rose-950">
+                    <div className="flex items-center gap-1 shrink-0 font-extrabold text-[11px] text-rose-700">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                      <span>Motivo:</span>
+                    </div>
+                    <input
+                      type="text"
+                      disabled={!isEditing}
+                      value={clientData.restrictionReason || ''}
+                      onChange={(e) => {
+                        setClientData({ ...clientData, restrictionReason: e.target.value });
+                        setIsDirty(true);
+                      }}
+                      placeholder="Informe o motivo da restrição (ex: Devedor / Inadimplente, Cheque sem fundo, etc.)..."
+                      className="flex-1 bg-white disabled:bg-rose-100/60 border border-rose-300 rounded px-2 py-0.5 text-rose-900 font-bold focus:outline-none focus:border-rose-600 placeholder:text-rose-300 text-xs h-7"
+                    />
+                  </div>
+                )}
+
+                {/* LINHA 1: TIPO DE PESSOA (DROPDOWN) + NOME/RAZÃO SOCIAL (MAX 60) + NOME FANTASIA (MAX 60) */}
+                <div className="col-span-2">
+                  <label className="block font-bold text-slate-700 mb-0.5 text-[10.5px]">
+                    Pessoa <span className="text-red-500 font-extrabold">*</span>
+                  </label>
+                  <select
+                    disabled={!isEditing}
+                    value={clientData.personType || 'PF'}
+                    onChange={(e) => {
+                      const pType = e.target.value as 'PF' | 'PJ';
+                      setClientData((prev) => ({ ...prev, personType: pType }));
+                      setIsDirty(true);
+                    }}
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 cursor-pointer"
+                  >
+                    <option value="PF">Física (PF)</option>
+                    <option value="PJ">Jurídica (PJ)</option>
+                  </select>
+                </div>
+
+                <div className="col-span-5">
+                  <label className="block font-bold text-slate-800 mb-0.5 text-[10.5px] truncate">
+                    {clientData.personType === 'PJ' ? 'Razão Social' : 'Nome Completo do Cliente'}{' '}
+                    <span className="text-red-500 font-extrabold">*</span>
                   </label>
                   <input
                     ref={nameRef}
                     type="text"
+                    maxLength={60}
                     required
                     disabled={!isEditing}
                     value={clientData.name}
-                    onChange={(e) => setClientData({ ...clientData, name: e.target.value })}
-                    onKeyDown={(e) => handleKeyDownNext(e, phoneRef)}
-                    placeholder="Digite o nome completo do cliente..."
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    onChange={(e) => {
+                      setClientData({ ...clientData, name: e.target.value.slice(0, 60) });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, clientData.personType === 'PJ' ? tradeNameRef : docRef)}
+                    placeholder={clientData.personType === 'PJ' ? 'Razão Social completa...' : 'Nome completo do cliente...'}
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Telefone Fixo / Recado</label>
+                <div className="col-span-5">
+                  <label className={`block font-semibold mb-0.5 text-[10.5px] truncate transition-colors ${
+                    clientData.personType !== 'PJ' ? 'text-slate-500' : 'text-slate-700'
+                  }`}>
+                    Nome Fantasia
+                  </label>
+                  <input
+                    ref={tradeNameRef}
+                    type="text"
+                    maxLength={60}
+                    disabled={!isEditing || clientData.personType !== 'PJ'}
+                    value={clientData.personType === 'PJ' ? (clientData.tradeName || '') : ''}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, tradeName: e.target.value.slice(0, 60) });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, cnpjRef)}
+                    placeholder={clientData.personType !== 'PJ' ? 'Disponível apenas para Pessoa Jurídica' : 'Nome Fantasia / Comercial...'}
+                    className={`w-full border rounded-md px-2 py-1 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 transition-all ${
+                      clientData.personType !== 'PJ'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500 placeholder:text-slate-400 select-none'
+                        : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                {/* LINHA 2: CPF (PF) + CNPJ (PJ) + IE (PJ) + IM (PJ) */}
+                <div className="col-span-3">
+                  <label className={`block font-semibold mb-0.5 text-[10.5px] truncate transition-colors ${
+                    clientData.personType === 'PJ' ? 'text-slate-500' : 'text-slate-700'
+                  }`}>
+                    CPF (Pessoa Física)
+                  </label>
+                  <input
+                    ref={docRef}
+                    type="text"
+                    disabled={!isEditing || clientData.personType === 'PJ'}
+                    value={clientData.personType !== 'PJ' ? (clientData.cpf || '') : ''}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, cpf: formatCpf(e.target.value) });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, phoneRef)}
+                    placeholder={clientData.personType === 'PJ' ? 'Disponível para PF' : '000.000.000-00'}
+                    className={`w-full border rounded-md px-2 py-1 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 transition-all ${
+                      clientData.personType === 'PJ'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500 placeholder:text-slate-400 select-none'
+                        : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className={`block font-semibold mb-0.5 text-[10.5px] truncate transition-colors ${
+                    clientData.personType !== 'PJ' ? 'text-slate-500' : 'text-slate-700'
+                  }`}>
+                    CNPJ (Pessoa Jurídica)
+                  </label>
+                  <input
+                    ref={cnpjRef}
+                    type="text"
+                    disabled={!isEditing || clientData.personType !== 'PJ'}
+                    value={clientData.personType === 'PJ' ? (clientData.cnpj || '') : ''}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, cnpj: formatCnpj(e.target.value) });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, ieRef)}
+                    placeholder={clientData.personType !== 'PJ' ? 'Disponível para PJ' : '00.000.000/0000-00'}
+                    className={`w-full border rounded-md px-2 py-1 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 transition-all ${
+                      clientData.personType !== 'PJ'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500 placeholder:text-slate-400 select-none'
+                        : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className={`block font-semibold mb-0.5 text-[10.5px] truncate transition-colors ${
+                    clientData.personType !== 'PJ' ? 'text-slate-500' : 'text-slate-700'
+                  }`}>
+                    Inscrição Estadual (IE)
+                  </label>
+                  <input
+                    ref={ieRef}
+                    type="text"
+                    disabled={!isEditing || clientData.personType !== 'PJ'}
+                    value={clientData.personType === 'PJ' ? (clientData.ie || '') : ''}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, ie: e.target.value });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, imRef)}
+                    placeholder={clientData.personType !== 'PJ' ? 'Disponível para PJ' : 'IE ou Isento'}
+                    className={`w-full border rounded-md px-2 py-1 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 transition-all ${
+                      clientData.personType !== 'PJ'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500 placeholder:text-slate-400 select-none'
+                        : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className={`block font-semibold mb-0.5 text-[10.5px] truncate transition-colors ${
+                    clientData.personType !== 'PJ' ? 'text-slate-500' : 'text-slate-700'
+                  }`}>
+                    Inscrição Municipal (IM)
+                  </label>
+                  <input
+                    ref={imRef}
+                    type="text"
+                    disabled={!isEditing || clientData.personType !== 'PJ'}
+                    value={clientData.personType === 'PJ' ? (clientData.im || '') : ''}
+                    onChange={(e) => {
+                      setClientData({ ...clientData, im: e.target.value });
+                      setIsDirty(true);
+                    }}
+                    onKeyDown={(e) => handleKeyDownNext(e, phoneRef)}
+                    placeholder={clientData.personType !== 'PJ' ? 'Disponível para PJ' : 'Opcional'}
+                    className={`w-full border rounded-md px-2 py-1 font-bold focus:outline-none focus:border-sky-600 text-xs h-7 transition-all ${
+                      clientData.personType !== 'PJ'
+                        ? 'bg-slate-100 border-slate-300 text-slate-500 placeholder:text-slate-400 select-none'
+                        : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                {/* LINHA 3: TELEFONE FIXO + WHATSAPP + CONTATO RESPONSÁVEL + TELEFONE CONTATO */}
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">
+                    Telefone Fixo / Recado
+                  </label>
                   <input
                     ref={phoneRef}
                     type="text"
@@ -662,14 +1203,14 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     }
                     onKeyDown={(e) => handleKeyDownNext(e, whatsappRef)}
                     placeholder="(00) 0000-0000"
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div className="col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] flex items-center gap-1 text-emerald-700">
-                    <MessageSquare className="w-3 h-3 text-emerald-600" />
-                    Número do WhatsApp
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] flex items-center gap-1 text-emerald-700 truncate">
+                    <MessageSquare className="w-3 h-3 text-emerald-600 shrink-0" />
+                    WhatsApp
                   </label>
                   <input
                     ref={whatsappRef}
@@ -681,17 +1222,14 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     }
                     onKeyDown={(e) => handleKeyDownNext(e, contactNameRef)}
                     placeholder="(00) 00000-0000"
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                {/* CONTATO PRINCIPAL */}
-                <div className="col-span-2">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="block font-semibold text-slate-700 text-[11px] text-sky-800">
-                      Contato (Nome da Pessoa / Responsável na Empresa)
-                    </label>
-                  </div>
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] text-sky-800 truncate">
+                    Contato (Responsável)
+                  </label>
                   <input
                     ref={contactNameRef}
                     type="text"
@@ -701,13 +1239,13 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                       setClientData({ ...clientData, contactName: e.target.value })
                     }
                     onKeyDown={(e) => handleKeyDownNext(e, contactPhoneRef)}
-                    placeholder="Ex: Fulano (Gerente), Ciclano (Financeiro)..."
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    placeholder="Ex: Fulano (Gerente)..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] text-sky-800">
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] text-sky-800 truncate">
                     Telefone do Contato
                   </label>
                   <input
@@ -720,95 +1258,15 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     }
                     onKeyDown={(e) => handleKeyDownNext(e, cepRef)}
                     placeholder="(00) 00000-0000"
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                {/* BOTÃO PARA ADICIONAR MAIS CONTATOS */}
-                <div className="col-span-3 flex justify-end -mt-1">
-                  {isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newContact = { id: String(Date.now()), name: '', phone: '' };
-                        setClientData((prev) => ({
-                          ...prev,
-                          additionalContacts: [...(prev.additionalContacts || []), newContact],
-                        }));
-                      }}
-                      className="text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 border border-sky-300 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all shadow-sm"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Adicionar Mais Contatos
-                    </button>
-                  )}
-                </div>
-
-                {/* CONTATOS ADICIONAIS DINÂMICOS */}
-                {(clientData.additionalContacts || []).map((cont, idx) => (
-                  <React.Fragment key={cont.id || idx}>
-                    <div className="col-span-2 bg-sky-50/40 p-2 rounded-lg border border-sky-200/80 space-y-1">
-                      <div className="flex items-center justify-between">
-                        <label className="block font-semibold text-sky-900 text-[10.5px]">
-                          Contato Adicional {idx + 2} (Nome / Cargo)
-                        </label>
-                        {isEditing && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setClientData((prev) => ({
-                                ...prev,
-                                additionalContacts: prev.additionalContacts.filter((_, i) => i !== idx),
-                              }));
-                            }}
-                            className="text-red-500 hover:text-red-700 text-[10px] font-bold flex items-center gap-0.5"
-                          >
-                            <Trash2 className="w-3 h-3" /> Remover
-                          </button>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        disabled={!isEditing}
-                        value={cont.name}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setClientData((prev) => ({
-                            ...prev,
-                            additionalContacts: prev.additionalContacts.map((c, i) =>
-                              i === idx ? { ...c, name: val } : c
-                            ),
-                          }));
-                        }}
-                        placeholder="Ex: Beltrano (Técnico), Suporte..."
-                        className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                      />
-                    </div>
-                    <div className="bg-sky-50/40 p-2 rounded-lg border border-sky-200/80 flex flex-col justify-end">
-                      <label className="block font-semibold text-sky-900 mb-1 text-[10.5px]">
-                        Telefone do Contato Adicional {idx + 2}
-                      </label>
-                      <input
-                        type="text"
-                        disabled={!isEditing}
-                        value={cont.phone}
-                        onChange={(e) => {
-                          const formatted = formatPhone(e.target.value);
-                          setClientData((prev) => ({
-                            ...prev,
-                            additionalContacts: prev.additionalContacts.map((c, i) =>
-                              i === idx ? { ...c, phone: formatted } : c
-                            ),
-                          }));
-                        }}
-                        placeholder="(00) 00000-0000"
-                        className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                      />
-                    </div>
-                  </React.Fragment>
-                ))}
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">CEP (Busca Automática)</label>
+                {/* LINHA 4: CEP + ENDEREÇO + NÚMERO + COMPLEMENTO */}
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">
+                    {getCurrentFeatures().hasAutoCepSearch ? 'CEP (Auto)' : 'CEP'}
+                  </label>
                   <input
                     ref={cepRef}
                     type="text"
@@ -817,12 +1275,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     onChange={handleCepChange}
                     onKeyDown={handleCepKeyDown}
                     placeholder="00000-000"
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div className="col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Endereço</label>
+                <div className="col-span-5">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Endereço / Rua</label>
                   <input
                     ref={addressRef}
                     type="text"
@@ -830,12 +1288,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     value={clientData.address}
                     onChange={(e) => setClientData({ ...clientData, address: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, numberRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Número</label>
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Número</label>
                   <input
                     ref={numberRef}
                     type="text"
@@ -843,12 +1301,12 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     value={clientData.number}
                     onChange={(e) => setClientData({ ...clientData, number: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, complementRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div className="col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Complemento</label>
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Complemento</label>
                   <input
                     ref={complementRef}
                     type="text"
@@ -857,25 +1315,30 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     onChange={(e) => setClientData({ ...clientData, complement: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, neighborhoodRef)}
                     placeholder="Ex: Apto 42, Bloco B..."
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Bairro</label>
+                {/* LINHA 5: BAIRRO + CIDADE + ESTADO (UF) + PONTO DE REFERÊNCIA */}
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">
+                    Bairro
+                  </label>
                   <input
                     ref={neighborhoodRef}
                     type="text"
+                    maxLength={30}
                     disabled={!isEditing}
                     value={clientData.neighborhood}
-                    onChange={(e) => setClientData({ ...clientData, neighborhood: e.target.value })}
+                    onChange={(e) => setClientData({ ...clientData, neighborhood: e.target.value.slice(0, 30) })}
                     onKeyDown={(e) => handleKeyDownNext(e, cityRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    placeholder="Bairro..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Cidade</label>
+                <div className="col-span-3">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Cidade</label>
                   <input
                     ref={cityRef}
                     type="text"
@@ -883,25 +1346,27 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     value={clientData.city}
                     onChange={(e) => setClientData({ ...clientData, city: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, stateRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Estado (UF)</label>
+                <div className="col-span-1">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate text-center" title="Estado (UF)">UF</label>
                   <input
                     ref={stateRef}
                     type="text"
+                    maxLength={3}
                     disabled={!isEditing}
                     value={clientData.state}
-                    onChange={(e) => setClientData({ ...clientData, state: e.target.value })}
+                    onChange={(e) => setClientData({ ...clientData, state: e.target.value.slice(0, 3).toUpperCase() })}
                     onKeyDown={(e) => handleKeyDownNext(e, referenceRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600 uppercase"
+                    placeholder="UF"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-1 py-1 text-slate-800 focus:outline-none focus:border-sky-600 uppercase text-xs h-7 text-center font-bold"
                   />
                 </div>
 
-                <div className="col-span-2">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Ponto de Referência</label>
+                <div className="col-span-5">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Ponto de Referência</label>
                   <input
                     ref={referenceRef}
                     type="text"
@@ -909,13 +1374,14 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     value={clientData.reference}
                     onChange={(e) => setClientData({ ...clientData, reference: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, emailRef)}
-                    placeholder="Ex: Próximo à padaria central..."
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    placeholder="Ex: Próximo à padaria..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div className="col-span-1">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">E-mail de Contato</label>
+                {/* LINHA 6: E-MAIL + OBSERVAÇÕES */}
+                <div className="col-span-4">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">E-mail de Contato</label>
                   <input
                     ref={emailRef}
                     type="email"
@@ -923,49 +1389,34 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                     value={clientData.email}
                     onChange={(e) => setClientData({ ...clientData, email: e.target.value })}
                     onKeyDown={(e) => handleKeyDownNext(e, submitBtnRef)}
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 focus:outline-none focus:border-sky-600"
+                    placeholder="email@cliente.com"
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
                 </div>
 
-                <div className="col-span-3">
-                  <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Informações Adicionais / Observações</label>
-                  <textarea
-                    rows={2}
+                <div className="col-span-8">
+                  <label className="block font-semibold text-slate-700 mb-0.5 text-[10.5px] truncate">Informações Adicionais / Observações</label>
+                  <input
+                    type="text"
                     disabled={!isEditing}
                     value={clientData.additionalNotes}
                     onChange={(e) => {
                       setClientData({ ...clientData, additionalNotes: e.target.value });
                       setIsDirty(true);
                     }}
-                    placeholder="Digite observações sobre o cliente, particularidades, preferências..."
-                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-sky-600 resize-none text-xs"
+                    placeholder="Observações sobre o cliente, particularidades, preferências..."
+                    className="w-full bg-white disabled:bg-slate-100 border border-slate-300 rounded-md px-2 py-1 text-slate-800 focus:outline-none focus:border-sky-600 text-xs h-7"
                   />
-                </div>
-
-                <div className="col-span-3 pt-1 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="isTechnicianCheck"
-                    disabled={!isEditing}
-                    checked={clientData.isTechnician}
-                    onChange={(e) => {
-                      setClientData({ ...clientData, isTechnician: e.target.checked });
-                      setIsDirty(true);
-                    }}
-                    className="w-4 h-4 text-sky-600 rounded border-slate-300 focus:ring-sky-500 cursor-pointer"
-                  />
-                  <label htmlFor="isTechnicianCheck" className="font-semibold text-slate-700 text-xs cursor-pointer select-none">
-                    Cliente Técnico / Terceirizado <span className="text-slate-400 font-normal">(Aplica o preço de técnico cadastrado nas Peças ao selecionar este cliente em Vendas)</span>
-                  </label>
                 </div>
               </div>
 
+              {/* FOOTER / BOTÕES DE AÇÃO */}
               {isEditing && (
-                <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-200 shrink-0">
+                <div className="flex justify-end items-center gap-2 pt-1.5 border-t border-slate-200 shrink-0">
                   <button
                     type="button"
                     onClick={handleCancelRegistration}
-                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                    className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs transition-all cursor-pointer"
                   >
                     Cancelar
                   </button>
@@ -973,9 +1424,9 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
                   <button
                     ref={submitBtnRef}
                     type="submit"
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl font-bold flex items-center gap-2 shadow-md shadow-emerald-600/30 transition-all cursor-pointer text-xs"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer text-xs"
                   >
-                    <Save className="w-4 h-4" />
+                    <Save className="w-3.5 h-3.5" />
                     Salvar Cadastro do Cliente
                   </button>
                 </div>
@@ -989,313 +1440,898 @@ export const RegisterModal: React.FC<RegisterModalProps> = ({
               onSubmit={(e) => {
                 e.preventDefault();
                 setIsDirty(false);
+
+                // Normaliza o código da peça digitado (ex: "80" -> "0080")
+                const rawCode = String(partData.code || nextPartCode || '0001').trim();
+                const numOnly = parseInt(rawCode.replace(/\D/g, ''), 10);
+                const formattedCode = isNaN(numOnly) ? rawCode : String(numOnly).padStart(4, '0');
+
+                // Validação de unicidade do código da peça
+                const duplicate = existingParts.find((p: any) => {
+                  if (partData.id && p.id === partData.id) return false;
+                  const pNum = parseInt(String(p.code || '').replace(/\D/g, ''), 10);
+                  const fNum = parseInt(formattedCode.replace(/\D/g, ''), 10);
+                  if (!isNaN(pNum) && !isNaN(fNum)) {
+                    return pNum === fNum;
+                  }
+                  return String(p.code || '').trim().toLowerCase() === formattedCode.toLowerCase();
+                });
+
+                if (duplicate) {
+                  alert(`O código "${formattedCode}" já existe cadastrado na peça "${duplicate.name || 'Sem nome'}" (Cód: ${duplicate.code}). Por favor, informe um código diferente.`);
+                  setIsEditingPartCode(true);
+                  if (partCodeInputRef.current) {
+                    partCodeInputRef.current.focus();
+                    partCodeInputRef.current.select();
+                  }
+                  return;
+                }
+
+                const finalPartData = {
+                  ...partData,
+                  code: formattedCode,
+                };
+
                 if (onSavePart) {
-                  onSavePart(partData);
+                  onSavePart(finalPartData);
                 }
                 onClose();
               }}
               onChange={() => setIsDirty(true)}
               className="flex-1 flex flex-col justify-between bg-white p-4 rounded-xl border border-slate-200"
             >
-              <div className="space-y-2.5">
+              {/* Input oculto para fallback de seleção de arquivos */}
+              <input
+                type="file"
+                ref={partFileInputRef}
+                onChange={handlePartFileChange}
+                accept=".jpg,.jpeg,.png,.webp,.gif,.bmp,image/jpeg,image/png,image/webp,image/gif,image/bmp"
+                className="hidden"
+              />
+
+              <div className="space-y-2.5 flex-1 flex flex-col">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 shrink-0">
-                  <h3 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                    <Package className="w-4 h-4 text-amber-600" />
-                    {partDataToView ? 'Editar Peça' : 'Cadastrar Nova Peça'}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                      <Package className="w-4 h-4 text-amber-600" />
+                      {partDataToView ? 'Editar Peça' : 'Cadastrar Nova Peça'}
+                    </h3>
+                  </div>
+
+                  {/* SUB-ABAS DE ESPECIFICAÇÕES DA PEÇA */}
+                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setPartSubTab('DATA')}
+                      className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        partSubTab === 'DATA'
+                          ? 'bg-white text-sky-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      Dados Gerais
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPartSubTab('DIMENSIONS')}
+                      className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        partSubTab === 'DIMENSIONS'
+                          ? 'bg-white text-sky-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Ruler className="w-3.5 h-3.5 text-indigo-500" />
+                      Medidas & Dimensões
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPartSubTab('SPECS')}
+                      className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        partSubTab === 'SPECS'
+                          ? 'bg-white text-sky-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-500" />
+                      Elétrica & Técnica
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPartSubTab('ATTRIBUTES')}
+                      className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        partSubTab === 'ATTRIBUTES'
+                          ? 'bg-white text-sky-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5 text-purple-600" />
+                      Atributos Extras
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPartSubTab('PHOTOS')}
+                      className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        partSubTab === 'PHOTOS'
+                          ? 'bg-white text-sky-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      <Camera className="w-3.5 h-3.5 text-sky-600" />
+                      <span>Fotos</span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5">
-                  {/* NOME DA PEÇA (OBRIGATÓRIO *) */}
-                  <div className="col-span-1 md:col-span-3">
-                    <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
-                      Nome da Peça <span className="text-red-500 font-extrabold">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={partData.name}
-                      onChange={(e) => setPartData({ ...partData, name: e.target.value })}
-                      placeholder="Digite o nome completo da peça..."
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                    />
-                  </div>
+                {/* CONTEÚDO DA ABA: DADOS DA PEÇA */}
+                {partSubTab === 'DATA' && (
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 flex-1">
+                    {/* LINHA 1: CÓDIGO DA PEÇA (1.5 COLS) + NOME DA PEÇA (6.5 COLS) + MARCA (4 COLS) */}
+                    <div className="col-span-1 md:col-span-2">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="block font-semibold text-slate-700 text-[11px] truncate">
+                          Cód. Peça
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingPartCode((prev) => {
+                              const nextState = !prev;
+                              if (nextState) {
+                                setTimeout(() => {
+                                  partCodeInputRef.current?.focus();
+                                  partCodeInputRef.current?.select();
+                                }, 50);
+                              }
+                              return nextState;
+                            });
+                          }}
+                          className={`p-0.5 rounded transition-colors cursor-pointer ${
+                            isEditingPartCode ? 'text-sky-600 bg-sky-100' : 'text-slate-400 hover:text-sky-600 hover:bg-slate-100'
+                          }`}
+                          title={isEditingPartCode ? 'Edição manual do código ativada' : 'Clique para editar o código da peça manualmente'}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <input
+                        ref={partCodeInputRef}
+                        type="text"
+                        readOnly={!isEditingPartCode}
+                        disabled={false}
+                        value={partData.code !== undefined && partData.code !== '' ? partData.code : (nextPartCode || '0001')}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPartData((prev) => ({ ...prev, code: val }));
+                          setIsDirty(true);
+                        }}
+                        onBlur={(e) => {
+                          const val = e.target.value.trim();
+                          if (val) {
+                            const n = parseInt(val.replace(/\D/g, ''), 10);
+                            if (!isNaN(n)) {
+                              setPartData((prev) => ({ ...prev, code: String(n).padStart(4, '0') }));
+                            }
+                          } else {
+                            setPartData((prev) => ({ ...prev, code: nextPartCode || '0001' }));
+                          }
+                          setIsEditingPartCode(false);
+                        }}
+                        className={`w-full border rounded-lg px-2 py-1 font-bold focus:outline-none font-mono text-xs text-center transition-all ${
+                          isEditingPartCode
+                            ? 'bg-amber-50/70 border-amber-400 text-amber-900 focus:border-amber-600 ring-1 ring-amber-300'
+                            : 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed select-none'
+                        }`}
+                        title={isEditingPartCode ? 'Digite o código desejado (ex: 80 salvará como 0080)' : 'Código sequencial automático. Clique no lápis para alterar.'}
+                      />
+                    </div>
 
-                  {/* MARCA / FABRICANTE */}
-                  <div className="col-span-1">
-                    <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">
-                      Marca / Fabricante
-                    </label>
-                    <input
-                      type="text"
-                      value={partData.brand}
-                      onChange={(e) => setPartData({ ...partData, brand: e.target.value })}
-                      placeholder="Ex: Brastemp, Bosch..."
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                    />
-                  </div>
+                    <div className="col-span-1 md:col-span-6">
+                      <label className="block font-bold text-slate-800 mb-0.5 text-[11px] truncate">
+                        Nome da Peça <span className="text-red-500 font-extrabold">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={partData.name}
+                        onChange={(e) => setPartData({ ...partData, name: e.target.value })}
+                        placeholder="Digite o nome completo da peça..."
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
 
-                  {/* CÓDIGO DO FABRICANTE */}
-                  <div className="col-span-1">
-                    <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">
-                      Código Fabricante
-                    </label>
-                    <input
-                      type="text"
-                      value={partData.manufacturerCode}
-                      onChange={(e) => setPartData({ ...partData, manufacturerCode: e.target.value })}
-                      placeholder="Ex: FAB-9982"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
-                    />
-                  </div>
+                    <div className="col-span-1 md:col-span-4">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Marca / Fabricante
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.brand}
+                        onChange={(e) => setPartData({ ...partData, brand: e.target.value })}
+                        placeholder="Ex: Brastemp, Bosch..."
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
 
-                  {/* GRUPO (TIPO DE EQUIPAMENTO CADASTRADO) */}
-                  <div className="col-span-1 md:col-span-2">
-                    <label className="block font-bold text-sky-800 mb-0.5 text-[11px]">
-                      Grupo (Tipo de Equipamento)
-                    </label>
-                    <select
-                      value={partData.group}
-                      onChange={(e) => setPartData({ ...partData, group: e.target.value })}
-                      className="w-full bg-sky-50 border border-sky-300 rounded-lg px-2.5 py-1 text-sky-950 font-bold focus:outline-none focus:border-sky-600 cursor-pointer uppercase text-xs"
-                    >
-                      <option value="">Selecione o grupo (tipo)...</option>
-                      {Array.from(
-                        new Set(
-                          availableEquipments
-                            .map((eq) => (eq.type || eq.name || '').trim().toUpperCase())
-                            .filter(Boolean)
-                        )
-                      ).map((typeName, idx) => (
-                        <option key={idx} value={typeName}>
-                          {typeName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                    {/* LINHA 2: CÓDIGO DE BARRAS (2 COLS) + CÓDIGO FABRICANTE (2.5 COLS) + GRUPO (3.5 COLS) + LOCAL ESTOQUE (4 COLS) */}
+                    <div className="col-span-1 md:col-span-2">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="block font-semibold text-slate-700 text-[11px] flex items-center gap-1 truncate">
+                          <Barcode className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                          Cód. Barras
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const codeToUse = partData.code || nextPartCode || '0001';
+                            const autoCode = generateAutoBarcode(codeToUse);
+                            setPartData((prev) => ({ ...prev, barcode: autoCode }));
+                            setIsDirty(true);
+                          }}
+                          className="text-[10px] font-bold text-sky-600 hover:text-sky-800 hover:underline cursor-pointer"
+                          title="Gerar código de barras baseado no código da peça no sistema"
+                        >
+                          Gerar
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={partData.barcode}
+                        onChange={(e) => setPartData({ ...partData, barcode: e.target.value })}
+                        placeholder="Ex: 000000000 ou cód. de fábrica"
+                        maxLength={48}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs text-center"
+                        title="Código de barras da peça (gerado com 9 dígitos ou código original de fábrica com mais dígitos)"
+                      />
+                    </div>
 
-                  {/* LOCALIZAÇÃO (PRATELEIRA / GAVETA / ALMOXARIFADO) */}
-                  <div className="col-span-1">
-                    <label className="block font-bold text-purple-900 mb-0.5 text-[11px]">
-                      Local no Estoque
-                    </label>
-                    <input
-                      type="text"
-                      value={partData.location}
-                      onChange={(e) => setPartData({ ...partData, location: e.target.value })}
-                      placeholder="Ex: Prateleira A2"
-                      className="w-full bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 text-purple-950 font-bold focus:outline-none focus:border-purple-600 uppercase text-xs"
-                    />
-                  </div>
+                    <div className="col-span-1 md:col-span-3">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Código Fabricante
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.manufacturerCode}
+                        onChange={(e) => setPartData({ ...partData, manufacturerCode: e.target.value })}
+                        placeholder="Ex: FAB-9982"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
+                      />
+                    </div>
 
-                  {/* VALOR DE CUSTO (OPCIONAL) */}
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Valor de Custo (R$)</label>
-                    <input
-                      type="text"
-                      value={partData.costPrice}
-                      onChange={(e) => {
-                        const newCost = e.target.value;
-                        const costVal = parseFloat(newCost.replace(',', '.')) || 0;
-                        const pctVal = parseFloat(partData.profitMarginPercent.replace(',', '.')) || 0;
+                    <div className="col-span-1 md:col-span-3">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Grupo (Tipo de Equip.)
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.group}
+                        onChange={(e) => setPartData({ ...partData, group: e.target.value })}
+                        placeholder="Ex: Lavadora, Refrigerador..."
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs uppercase"
+                      />
+                    </div>
 
-                        let newFinal = partData.finalPrice;
-                        if (costVal > 0 && pctVal > 0) {
-                          const calcFinal = costVal * (1 + pctVal / 100);
-                          newFinal = calcFinal.toFixed(2).replace('.', ',');
-                        }
+                    <div className="col-span-1 md:col-span-4">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Localização no Estoque (Prateleira / Gaveta)
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.location}
+                        onChange={(e) => setPartData({ ...partData, location: e.target.value })}
+                        placeholder="Ex: Prateleira B3, Gaveta 12..."
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs uppercase"
+                      />
+                    </div>
 
-                        setPartData({
-                          ...partData,
-                          costPrice: newCost,
-                          finalPrice: newFinal,
-                        });
-                      }}
-                      onBlur={(e) => {
-                        const formatted = formatCurrencyInput(e.target.value);
-                        setPartData((prev) => ({ ...prev, costPrice: formatted }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const formatted = formatCurrencyInput(partData.costPrice);
+                    {/* LINHA 3: PREÇO CUSTO (2 COLS) + MARGEM % (2 COLS) + VALOR TÉCNICO (2 COLS) + CONSUMIDOR FINAL (3 COLS) + UNIDADE (1.5 COLS) + ESTOQUE (1.5 COLS) */}
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Preço Custo (R$)
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.costPrice}
+                        onChange={(e) => {
+                          const newCost = e.target.value;
+                          const costVal = parseFloat(newCost.replace(',', '.')) || 0;
+                          const pctVal = parseFloat(partData.profitMarginPercent.replace('%', '').replace(',', '.')) || 0;
+
+                          let newFinal = partData.finalPrice;
+                          if (costVal > 0 && pctVal > 0) {
+                            const calcFinal = costVal * (1 + pctVal / 100);
+                            newFinal = calcFinal.toFixed(2).replace('.', ',');
+                          }
+
+                          setPartData({
+                            ...partData,
+                            costPrice: newCost,
+                            finalPrice: newFinal,
+                          });
+                        }}
+                        onBlur={(e) => {
+                          const formatted = formatCurrencyInput(e.target.value);
                           setPartData((prev) => ({ ...prev, costPrice: formatted }));
-                        }
-                      }}
-                      placeholder="0,00"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                    />
-                  </div>
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const formatted = formatCurrencyInput(partData.costPrice);
+                            setPartData((prev) => ({ ...prev, costPrice: formatted }));
+                          }
+                        }}
+                        placeholder="0,00"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
 
-                  {/* MARGEM DE LUCRO ESTIMADA (%) */}
-                  <div>
-                    <label className="block font-bold text-indigo-900 mb-0.5 text-[11px]">Margem (%)</label>
-                    <input
-                      type="text"
-                      value={partData.profitMarginPercent}
-                      onChange={(e) => {
-                        const newPct = e.target.value;
-                        const pctVal = parseFloat(newPct.replace(',', '.')) || 0;
-                        const costVal = parseFloat(partData.costPrice.replace(',', '.')) || 0;
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Margem (%)
+                      </label>
+                      <input
+                        type="text"
+                        value={partData.profitMarginPercent}
+                        onChange={(e) => {
+                          const newPct = e.target.value;
+                          const pctVal = parseFloat(newPct.replace('%', '').replace(',', '.')) || 0;
+                          const costVal = parseFloat(partData.costPrice.replace(',', '.')) || 0;
 
-                        let newFinal = partData.finalPrice;
-                        if (costVal > 0 && pctVal > 0) {
-                          const calcFinal = costVal * (1 + pctVal / 100);
-                          newFinal = calcFinal.toFixed(2).replace('.', ',');
-                        }
+                          let newFinal = partData.finalPrice;
+                          if (costVal > 0 && pctVal > 0) {
+                            const calcFinal = costVal * (1 + pctVal / 100);
+                            newFinal = calcFinal.toFixed(2).replace('.', ',');
+                          }
 
-                        setPartData({
-                          ...partData,
-                          profitMarginPercent: newPct,
-                          finalPrice: newFinal,
-                        });
-                      }}
-                      onBlur={(e) => {
-                        const formatted = formatPercentInput(e.target.value);
-                        setPartData((prev) => ({ ...prev, profitMarginPercent: formatted }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const formatted = formatPercentInput(partData.profitMarginPercent);
+                          setPartData({
+                            ...partData,
+                            profitMarginPercent: newPct,
+                            finalPrice: newFinal,
+                          });
+                        }}
+                        onBlur={(e) => {
+                          const formatted = formatPercentInput(e.target.value);
                           setPartData((prev) => ({ ...prev, profitMarginPercent: formatted }));
-                        }
-                      }}
-                      placeholder="50%"
-                      className="w-full bg-indigo-50 border border-indigo-300 rounded-lg px-2.5 py-1 text-indigo-950 font-bold focus:outline-none focus:border-indigo-600 font-mono text-xs"
-                    />
-                  </div>
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const formatted = formatPercentInput(partData.profitMarginPercent);
+                            setPartData((prev) => ({ ...prev, profitMarginPercent: formatted }));
+                          }
+                        }}
+                        placeholder="50%"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
+                      />
+                    </div>
 
-                  {/* VALOR PARA TÉCNICO (OPCIONAL) */}
-                  <div>
-                    <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Valor Técnico (R$)</label>
-                    <input
-                      type="text"
-                      value={partData.techPrice}
-                      onChange={(e) => setPartData({ ...partData, techPrice: e.target.value })}
-                      onBlur={(e) => {
-                        const formatted = formatCurrencyInput(e.target.value);
-                        setPartData((prev) => ({ ...prev, techPrice: formatted }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const formatted = formatCurrencyInput(partData.techPrice);
-                          setPartData((prev) => ({ ...prev, techPrice: formatted }));
-                        }
-                      }}
-                      placeholder="0,00"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                    />
-                  </div>
+                    {getCurrentFeatures().hasPartsTechPrice ? (
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">Valor Técnico</label>
+                        <input
+                          type="text"
+                          value={partData.techPrice}
+                          onChange={(e) => setPartData({ ...partData, techPrice: e.target.value })}
+                          onBlur={(e) => {
+                            const formatted = formatCurrencyInput(e.target.value);
+                            setPartData((prev) => ({ ...prev, techPrice: formatted }));
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const formatted = formatCurrencyInput(partData.techPrice);
+                              setPartData((prev) => ({ ...prev, techPrice: formatted }));
+                            }
+                          }}
+                          placeholder="0,00"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                    ) : null}
 
-                  {/* VALOR PARA CONSUMIDOR FINAL (OBRIGATÓRIO *) */}
-                  <div>
-                    <label className="block font-bold text-emerald-800 mb-0.5 text-[11px]">
-                      Consumidor Final <span className="text-red-500 font-extrabold">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={partData.finalPrice}
-                      onChange={(e) => {
-                        const newFinal = e.target.value;
-                        const finalVal = parseFloat(newFinal.replace(',', '.')) || 0;
-                        const costVal = parseFloat(partData.costPrice.replace(',', '.')) || 0;
+                    <div className={getCurrentFeatures().hasPartsTechPrice ? "col-span-1 md:col-span-2" : "col-span-1 md:col-span-4"}>
+                      <label className="block font-bold text-slate-800 mb-0.5 text-[11px] truncate">
+                        Consumidor Final <span className="text-red-500 font-extrabold">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={partData.finalPrice}
+                        onChange={(e) => {
+                          const newFinal = e.target.value;
+                          const finalVal = parseFloat(newFinal.replace(',', '.')) || 0;
+                          const costVal = parseFloat(partData.costPrice.replace(',', '.')) || 0;
 
-                        let newPct = partData.profitMarginPercent;
-                        if (costVal > 0 && finalVal > 0) {
-                          const pct = ((finalVal - costVal) / costVal) * 100;
-                          newPct = pct.toFixed(1).replace('.0', '');
-                        }
+                          let newPct = partData.profitMarginPercent;
+                          if (costVal > 0 && finalVal > 0) {
+                            const pct = ((finalVal - costVal) / costVal) * 100;
+                            newPct = pct.toFixed(1).replace('.0', '');
+                          }
 
-                        setPartData({
-                          ...partData,
-                          finalPrice: newFinal,
-                          profitMarginPercent: newPct,
-                        });
-                      }}
-                      onBlur={(e) => {
-                        const formatted = formatCurrencyInput(e.target.value);
-                        setPartData((prev) => ({ ...prev, finalPrice: formatted }));
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const formatted = formatCurrencyInput(partData.finalPrice);
+                          setPartData({
+                            ...partData,
+                            finalPrice: newFinal,
+                            profitMarginPercent: newPct,
+                          });
+                        }}
+                        onBlur={(e) => {
+                          const formatted = formatCurrencyInput(e.target.value);
                           setPartData((prev) => ({ ...prev, finalPrice: formatted }));
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const formatted = formatCurrencyInput(partData.finalPrice);
+                            setPartData((prev) => ({ ...prev, finalPrice: formatted }));
+                          }
+                        }}
+                        placeholder="0,00"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                      />
+                    </div>
+
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block font-bold text-slate-800 mb-0.5 text-[11px] truncate">
+                        Unidade
+                      </label>
+                      <select
+                        value={partData.unit}
+                        onChange={(e) => setPartData({ ...partData, unit: e.target.value })}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-900 font-bold focus:outline-none focus:border-sky-600 cursor-pointer text-xs"
+                      >
+                        <option value="UN">UN</option>
+                        <option value="PC">PC</option>
+                        <option value="KIT">KIT</option>
+                        <option value="CX">CX</option>
+                        <option value="CJ">CJ</option>
+                        <option value="PAR">PAR</option>
+                        <option value="MT">MT</option>
+                        <option value="LT">LT</option>
+                        <option value="KG">KG</option>
+                        <option value="RL">RL</option>
+                        <option value="PCT">PCT</option>
+                      </select>
+                    </div>
+
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block font-bold text-slate-800 mb-0.5 text-[11px] truncate">
+                        Estoque <span className="text-red-500 font-extrabold">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={partData.stockQuantity}
+                        onChange={(e) => setPartData({ ...partData, stockQuantity: e.target.value })}
+                        placeholder="0"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
+                      />
+                    </div>
+
+                    {/* LINHA 4: ESTOQUE MÍNIMO (2 COLS) + FORNECEDOR (6 COLS) + DATA DA ALTERAÇÃO (4 COLS) */}
+                    <div className="col-span-1 md:col-span-2">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] truncate">
+                        Estoque Mín.
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={partData.minStock}
+                        onChange={(e) => setPartData({ ...partData, minStock: e.target.value })}
+                        placeholder="0"
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div className="col-span-1 md:col-span-6">
+                      <label className="block font-semibold text-slate-700 mb-0.5 text-[11px] flex items-center gap-1 truncate">
+                        <Building2 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        Fornecedor
+                      </label>
+                      <select
+                        value={partData.supplierId || ''}
+                        onChange={(e) => {
+                          const supId = e.target.value;
+                          const supObj = availableSuppliers.find((s: any) => s.id === supId);
+                          setPartData({
+                            ...partData,
+                            supplierId: supId,
+                            supplierName: supObj ? (supObj.tradeName || supObj.name) : '',
+                          });
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:border-sky-600 cursor-pointer text-xs"
+                      >
+                        <option value="">Nenhum fornecedor selecionado</option>
+                        {availableSuppliers.map((sup: any) => (
+                          <option key={sup.id} value={sup.id}>
+                            {sup.code ? `[${sup.code}] ` : ''}{sup.tradeName ? `${sup.tradeName} (${sup.name})` : sup.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="col-span-1 md:col-span-4">
+                      <label className="block font-bold text-slate-600 mb-0.5 text-[11px] truncate">
+                        Data da Alteração <span className="text-[10px] text-slate-400 font-normal">(Automático)</span>
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={
+                          partData.updatedAt
+                            ? (() => {
+                                try {
+                                  const d = new Date(partData.updatedAt);
+                                  return isNaN(d.getTime())
+                                    ? partData.updatedAt
+                                    : `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                                } catch {
+                                  return partData.updatedAt;
+                                }
+                              })()
+                            : 'Será gerada ao salvar'
                         }
-                      }}
-                      placeholder="0,00"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
-                    />
-                  </div>
+                        className="w-full bg-slate-100 border border-slate-300 text-slate-600 font-semibold rounded-lg px-2.5 py-1 text-xs cursor-not-allowed select-none font-mono"
+                      />
+                    </div>
 
-                  {/* UNIDADE DE MEDIDA (PC, UN, KIT, CX...) */}
-                  <div>
-                    <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
-                      Unidade
-                    </label>
-                    <select
-                      value={partData.unit}
-                      onChange={(e) => setPartData({ ...partData, unit: e.target.value })}
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:border-sky-600 cursor-pointer text-xs"
-                    >
-                      <option value="UN">UN - Unidade</option>
-                      <option value="PC">PC - Peça</option>
-                      <option value="KIT">KIT - Conjunto / Kit</option>
-                      <option value="CX">CX - Caixa</option>
-                      <option value="CJ">CJ - Conjunto</option>
-                      <option value="PAR">PAR - Par</option>
-                      <option value="MT">MT - Metro</option>
-                      <option value="LT">LT - Litro</option>
-                      <option value="KG">KG - Quilo</option>
-                      <option value="RL">RL - Rolo</option>
-                      <option value="PCT">PCT - Pacote</option>
-                    </select>
+                    {/* LINHA 5: REFERÊNCIA / APLICAÇÃO (6 COLS TOTAL) */}
+                    <div className="col-span-1 md:col-span-6">
+                      <label className="block font-bold text-slate-800 mb-0.5 text-[11px] truncate">
+                        Referência / Aplicação / Compatibilidade Básica
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={partData.application}
+                        onChange={(e) => setPartData({ ...partData, application: e.target.value })}
+                        placeholder="Descreva aqui os principais aparelhos ou anotações gerais..."
+                        className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 font-medium focus:outline-none focus:border-sky-600 text-xs resize-none"
+                      />
+                    </div>
                   </div>
+                )}
 
-                  {/* QUANTIDADE EM ESTOQUE */}
-                  <div>
-                    <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
-                      Estoque <span className="text-red-500 font-extrabold">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      required
-                      value={partData.stockQuantity}
-                      onChange={(e) => setPartData({ ...partData, stockQuantity: e.target.value })}
-                      placeholder="0"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
-                    />
-                  </div>
+                {/* CONTEÚDO DA ABA: MEDIDAS & DIMENSÕES FÍSICAS */}
+                {partSubTab === 'DIMENSIONS' && (
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-3.5 space-y-3 flex-1">
+                    <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                      <Ruler className="w-4 h-4 text-indigo-600" />
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">Medidas & Dimensões Físicas</h4>
+                        <p className="text-[11px] text-slate-500">Dimensões externas, diâmetros, bitolas e peso para conferência de encaixe</p>
+                      </div>
+                    </div>
 
-                  {/* ESTOQUE MÍNIMO */}
-                  <div className="col-span-1 md:col-span-2">
-                    <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">
-                      Estoque Mínimo (Alerta de Reposição)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={partData.minStock}
-                      onChange={(e) => setPartData({ ...partData, minStock: e.target.value })}
-                      placeholder="0"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 font-mono text-xs"
-                    />
-                  </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Comprimento (mm / cm)</label>
+                        <input
+                          type="text"
+                          value={partData.length || ''}
+                          onChange={(e) => setPartData({ ...partData, length: e.target.value })}
+                          placeholder="Ex: 120 mm"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Largura (mm / cm)</label>
+                        <input
+                          type="text"
+                          value={partData.width || ''}
+                          onChange={(e) => setPartData({ ...partData, width: e.target.value })}
+                          placeholder="Ex: 45 mm"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Altura / Espessura (mm / cm)</label>
+                        <input
+                          type="text"
+                          value={partData.height || ''}
+                          onChange={(e) => setPartData({ ...partData, height: e.target.value })}
+                          placeholder="Ex: 25 mm"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
 
-                  {/* REFERÊNCIA / APLICAÇÃO (AMPLO - 4 COLUNAS) */}
-                  <div className="col-span-1 md:col-span-4">
-                    <label className="block font-bold text-slate-800 mb-0.5 text-[11px]">
-                      Referência / Aplicação / Compatibilidade de Modelos
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={partData.application}
-                      onChange={(e) => setPartData({ ...partData, application: e.target.value })}
-                      placeholder="Descreva aqui todos os modelos, versões e aplicações compatíveis com esta peça (Ex: Compatível com lavadoras Brastemp / Consul 10kg, 12kg e 15kg modelos BWW, CWL, BWS...)..."
-                      className="w-full bg-white border border-slate-300 rounded-lg p-2 text-slate-800 font-medium focus:outline-none focus:border-sky-600 text-xs resize-none"
-                    />
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Diâmetro Interno (mm)</label>
+                        <input
+                          type="text"
+                          value={partData.innerDiameter || ''}
+                          onChange={(e) => setPartData({ ...partData, innerDiameter: e.target.value })}
+                          placeholder="Ex: 8 mm / 1/4 pol"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Diâmetro Externo (mm)</label>
+                        <input
+                          type="text"
+                          value={partData.outerDiameter || ''}
+                          onChange={(e) => setPartData({ ...partData, outerDiameter: e.target.value })}
+                          placeholder="Ex: 22 mm"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Rosca / Encaixe / Bitola</label>
+                        <input
+                          type="text"
+                          value={partData.threadFitting || ''}
+                          onChange={(e) => setPartData({ ...partData, threadFitting: e.target.value })}
+                          placeholder="Ex: M8, 1/2 BSP, 3/4 pol, Eixo estriado"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Peso Líquido (g / kg)</label>
+                        <input
+                          type="text"
+                          value={partData.weight || ''}
+                          onChange={(e) => setPartData({ ...partData, weight: e.target.value })}
+                          placeholder="Ex: 350 g ou 1.2 kg"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* CONTEÚDO DA ABA: ESPECIFICAÇÕES ELÉTRICAS & TÉCNICAS */}
+                {partSubTab === 'SPECS' && (
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-3.5 space-y-3 flex-1">
+                    <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                      <Zap className="w-4 h-4 text-amber-500" />
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">Especificações Elétricas & Técnicas</h4>
+                        <p className="text-[11px] text-slate-500">Tensão, potência, corrente, capacitância e composição de materiais</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Tensão / Voltagem (V)</label>
+                        <input
+                          type="text"
+                          value={partData.voltage || ''}
+                          onChange={(e) => setPartData({ ...partData, voltage: e.target.value })}
+                          placeholder="Ex: 110V, 220V, Bivolt, 12V DC"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Potência (W / HP / BTU)</label>
+                        <input
+                          type="text"
+                          value={partData.power || ''}
+                          onChange={(e) => setPartData({ ...partData, power: e.target.value })}
+                          placeholder="Ex: 1/4 HP, 45W, 9000 BTU"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Corrente Elétrica (A / mA)</label>
+                        <input
+                          type="text"
+                          value={partData.current || ''}
+                          onChange={(e) => setPartData({ ...partData, current: e.target.value })}
+                          placeholder="Ex: 1.5A, 300mA"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Capacitância (µF / nF)</label>
+                        <input
+                          type="text"
+                          value={partData.capacitance || ''}
+                          onChange={(e) => setPartData({ ...partData, capacitance: e.target.value })}
+                          placeholder="Ex: 15 µF, 35 µF + 5 µF"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Frequência (Hz)</label>
+                        <input
+                          type="text"
+                          value={partData.frequency || ''}
+                          onChange={(e) => setPartData({ ...partData, frequency: e.target.value })}
+                          placeholder="Ex: 60Hz, 50/60Hz"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Resistência Ôhmica (Ω / kΩ)</label>
+                        <input
+                          type="text"
+                          value={partData.resistance || ''}
+                          onChange={(e) => setPartData({ ...partData, resistance: e.target.value })}
+                          placeholder="Ex: 28 Ω, 10 kΩ"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Material / Composição</label>
+                        <input
+                          type="text"
+                          value={partData.material || ''}
+                          onChange={(e) => setPartData({ ...partData, material: e.target.value })}
+                          placeholder="Ex: Alumínio, Cobre, Inox, Plástico ABS"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Cor / Acabamento</label>
+                        <input
+                          type="text"
+                          value={partData.colorFinish || ''}
+                          onChange={(e) => setPartData({ ...partData, colorFinish: e.target.value })}
+                          placeholder="Ex: Branco, Preto fosco, Cromado"
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-slate-800 font-bold focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+
+
+                {/* CONTEÚDO DA ABA: ATRIBUTOS PERSONALIZADOS EXTRAS */}
+                {partSubTab === 'ATTRIBUTES' && (
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-3.5 space-y-3 flex-1 flex flex-col">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-purple-600" />
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-800">Atributos Personalizados Extras</h4>
+                          <p className="text-[11px] text-slate-500">Adicione especificações adicionais em pares Nome / Valor livres</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const currentAttrs = partData.customAttributes || [];
+                          setPartData({
+                            ...partData,
+                            customAttributes: [...currentAttrs, { name: '', value: '' }],
+                          });
+                          setIsDirty(true);
+                        }}
+                        className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Adicionar Atributo
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto max-h-64 space-y-2 pr-1">
+                      {(!partData.customAttributes || partData.customAttributes.length === 0) ? (
+                        <div className="flex flex-col items-center justify-center p-6 text-slate-400 border border-dashed border-slate-300 rounded-xl bg-white">
+                          <Layers className="w-8 h-8 text-slate-300 mb-1" />
+                          <p className="text-xs font-medium">Nenhum atributo personalizado cadastrado nesta peça.</p>
+                          <p className="text-[11px] text-slate-400">Clique em "+ Adicionar Atributo" para criar campos como Gás Refrigerante, Rotação (RPM), etc.</p>
+                        </div>
+                      ) : (
+                        partData.customAttributes.map((attr, idx) => (
+                          <div key={idx} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-2 shadow-xs">
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Nome do Campo / Propriedade</label>
+                              <input
+                                type="text"
+                                value={attr.name}
+                                onChange={(e) => {
+                                  const updated = [...(partData.customAttributes || [])];
+                                  updated[idx] = { ...updated[idx], name: e.target.value };
+                                  setPartData({ ...partData, customAttributes: updated });
+                                  setIsDirty(true);
+                                }}
+                                placeholder="Ex: Gás Refrigerante, RPM, Sensor NTC..."
+                                className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-800 text-xs font-semibold focus:outline-none focus:border-purple-600"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Valor / Especificação</label>
+                              <input
+                                type="text"
+                                value={attr.value}
+                                onChange={(e) => {
+                                  const updated = [...(partData.customAttributes || [])];
+                                  updated[idx] = { ...updated[idx], value: e.target.value };
+                                  setPartData({ ...partData, customAttributes: updated });
+                                  setIsDirty(true);
+                                }}
+                                placeholder="Ex: R-134a (140g), 1400 RPM, 10k @ 25°C..."
+                                className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-800 text-xs font-semibold focus:outline-none focus:border-purple-600"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = (partData.customAttributes || []).filter((_, i) => i !== idx);
+                                setPartData({ ...partData, customAttributes: updated });
+                                setIsDirty(true);
+                              }}
+                              className="mt-3.5 p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                              title="Remover este atributo"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* CONTEÚDO DA ABA: FOTOS */}
+                {partSubTab === 'PHOTOS' && (
+                  <div className="py-2 space-y-3 flex-1 flex flex-col justify-start">
+                    {/* BARRA DE CAMINHO, BUSCAR E LIMPAR */}
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-2">
+                      <label className="block font-bold text-slate-700 text-xs">
+                        Caminho do arquivo de imagem ou link da foto:
+                      </label>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <input
+                          type="text"
+                          value={partData.imageUrl || ''}
+                          onChange={(e) => {
+                            setPartData({ ...partData, imageUrl: e.target.value });
+                            setIsDirty(true);
+                          }}
+                          placeholder="Cole aqui o caminho do arquivo no Windows (ex: C:\Imagens\peca.jpg) ou link..."
+                          className="flex-1 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-slate-800 font-medium focus:outline-none focus:border-sky-600 text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleBrowsePartImage}
+                          className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-1.5 rounded-lg font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer text-xs shrink-0"
+                          title="Abrir gerenciador de arquivos do Windows para selecionar imagem"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                          Buscar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPartData((prev) => ({ ...prev, imageUrl: '' }));
+                            setIsDirty(true);
+                          }}
+                          disabled={!partData.imageUrl}
+                          className="bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:hover:bg-slate-200 text-slate-700 px-3.5 py-1.5 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer text-xs shrink-0"
+                          title="Limpar foto selecionada"
+                        >
+                          <Trash2 className="w-4 h-4 text-slate-500" />
+                          Limpar
+                        </button>
+                        <input
+                          type="file"
+                          ref={partFileInputRef}
+                          onChange={handlePartFileChange}
+                          accept=".jpg,.jpeg,.png,.webp,.bmp"
+                          className="hidden"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500 font-medium">
+                        <span><strong className="text-slate-700">Formatos aceitos:</strong> JPG, JPEG, PNG, WEBP, BMP</span>
+                        <span className="text-slate-300 hidden sm:inline">•</span>
+                        <span><strong className="text-slate-700">Proporção recomendada:</strong> 1:1 Quadrada (ex: 500x500 px)</span>
+                      </div>
+                    </div>
+
+                    {/* ÁREA DE EXIBIÇÃO DA FOTO (SEMPRE EM FORMATO QUADRADO) */}
+                    <div className="flex flex-col items-center justify-center pt-2">
+                      <div className="w-56 h-56 md:w-64 md:h-64 aspect-square rounded-2xl border-2 border-dashed border-slate-300 bg-slate-100 flex items-center justify-center overflow-hidden relative shadow-inner">
+                        <PartPhotoRegisterPreview imageUrl={partData.imageUrl} />
+                      </div>
+                      {partData.imageUrl && (
+                        <span className="text-[11px] text-slate-400 mt-1.5 font-medium">
+                          Visualização da Peça em Formato Quadrado (1:1)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end items-center gap-2 pt-2 border-t border-slate-200 mt-2 shrink-0">

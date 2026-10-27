@@ -401,7 +401,7 @@ export const OptionsScreen: React.FC<OptionsScreenProps> = ({ onRefreshAll, sect
               {section === 'PARTS' && (
                 <View style={styles.itemMetaRow}>
                   <Text style={styles.metaText}>Preco: <Text style={{ color: '#38bdf8', fontWeight: 'bold' }}>R$ {item.finalPrice || item.price || '0,00'}</Text></Text>
-                  <Text style={styles.metaText}>Estoque: <Text style={{ color: '#4ade80', fontWeight: 'bold' }}>{item.stockQuantity ?? 10} un</Text></Text>
+                  <Text style={styles.metaText}>Estoque: <Text style={{ color: '#4ade80', fontWeight: 'bold' }}>{item.stockQuantity ?? 0} un</Text></Text>
                   {item.brand ? <Text style={styles.metaText}>Marca: {item.brand}</Text> : null}
                 </View>
               )}

@@ -137,7 +137,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       : Info;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[999999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden font-sans text-xs animate-fadeIn">
         {/* Cabeçalho */}
         <div className={`p-3.5 flex items-center justify-between ${headerColors[variant]}`}>

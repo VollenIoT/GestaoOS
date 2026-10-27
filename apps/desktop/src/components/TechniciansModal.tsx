@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Search,
@@ -11,9 +11,13 @@ import {
   CheckCircle2,
   Save,
   MessageSquare,
+  Check,
 } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
 import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
+import { assertTerminalCanSave } from '../services/localNetworkService';
+import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_TECNICO_PERMISSIONS } from './UsersModal';
 
 export interface TechnicianItem {
   id: string;
@@ -113,9 +117,13 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
   );
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('technicians_modal_columns_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
     return [
-      { id: 'code', label: 'Código', width: 80, visible: true },
-      { id: 'name', label: 'Nome do Funcionário', width: 220, visible: true },
+      { id: 'code', label: 'Código', width: 80, visible: true, fixed: true },
+      { id: 'name', label: 'Nome do Funcionário', width: 220, visible: true, fixed: true },
       { id: 'role', label: 'Função / Cargo', width: 140, visible: true },
       { id: 'phone', label: 'Telefone / WhatsApp', width: 160, visible: true },
       { id: 'specialty', label: 'Especialidade / Setor', width: 200, visible: true },
@@ -124,31 +132,164 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
     ];
   });
 
+  const saveColumnsToStorage = (newCols: ColumnConfig[]) => {
+    try {
+      localStorage.setItem('technicians_modal_columns_v1', JSON.stringify(newCols));
+    } catch {}
+  };
+
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
+
+  const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startX = e.clientX;
+    const initialWidth = columns.find((c) => c.id === columnId)?.width || 100;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.max(50, initialWidth + deltaX);
+      setColumns((prev) => {
+        const updated = prev.map((col) => (col.id === columnId ? { ...col, width: newWidth } : col));
+        saveColumnsToStorage(updated);
+        return updated;
+      });
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleDragStart = (e: React.DragEvent, colId: string) => {
+    setDraggedColumnId(colId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent, targetColId: string) => {
+    e.preventDefault();
+    if (!draggedColumnId || draggedColumnId === targetColId) return;
+
+    const newCols = [...columns];
+    const sourceIdx = newCols.findIndex((c) => c.id === draggedColumnId);
+    const targetIdx = newCols.findIndex((c) => c.id === targetColId);
+
+    const [removed] = newCols.splice(sourceIdx, 1);
+    newCols.splice(targetIdx, 0, removed);
+
+    setColumns(newCols);
+    saveColumnsToStorage(newCols);
+    setDraggedColumnId(null);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const toggleColumnVisibility = (columnId: string) => {
+    setColumns((prev) => {
+      const updated = prev.map((col) => {
+        if (col.fixed) return col;
+        return col.id === columnId ? { ...col, visible: !col.visible } : col;
+      });
+      saveColumnsToStorage(updated);
+      return updated;
+    });
+  };
+
   // Função auxiliar para sincronizar com Firestore e localStorage
   const syncTechnicians = (techList: TechnicianItem[], deletedId?: string) => {
     try {
       localStorage.setItem('vollen_technicians', JSON.stringify(techList));
+
+      // Sincroniza também com vollen_users no localStorage para que apareçam na Gestão de Usuários
+      try {
+        const rawUsers = localStorage.getItem('vollen_users');
+        const currentUsers = rawUsers ? JSON.parse(rawUsers) : [];
+        if (Array.isArray(currentUsers)) {
+          let updatedUsers = deletedId
+            ? currentUsers.filter((u: any) => u.id !== deletedId && u.username !== deletedId)
+            : [...currentUsers];
+
+          techList.forEach((t) => {
+            const cleanName = (t.name || '').trim();
+            if (!cleanName) return;
+            const username = t.username || cleanName.toLowerCase().replace(/\s+/g, '.');
+            const isAdmin = Boolean(t.isAdmin || t.role === 'Admin' || t.role === 'ADMIN');
+            const isAttendant = t.role === 'ATENDENTE' || t.role === 'Atendimento' || isAdmin;
+            const isTechnician = t.role !== 'ATENDENTE' && t.role !== 'Atendimento';
+
+            const existingIdx = updatedUsers.findIndex(
+              (u: any) => u.id === t.id || (u.name && u.name.trim().toLowerCase() === cleanName.toLowerCase()) || (u.username && u.username.toLowerCase() === username.toLowerCase())
+            );
+
+            if (existingIdx >= 0) {
+              updatedUsers[existingIdx] = {
+                ...updatedUsers[existingIdx],
+                name: cleanName,
+                username: username,
+                role: isAdmin ? 'Admin' : (isAttendant ? 'Atendimento' : 'Técnico'),
+                isAdmin: isAdmin,
+                isTechnician: isTechnician,
+                isAttendant: isAttendant,
+                password: t.password || updatedUsers[existingIdx].password || '123456',
+                permissions: isAdmin ? DEFAULT_ADMIN_PERMISSIONS : (updatedUsers[existingIdx].permissions || DEFAULT_TECNICO_PERMISSIONS),
+              };
+            } else {
+              updatedUsers.push({
+                id: t.id,
+                name: cleanName,
+                username: username,
+                role: isAdmin ? 'Admin' : (isAttendant ? 'Atendimento' : 'Técnico'),
+                isAdmin: isAdmin,
+                isTechnician: isTechnician,
+                isAttendant: isAttendant,
+                password: t.password || '123456',
+                permissions: isAdmin ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_TECNICO_PERMISSIONS,
+              });
+            }
+          });
+
+          localStorage.setItem('vollen_users', JSON.stringify(updatedUsers));
+          window.dispatchEvent(new Event('storage'));
+        }
+      } catch (err) {}
+
       import('../services/firebase').then(({ db }) => {
         import('firebase/firestore').then(({ doc, setDoc, deleteDoc }) => {
           if (deletedId) {
             deleteDoc(doc(db, 'users', deletedId)).catch(() => {});
+            deleteDoc(doc(db, 'technicians', deletedId)).catch(() => {});
           }
           techList.forEach((t) => {
-            const username = t.username || t.name.toLowerCase().replace(/\s+/g, '.');
-            const role = t.role || (t.isAdmin ? 'Admin' : 'Tecnico');
+            const cleanName = (t.name || '').trim();
+            const username = t.username || cleanName.toLowerCase().replace(/\s+/g, '.');
+            const isAdmin = Boolean(t.isAdmin || t.role === 'Admin' || t.role === 'ADMIN');
+            const role = isAdmin ? 'Admin' : (t.role === 'ATENDENTE' ? 'Atendimento' : 'Técnico');
             setDoc(
               doc(db, 'users', t.id),
               {
                 id: t.id,
                 username: username,
-                name: t.name,
+                name: cleanName,
                 role: role,
-                isAdmin: Boolean(t.isAdmin || role === 'Admin'),
+                isAdmin: isAdmin,
+                isTechnician: t.role !== 'ATENDENTE' && t.role !== 'Atendimento',
+                isAttendant: t.role === 'ATENDENTE' || t.role === 'Atendimento' || isAdmin,
                 phone: t.phone || '',
                 whatsapp: t.whatsapp || '',
                 specialty: t.specialty || '',
                 pixKey: t.pixKey || '',
-                password: t.password || '1234',
+                password: t.password || '123456',
                 active: t.active ?? true,
                 updatedAt: new Date().toISOString(),
               },
@@ -157,6 +298,11 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
           });
         });
       });
+
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('technicians', techList);
+      }).catch(() => {});
     } catch (err) {}
   };
 
@@ -187,18 +333,18 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
     }
   };
 
-  // Suporte a tecla ESC
+  const handleRequestCloseMainRef = useRef(handleRequestCloseMain);
+  handleRequestCloseMainRef.current = handleRequestCloseMain;
+
+  // Registro no modalStack para ESC
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleRequestCloseMain();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isFormOpen, isDirty]);
+    if (isOpen) {
+      modalStack.register('TechniciansModal', () => {
+        handleRequestCloseMainRef.current();
+      });
+      return () => modalStack.unregister('TechniciansModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -277,6 +423,18 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
 
   const handleDelete = async () => {
     if (!selectedTech) { await alert({ title: 'Selecione um Registro', message: 'Por favor, selecione um registro na tabela.', variant: 'info' }); return; }
+
+    try {
+      await assertTerminalCanSave('excluir técnico / funcionário');
+    } catch (err: any) {
+      await alert({
+        title: 'Servidor Desconectado',
+        message: err.message || 'O Computador Servidor está offline. Não é possível excluir funcionários no terminal neste momento.',
+        variant: 'danger',
+      });
+      return;
+    }
+
     const ok = await confirm({ title: 'Excluir Funcionário', message: `Deseja realmente EXCLUIR "${selectedTech.name}"?`, variant: 'danger', confirmText: 'Excluir' });
     if (ok) {
       const deletedId = selectedTech.id;
@@ -292,6 +450,17 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
     const cleanName = formData.name.trim();
     if (!cleanName) {
       await alert({ title: 'Nome Obrigatório', message: 'O nome do funcionário é obrigatório.', variant: 'warning' });
+      return;
+    }
+
+    try {
+      await assertTerminalCanSave(editingTech ? 'editar técnico / funcionário' : 'cadastrar técnico / funcionário');
+    } catch (err: any) {
+      await alert({
+        title: 'Servidor Desconectado',
+        message: err.message || 'O Computador Servidor está offline. Não é possível cadastrar ou alterar funcionários no terminal neste momento.',
+        variant: 'danger',
+      });
       return;
     }
 
@@ -407,7 +576,8 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
 
         {/* Tabela de Técnicos */}
         <div
-          className="flex-1 overflow-auto p-4 bg-slate-50"
+          className="flex-1 overflow-auto p-4 bg-slate-50 select-none"
+          onContextMenu={handleContextMenu}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('tr[data-row]') === null) {
               setSelectedTechId(null);
@@ -421,10 +591,18 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                   {columns.filter((c) => c.visible).map((col) => (
                     <th
                       key={col.id}
-                      style={{ width: `${col.width}px`, minWidth: `${col.width}px` }}
-                      className="p-2 border-b border-r border-slate-300"
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, col.id)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, col.id)}
+                      style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }}
+                      className="p-1.5 border-b border-r border-slate-300 relative group cursor-grab active:cursor-grabbing hover:bg-slate-300/80 transition-colors"
                     >
-                      {col.label}
+                      <div className="truncate pr-2">{col.label}</div>
+                      <div
+                        onMouseDown={(e) => handleMouseDownResize(e, col.id)}
+                        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-indigo-500/60 z-30 opacity-0 group-hover:opacity-100"
+                      />
                     </th>
                   ))}
                 </tr>
@@ -470,21 +648,21 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
                             ? '👑 ADMIN'
                             : t.role === 'ATENDENTE'
                             ? '🎧 ATENDENTE'
-                            : '🔧 TÉCNICO'}
+                            : '🛠️ TÉCNICO'}
                         </span>
                       </td>
-                      <td className="p-2 border-r border-slate-200 text-slate-700 truncate">
-                        {t.whatsapp || t.phone || '-'}
+                      <td className="p-2 border-r border-slate-200 text-slate-700">
+                        {t.phone || t.whatsapp || '-'}
                       </td>
                       <td className="p-2 border-r border-slate-200 text-slate-700 truncate">
                         {t.specialty || '-'}
                       </td>
-                      <td className="p-2 border-r border-slate-200 font-mono text-slate-600 truncate">
+                      <td className="p-2 border-r border-slate-200 text-slate-700 font-mono">
                         {t.pixKey || '-'}
                       </td>
                       <td className="p-2 border-r border-slate-200 text-center">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[9.5px] font-bold ${
+                          className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
                             t.active
                               ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                               : 'bg-red-100 text-red-800 border border-red-300'
@@ -508,6 +686,32 @@ export const TechniciansModal: React.FC<TechniciansModalProps> = ({
             </table>
           </div>
         </div>
+
+        {/* Menu de Contexto (Botão Direito) para Ocultar/Exibir Colunas */}
+        {contextMenu && (
+          <div
+            style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+            className="fixed bg-white border border-slate-300 rounded-xl shadow-2xl py-2 min-w-[230px] z-50 text-xs text-slate-800 font-sans"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1 font-bold text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-100 mb-1">
+              Exibir / Remover Colunas
+            </div>
+            {columns.map((col) => (
+              <button
+                key={col.id}
+                disabled={col.fixed}
+                onClick={() => toggleColumnVisibility(col.id)}
+                className={`w-full text-left px-3 py-1.5 hover:bg-indigo-50 text-slate-800 flex items-center justify-between transition-colors ${
+                  col.fixed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
+              >
+                <span>{col.label}</span>
+                {col.visible && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Rodapé */}
         <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between text-xs">

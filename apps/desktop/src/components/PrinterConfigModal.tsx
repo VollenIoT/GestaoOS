@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Printer,
@@ -15,10 +15,22 @@ import {
   QrCode,
   ShieldCheck,
   RotateCcw,
+  Barcode,
+  Volume2,
+  Sparkles,
+  AlertCircle,
+  Cpu,
+  Usb,
+  Radio,
+  RefreshCw,
 } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
 
 export interface PrinterConfig {
   selectedPrinterName: string;
+  selectedA4PrinterName?: string;
+  selectedThermalPrinterName?: string;
+  selectedSalesPrinterName?: string;
   paperType: 'A4' | 'THERMAL_80MM' | 'THERMAL_58MM' | 'LETTER' | 'A5';
   orientation: 'PORTRAIT' | 'LANDSCAPE';
   margins: 'DEFAULT' | 'NARROW' | 'NONE';
@@ -38,6 +50,9 @@ export interface PrinterConfig {
 
 export const defaultPrinterConfig: PrinterConfig = {
   selectedPrinterName: 'Impressora Padrão do Windows',
+  selectedA4PrinterName: 'Impressora Padrão do Windows',
+  selectedThermalPrinterName: 'Impressora Térmica 80mm (POS-80 / Elgin / Bematech)',
+  selectedSalesPrinterName: 'Impressora Térmica 80mm (POS-80 / Elgin / Bematech)',
   paperType: 'A4',
   orientation: 'PORTRAIT',
   margins: 'DEFAULT',
@@ -54,14 +69,8 @@ export const defaultPrinterConfig: PrinterConfig = {
   printSaleSignatureLine: true,
 };
 
-const SYSTEM_PRINTERS_LIST = [
+const FALLBACK_PRINTERS_LIST = [
   'Impressora Padrão do Windows',
-  'Microsoft Print to PDF',
-  'EPSON EcoTank L3250 / L3150 Series',
-  'HP LaserJet Pro M404-M405',
-  'Brother HL-1212W series',
-  'Impressora Térmica 80mm (POS-80 / Elgin / Bematech)',
-  'Impressora Térmica 58mm (Mini POS)',
 ];
 
 interface PrinterConfigModalProps {
@@ -86,61 +95,157 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
   const [printersList, setPrintersList] = useState<string[]>(() => {
     try {
       const savedList = localStorage.getItem('vollen_custom_printers_list');
-      if (savedList) return JSON.parse(savedList);
+      if (savedList) {
+        const parsed = JSON.parse(savedList);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch { }
-    return SYSTEM_PRINTERS_LIST;
+    return FALLBACK_PRINTERS_LIST;
   });
 
-  const [newPrinterName, setNewPrinterName] = useState('');
-  const [isAddingPrinter, setIsAddingPrinter] = useState(false);
+  const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activeTab, setActiveTab] = useState<'selecao' | 'papel' | 'cupom' | 'vendas'>('selecao');
+  const [activeTab, setActiveTab] = useState<'selecao' | 'papel' | 'cupom' | 'vendas' | 'leitor'>('selecao');
+
+  // Estados específicos para Teste e Configuração do Leitor de Código de Barras
+  const [testScannedCode, setTestScannedCode] = useState('');
+  const [scanHistory, setScanHistory] = useState<{ code: string; time: string; type: string }[]>([]);
+  const [scannerBeepAudio, setScannerBeepAudio] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vollen_scanner_beep_enabled') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [scannerAutoAddPOS, setScannerAutoAddPOS] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vollen_scanner_auto_add_pos') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const [selectedScannerDevice, setSelectedScannerDevice] = useState<string>(() => {
+    try {
+      return localStorage.getItem('vollen_selected_scanner_device') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [hasScannedDeviceActive, setHasScannedDeviceActive] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('vollen_scanner_detected_active') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const scannerInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Função para buscar dispositivos instalados no Windows via Tauri
+  const fetchInstalledPrinters = async (showLoadingState = false) => {
+    if (showLoadingState) setIsLoadingPrinters(true);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const installedPrinters: string[] = await invoke('get_installed_printers');
+      if (installedPrinters && Array.isArray(installedPrinters) && installedPrinters.length > 0) {
+        setPrintersList(installedPrinters);
+        try {
+          localStorage.setItem('vollen_custom_printers_list', JSON.stringify(installedPrinters));
+        } catch {}
+
+        // Atualizar se a selecionada não estiver na lista instalada
+        setConfig((prev) => {
+          const updated = { ...prev };
+          if (!installedPrinters.includes(prev.selectedPrinterName) && installedPrinters[0]) {
+            updated.selectedPrinterName = installedPrinters[0];
+          }
+          if (prev.selectedA4PrinterName && !installedPrinters.includes(prev.selectedA4PrinterName) && installedPrinters[0]) {
+            updated.selectedA4PrinterName = installedPrinters[0];
+          }
+          if (prev.selectedThermalPrinterName && !installedPrinters.includes(prev.selectedThermalPrinterName) && installedPrinters[0]) {
+            updated.selectedThermalPrinterName = installedPrinters[0];
+          }
+          if (prev.selectedSalesPrinterName && !installedPrinters.includes(prev.selectedSalesPrinterName) && installedPrinters[0]) {
+            updated.selectedSalesPrinterName = installedPrinters[0];
+          }
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.warn('Erro ao consultar impressoras instaladas do Windows via Tauri:', err);
+    } finally {
+      if (showLoadingState) setIsLoadingPrinters(false);
+    }
+  };
+
+  // Reproduz som de bip sintetizado quando um código for escaneado com sucesso
+  const playBeepSound = () => {
+    if (!scannerBeepAudio) return;
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1800, audioCtx.currentTime); // Frequência do bipe do leitor
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.12);
+    } catch {}
+  };
+
+  const handleProcessScannedCode = (rawCode: string) => {
+    const code = rawCode.trim();
+    if (!code) return;
+
+    let detectedType = 'Code-128 / Livre';
+    if (/^\d{13}$/.test(code)) detectedType = 'EAN-13 (Padrão Comercial)';
+    else if (/^\d{8}$/.test(code)) detectedType = 'EAN-8 (Embalagens Pequenas)';
+    else if (/^\d{12}$/.test(code)) detectedType = 'UPC-A';
+    else if (/^\d{14}$/.test(code)) detectedType = 'DUN-14 (Caixas/Fardos)';
+
+    playBeepSound();
+    setHasScannedDeviceActive(true);
+    setSelectedScannerDevice('Leitor USB / Teclado HID (Ativo)');
+    try {
+      localStorage.setItem('vollen_scanner_detected_active', 'true');
+      localStorage.setItem('vollen_selected_scanner_device', 'Leitor USB / Teclado HID (Ativo)');
+    } catch {}
+    setScanHistory((prev) => [
+      { code, time: new Date().toLocaleTimeString('pt-BR'), type: detectedType },
+      ...prev.slice(0, 9),
+    ]);
+    setTestScannedCode('');
+  };
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (isOpen) {
+      modalStack.register('PrinterConfigModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('PrinterConfigModal');
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
       try {
         const saved = localStorage.getItem('vollen_printer_config');
         if (saved) setConfig({ ...defaultPrinterConfig, ...JSON.parse(saved) });
-
-        const savedList = localStorage.getItem('vollen_custom_printers_list');
-        if (savedList) setPrintersList(JSON.parse(savedList));
       } catch { }
+      fetchInstalledPrinters();
       setSaveSuccess(false);
-      setIsAddingPrinter(false);
     }
   }, [isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
-
-  const handleAddPrinter = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = newPrinterName.trim();
-    if (!trimmed) return;
-    if (printersList.includes(trimmed)) {
-      alert('Esta impressora já está na lista.');
-      return;
-    }
-    const updated = [...printersList, trimmed];
-    setPrintersList(updated);
-    setConfig((prev) => ({ ...prev, selectedPrinterName: trimmed }));
-    try {
-      localStorage.setItem('vollen_custom_printers_list', JSON.stringify(updated));
-    } catch { }
-    setNewPrinterName('');
-    setIsAddingPrinter(false);
-  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,10 +262,53 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
     }
   };
 
-  const handleTestPrint = () => {
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
+  const handleTestPrint = (printerTarget?: string, formatType?: string) => {
+    const printerName = printerTarget || config.selectedPrinterName || 'Impressora Padrão do Windows';
+    const paper = formatType || config.paperType || 'A4';
+    const isThermal = paper.includes('THERMAL') || paper.includes('58MM') || paper.includes('80MM');
+
+    const printWindow = window.open('', '_blank', isThermal ? 'width=450,height=600' : 'width=800,height=600');
     if (!printWindow) {
       return alert('Não foi possível abrir a janela de impressão. Verifique se popups estão bloqueados.');
+    }
+
+    if (isThermal) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Teste Térmico - Vollen OS</title>
+            <style>
+              @page { size: 80mm auto; margin: 3mm; }
+              body { font-family: 'Courier New', monospace; padding: 4px; color: #000; font-size: 11px; text-align: center; }
+              .divider { border-top: 1px dashed #000; margin: 6px 0; }
+              .bold { font-weight: bold; }
+              .details { text-align: left; margin-top: 8px; font-size: 10px; }
+            </style>
+          </head>
+          <body>
+            <div class="bold" style="font-size: 13px;">VOLLEN - GESTÃO DE OS</div>
+            <div style="font-size: 10px;">TESTE DE IMPRESSÃO TÉRMICA</div>
+            <div class="divider"></div>
+            <p>Impressora comunicando com sucesso!</p>
+            <div class="details">
+              <strong>Dispositivo:</strong> ${printerName}<br/>
+              <strong>Modelo:</strong> ${paper}<br/>
+              <strong>Emissão:</strong> ${new Date().toLocaleString('pt-BR')}
+            </div>
+            <div class="divider"></div>
+            <div style="font-size: 9px; margin-top: 10px;">Obrigado por utilizar o Gestão OS!</div>
+            <script>
+              window.onload = function() {
+                window.print();
+                setTimeout(function() { window.close(); }, 500);
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      return;
     }
 
     printWindow.document.write(`
@@ -183,8 +331,8 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
             <div class="badge">PÁGINA DE TESTE DE IMPRESSÃO</div>
             <p>Se você está lendo esta página, sua impressora está configurada e comunicando perfeitamente com o sistema!</p>
             <div class="details">
-              <strong>Impressora Selecionada:</strong> ${config.selectedPrinterName}<br/>
-              <strong>Formato do Papel:</strong> ${config.paperType}<br/>
+              <strong>Impressora Selecionada:</strong> ${printerName}<br/>
+              <strong>Formato do Papel:</strong> ${paper}<br/>
               <strong>Orientação:</strong> ${config.orientation === 'PORTRAIT' ? 'Retrato (Vertical)' : 'Paisagem (Horizontal)'}<br/>
               <strong>Data / Hora do Teste:</strong> ${new Date().toLocaleString('pt-BR')}
             </div>
@@ -279,6 +427,22 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
             <Receipt className="w-3.5 h-3.5 text-emerald-600" />
             Comprovante de Vendas
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('leitor');
+              setTimeout(() => scannerInputRef.current?.focus(), 100);
+            }}
+            className={`px-3 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${
+              activeTab === 'leitor'
+                ? 'bg-white text-amber-800 border-t-2 border-amber-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Barcode className="w-3.5 h-3.5 text-amber-600" />
+            Leitor de Código de Barras
+          </button>
         </div>
 
         {/* Formulário com Rolagem */}
@@ -287,11 +451,21 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
           {activeTab === 'selecao' && (
             <div className="space-y-3">
               <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2">
-                <label className="block font-bold text-slate-800 text-[11.5px]">
-                  <span>Selecione a Impressora Padrão:</span>
-                </label>
-
-
+                <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                  <label className="block font-bold text-slate-800 text-[11.5px]">
+                    <span>Impressoras Instaladas no Computador (Windows):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fetchInstalledPrinters(true)}
+                    disabled={isLoadingPrinters}
+                    className="flex items-center gap-1.5 text-[11px] font-bold text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-lg border border-sky-200 cursor-pointer transition-colors"
+                    title="Buscar e atualizar lista de impressoras conectadas no Windows"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingPrinters ? 'animate-spin' : ''}`} />
+                    {isLoadingPrinters ? 'Detectando...' : 'Atualizar Dispositivos'}
+                  </button>
+                </div>
 
                 {/* Lista de Seleção de Impressoras com Checkmark */}
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -332,7 +506,7 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={handleTestPrint}
+                  onClick={() => handleTestPrint(config.selectedPrinterName, 'A4')}
                   className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-transform active:scale-95"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -345,6 +519,45 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
           {/* ABA 2: FORMATO E LAYOUT (A4) */}
           {activeTab === 'papel' && (
             <div className="space-y-3">
+              {/* Seleção de Impressora para A4 */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-800 text-[11.5px]">
+                    <span>Impressora para Folha A4 (Comprovante e Orçamento):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fetchInstalledPrinters(true)}
+                    disabled={isLoadingPrinters}
+                    className="flex items-center gap-1 text-[10.5px] text-sky-700 hover:text-sky-900 cursor-pointer"
+                    title="Atualizar lista de impressoras"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingPrinters ? 'animate-spin' : ''}`} />
+                    Atualizar
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={config.selectedA4PrinterName || config.selectedPrinterName || printersList[0] || 'Impressora Padrão do Windows'}
+                    onChange={(e) => setConfig({ ...config, selectedA4PrinterName: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-600 cursor-pointer text-xs"
+                  >
+                    {printersList.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrint(config.selectedA4PrinterName || config.selectedPrinterName, 'A4')}
+                    className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-2 rounded-lg font-bold flex items-center gap-1 shrink-0 text-xs shadow-xs cursor-pointer"
+                    title="Imprimir folha de teste A4"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Testar
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 {/* Formato de Papel */}
                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
@@ -425,8 +638,6 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
                     className="w-4 h-4 accent-sky-600 cursor-pointer"
                   />
                 </label>
-
-
               </div>
             </div>
           )}
@@ -436,6 +647,45 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
             <div className="space-y-3">
               <div className="bg-amber-50 border border-amber-300 rounded-xl p-2.5 text-amber-900 text-[11px] leading-tight">
                 <strong>Modo Cupom / Bobina:</strong> Ideal para impressoras térmicas não fiscais (80mm ou 58mm), gerando comprovantes compactos e rápidos para entrega ao cliente.
+              </div>
+
+              {/* Seleção de Impressora Térmica */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-800 text-[11.5px]">
+                    <span>Impressora para Cupom Térmico (OS):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fetchInstalledPrinters(true)}
+                    disabled={isLoadingPrinters}
+                    className="flex items-center gap-1 text-[10.5px] text-amber-700 hover:text-amber-900 cursor-pointer"
+                    title="Atualizar lista de impressoras"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingPrinters ? 'animate-spin' : ''}`} />
+                    Atualizar
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={config.selectedThermalPrinterName || config.selectedPrinterName || printersList[0] || 'Impressora Padrão do Windows'}
+                    onChange={(e) => setConfig({ ...config, selectedThermalPrinterName: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-600 cursor-pointer text-xs"
+                  >
+                    {printersList.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrint(config.selectedThermalPrinterName || config.selectedPrinterName, 'THERMAL_80MM')}
+                    className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg font-bold flex items-center gap-1 shrink-0 text-xs shadow-xs cursor-pointer"
+                    title="Imprimir cupom de teste térmico"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Testar
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-2">
@@ -472,7 +722,46 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
               <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-2.5 text-emerald-950 text-[11px] leading-tight flex items-start gap-2">
                 <Receipt className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <div>
-                  <strong>Formato do Comprovante de Venda (PDV/Balcão):</strong> Escolha como o comprovante de venda de peças será emitido e impresso pelo sistema.
+                  <strong>Formato do Comprovante de Venda (PDV/Balcão):</strong> Escolha a impressora e o modelo de recibo para vendas de balcão e peças.
+                </div>
+              </div>
+
+              {/* Seleção de Impressora de Vendas */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-800 text-[11.5px]">
+                    <span>Impressora para Comprovante de Vendas:</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => fetchInstalledPrinters(true)}
+                    disabled={isLoadingPrinters}
+                    className="flex items-center gap-1 text-[10.5px] text-emerald-700 hover:text-emerald-900 cursor-pointer"
+                    title="Atualizar lista de impressoras"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingPrinters ? 'animate-spin' : ''}`} />
+                    Atualizar
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={config.selectedSalesPrinterName || config.selectedPrinterName || printersList[0] || 'Impressora Padrão do Windows'}
+                    onChange={(e) => setConfig({ ...config, selectedSalesPrinterName: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-emerald-600 cursor-pointer text-xs"
+                  >
+                    {printersList.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestPrint(config.selectedSalesPrinterName || config.selectedPrinterName, config.salesReceiptFormat || 'THERMAL_80MM')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold flex items-center gap-1 shrink-0 text-xs shadow-xs cursor-pointer"
+                    title="Imprimir teste de venda"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Testar
+                  </button>
                 </div>
               </div>
 
@@ -581,6 +870,198 @@ export const PrinterConfigModal: React.FC<PrinterConfigModalProps> = ({
                       className="w-4 h-4 accent-emerald-600 cursor-pointer"
                     />
                   </label>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ABA 5: LEITOR DE CÓDIGO DE BARRAS */}
+          {activeTab === 'leitor' && (
+            <div className="space-y-4">
+              {/* Box de Teste em Tempo Real */}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50/50 p-4 rounded-xl border border-amber-200 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-600 text-white rounded-lg shadow-xs">
+                      <Barcode className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-xs">Área de Teste do Leitor (USB / Teclado)</h3>
+                      <p className="text-[10.5px] text-slate-500">Bipe ou digite qualquer código de barras para testar a captura instantânea</p>
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-1 text-[10.5px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-300">
+                    <Sparkles className="w-3 h-3 text-amber-600" />
+                    Pronto para Bipar
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input
+                    ref={scannerInputRef}
+                    type="text"
+                    value={testScannedCode}
+                    onChange={(e) => setTestScannedCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleProcessScannedCode(testScannedCode);
+                      }
+                    }}
+                    placeholder="Clique aqui e aponte o leitor de código de barras..."
+                    className="w-full bg-white border-2 border-amber-400 focus:border-amber-600 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 font-mono font-bold focus:outline-none focus:ring-3 focus:ring-amber-500/20 shadow-inner"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleProcessScannedCode(testScannedCode)}
+                    className="absolute right-1.5 top-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Testar
+                  </button>
+                </div>
+
+                {/* Histórico Recente de Bipagens de Teste */}
+                <div className="bg-white rounded-xl border border-amber-200/80 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-slate-700">Leituras Recentes de Teste:</span>
+                    {scanHistory.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setScanHistory([])}
+                        className="text-red-600 hover:text-red-800 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" /> Limpar histórico
+                      </button>
+                    )}
+                  </div>
+
+                  {scanHistory.length === 0 ? (
+                    <div className="py-4 text-center text-slate-400 text-xs italic">
+                      Nenhum código bipado ainda. Aponte o leitor de código de barras para testar.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 max-h-36 overflow-y-auto pr-1">
+                      {scanHistory.map((item, idx) => (
+                        <div key={idx} className="py-1.5 flex items-center justify-between text-xs animate-fadeIn">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-black text-[10px] flex items-center justify-center">
+                              ✓
+                            </span>
+                            <span className="font-mono font-bold text-slate-900">{item.code}</span>
+                            <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.2 rounded">
+                              {item.type}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px] text-slate-400">{item.time}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Seleção / Status do Dispositivo de Leitura */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <Usb className="w-4 h-4 text-sky-600" />
+                    Dispositivo de Leitura Detectado no Sistema:
+                  </label>
+                  {hasScannedDeviceActive ? (
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Leitor Conectado e Ativo
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                      Aguardando Conexão / Primeiro Bipe
+                    </span>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={selectedScannerDevice}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedScannerDevice(val);
+                      try { localStorage.setItem('vollen_selected_scanner_device', val); } catch {}
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-600 focus:bg-white shadow-2xs cursor-pointer"
+                  >
+                    {!hasScannedDeviceActive ? (
+                      <option value="">
+                        ⚠️ Nenhum Leitor Detectado (Conecte o leitor USB ou bipe na área de teste)
+                      </option>
+                    ) : (
+                      <option value="Leitor USB / Teclado HID (Ativo)">
+                        🟢 Leitor USB / Teclado HID (Dispositivo Reconhecido)
+                      </option>
+                    )}
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between text-[10.5px] text-slate-500 pt-0.5">
+                  <span>Interface: <strong>USB / Bluetooth (Emulação de Teclado HID)</strong></span>
+                  <span className={hasScannedDeviceActive ? 'text-emerald-700 font-semibold' : 'text-slate-500 font-medium'}>
+                    {hasScannedDeviceActive ? 'Status: Pronto para Leitura' : 'Status: Conecte o leitor na porta USB'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Configurações de Comportamento do Leitor */}
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                <span className="font-bold text-slate-800 block text-xs">
+                  Preferências e Comportamento do Leitor:
+                </span>
+
+                <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer border border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <Volume2 className="w-4 h-4 text-sky-600" />
+                    <div>
+                      <span className="font-bold text-slate-800 block text-xs">Som de Confirmação (Bipe no Sistema)</span>
+                      <span className="text-[10.5px] text-slate-500">Emitir um som sonoro curto ao bipar com sucesso</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={scannerBeepAudio}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setScannerBeepAudio(val);
+                      try { localStorage.setItem('vollen_scanner_beep_enabled', String(val)); } catch {}
+                    }}
+                    className="w-4 h-4 accent-amber-600 cursor-pointer"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-xl cursor-pointer border border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <span className="font-bold text-slate-800 block text-xs">Inserção Direta no PDV / Vendas Rápidas</span>
+                      <span className="text-[10.5px] text-slate-500">Ao bipar no PDV, adiciona 1 unidade do produto instantaneamente ao carrinho</span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={scannerAutoAddPOS}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setScannerAutoAddPOS(val);
+                      try { localStorage.setItem('vollen_scanner_auto_add_pos', String(val)); } catch {}
+                    }}
+                    className="w-4 h-4 accent-amber-600 cursor-pointer"
+                  />
+                </label>
+
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 flex items-start gap-2 text-[11px] text-slate-600">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="text-slate-800">Dica de Compatibilidade:</strong> Leitores USB e sem fio funcionam como teclados virtuais (HID). Certifique-se de que o leitor esteja configurado com o sufixo <code>ENTER</code> (padrão de fábrica na maioria das marcas como Honeywell, Elgin, Zebra e Bematech).
+                  </div>
                 </div>
               </div>
             </div>

@@ -19,6 +19,7 @@ import { Estimate } from './CreateEstimateModal';
 import { matchesSearchTerm } from '../utils/searchUtils';
 import { useDialog } from './DialogContext';
 import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
 
 interface EstimatesModalProps {
   isOpen: boolean;
@@ -440,57 +441,59 @@ export const EstimatesModal: React.FC<EstimatesModalProps> = ({
             </button>
 
             {/* Gerar OS a partir do Orçamento */}
-            <button
-              type="button"
-              disabled={!selectedEstimateId}
-              onClick={async () => {
-                if (selectedEstimate) {
-                  if (selectedEstimate.status === 'APROVADO') {
-                    await dlgAlert({
-                      title: 'Orçamento Já Convertido',
-                      message: `O orçamento #${selectedEstimate.code} já foi aprovado e convertido em Ordem de Serviço anteriormente.\n\nNão é possível gerar outra OS a partir deste mesmo orçamento.`,
-                      variant: 'warning',
-                    });
-                    return;
-                  }
-
-                  let matchedClientId = selectedEstimate.client?.id;
-                  if (!matchedClientId && selectedEstimate.client?.name?.trim()) {
-                    const searchName = selectedEstimate.client.name.trim().toLowerCase();
-                    const existingClient = (clientsList || []).find(
-                      (c: any) => c && c.name && c.name.trim().toLowerCase() === searchName
-                    );
-                    if (existingClient && existingClient.id) {
-                      matchedClientId = existingClient.id;
+            {getCurrentFeatures().hasGenerateOSFromEstimate && (
+              <button
+                type="button"
+                disabled={!selectedEstimateId}
+                onClick={async () => {
+                  if (selectedEstimate) {
+                    if (selectedEstimate.status === 'APROVADO') {
+                      await dlgAlert({
+                        title: 'Orçamento Já Convertido',
+                        message: `O orçamento #${selectedEstimate.code} já foi aprovado e convertido em Ordem de Serviço anteriormente.\n\nNão é possível gerar outra OS a partir deste mesmo orçamento.`,
+                        variant: 'warning',
+                      });
+                      return;
                     }
-                  }
 
-                  if (!matchedClientId) {
-                    await dlgAlert({
-                      title: 'Cliente Não Cadastrado',
-                      message: 'Para gerar uma Ordem de Serviço a partir deste orçamento, o cliente deve estar cadastrado no sistema.\n\nPor favor, cadastre ou selecione um cliente existente na Central de Clientes.',
-                      variant: 'warning',
-                    });
-                    if (onOpenClientsModal) {
-                      onOpenClientsModal();
+                    let matchedClientId = selectedEstimate.client?.id;
+                    if (!matchedClientId && selectedEstimate.client?.name?.trim()) {
+                      const searchName = selectedEstimate.client.name.trim().toLowerCase();
+                      const existingClient = (clientsList || []).find(
+                        (c: any) => c && c.name && c.name.trim().toLowerCase() === searchName
+                      );
+                      if (existingClient && existingClient.id) {
+                        matchedClientId = existingClient.id;
+                      }
                     }
-                    return;
-                  }
 
-                  onGenerateOSFromEstimate({
-                    ...selectedEstimate,
-                    client: { ...selectedEstimate.client, id: matchedClientId }
-                  });
-                  onClose();
-                }
-              }}
-              className="h-8 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-40 text-white px-3.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow transition-all cursor-pointer hover:scale-102"
-              title="Transforma este orçamento diretamente em Ordem de Serviço"
-            >
-              <Sparkles className="w-4 h-4 text-emerald-200" />
-              Gerar OS do Orçamento
-              <ArrowRight className="w-4 h-4" />
-            </button>
+                    if (!matchedClientId) {
+                      await dlgAlert({
+                        title: 'Cliente Não Cadastrado',
+                        message: 'Para gerar uma Ordem de Serviço a partir deste orçamento, o cliente deve estar cadastrado no sistema.\n\nPor favor, cadastre ou selecione um cliente existente na Central de Clientes.',
+                        variant: 'warning',
+                      });
+                      if (onOpenClientsModal) {
+                        onOpenClientsModal();
+                      }
+                      return;
+                    }
+
+                    onGenerateOSFromEstimate({
+                      ...selectedEstimate,
+                      client: { ...selectedEstimate.client, id: matchedClientId }
+                    });
+                    onClose();
+                  }
+                }}
+                className="h-8 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-40 text-white px-3.5 rounded-xl text-xs font-black flex items-center gap-1.5 shadow transition-all cursor-pointer hover:scale-102"
+                title="Transforma este orçamento diretamente em Ordem de Serviço"
+              >
+                <Sparkles className="w-4 h-4 text-emerald-200" />
+                Gerar OS do Orçamento
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
 
             {/* Excluir Orçamento */}
             <button

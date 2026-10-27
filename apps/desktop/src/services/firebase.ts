@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp, deleteApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   initializeFirestore,
@@ -9,11 +9,13 @@ import {
 import {
   getSavedTenantFirebaseConfig,
   isCloudModeActive,
-  MASTER_CATALOG_FIREBASE_CONFIG,
 } from './licenseService';
 
-// Determina se há configuração ativa do tenant. Se não houver, opera em MODO LOCAL PURO (sem nuvem).
+// Determina se há configuração ativa do tenant e se o sistema está em modo Nuvem. Se não houver, opera em MODO LOCAL PURO (sem nuvem).
 export function getActiveFirebaseConfig() {
+  if (!isCloudModeActive()) {
+    return null;
+  }
   const tenantConfig = getSavedTenantFirebaseConfig();
   if (tenantConfig && tenantConfig.projectId && tenantConfig.apiKey) {
     return tenantConfig;
@@ -23,11 +25,11 @@ export function getActiveFirebaseConfig() {
 
 const activeConfig = getActiveFirebaseConfig();
 
-// Inicializa o App do Firebase somente se houver uma configuração de tenant ativa
+// Inicializa o App do Firebase somente se houver uma configuração de tenant ativa e o modo nuvem estiver ativo
 let appInstance: FirebaseApp | null = null;
 let firestoreDb: Firestore | null = null;
 
-if (activeConfig) {
+if (activeConfig && isCloudModeActive()) {
   const existingApp = getApps().find((a) => a.name === '[DEFAULT]');
   if (existingApp) {
     appInstance = existingApp;
@@ -45,8 +47,8 @@ if (activeConfig) {
 }
 
 export const app = appInstance;
-// Se estiver em modo local, db é null (operações em nuvem são ignoradas com segurança)
-export const db = firestoreDb as Firestore;
+// Se estiver em modo local, db é null (operações em nuvem e listeners são ignorados com segurança)
+export const db = (isCloudModeActive() ? firestoreDb : null) as Firestore;
 
 
 

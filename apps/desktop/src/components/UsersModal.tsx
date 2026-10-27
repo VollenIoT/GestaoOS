@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { X, PlusCircle, Trash2, KeyRound, UserCheck, Shield, User, Lock, Edit3, CheckSquare, Square } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, PlusCircle, Trash2, KeyRound, UserCheck, Shield, User, Lock, Edit3, CheckSquare, Square, Eye, EyeOff } from 'lucide-react';
 import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
+import { assertTerminalCanSave } from '../services/localNetworkService';
 
 export interface UserPermissions {
-  // Ordens de Serviço
+  // 1. Ordens de Serviço (OS)
   createOS: boolean;
   editOS: boolean;
   cancelOS: boolean;
@@ -15,37 +17,48 @@ export interface UserPermissions {
   viewAuditHistory: boolean;
   printOS: boolean;
 
-  // Orçamentos e Vendas
+  // 2. Orçamentos e Vendas
   manageEstimates: boolean;
   manageSales: boolean;
 
-  // Fluxo de Caixa e Finanças
+  // 3. Fluxo de Caixa & Finanças
   manageCashRegister: boolean;
   openCloseCashRegister: boolean;
   manageManualCashMovement: boolean;
+  manageAccountsPayable: boolean;
+  manageAccountsReceivable: boolean;
+  manageFinancialDRE: boolean;
+  manageFiscalInvoices: boolean;
 
-  // Cadastros e Centrais
+  // 4. Cadastros & Centrais
   manageClients: boolean;
   manageParts: boolean;
+  manageQuickStock: boolean;
+  managePurchaseOrders: boolean;
+  manageSuppliers: boolean;
   manageServices: boolean;
   manageEquipments: boolean;
   manageTechnicians: boolean;
   manageOrderStatus: boolean;
 
-  // Configurações e Parâmetros
+  // 5. Parâmetros e Configurações
   manageOSGeneralConfig: boolean;
   manageOrderSequence: boolean;
   manageWarrantyTerms: boolean;
   managePrinterConfig: boolean;
+  manageShortcuts: boolean;
 
-  // Relatórios
+  // 6. Impressão & Relatórios
   viewGeneralReports: boolean;
   viewTechnicianReports: boolean;
+  manageLabelsGenerator: boolean;
 
-  // Sistema e Administração
+  // 7. Sistema & Administração
   manageCompanyData: boolean;
   manageMobileLink: boolean;
+  manageLocalNetwork: boolean;
   manageWallpaper: boolean;
+  manageSerialLicense: boolean;
   manageUsers: boolean;
   accessBackup: boolean;
   accessFactoryReset: boolean;
@@ -59,6 +72,7 @@ export interface UserItem {
   isAdmin?: boolean;
   isTechnician?: boolean;
   isAttendant?: boolean;
+  password?: string;
   permissions: UserPermissions;
 }
 
@@ -67,7 +81,8 @@ interface UsersModalProps {
   onClose: () => void;
 }
 
-const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
+export const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
+  // 1. OS
   createOS: true,
   editOS: true,
   cancelOS: true,
@@ -78,32 +93,55 @@ const DEFAULT_ADMIN_PERMISSIONS: UserPermissions = {
   viewFinishedOrders: true,
   viewAuditHistory: true,
   printOS: true,
+
+  // 2. Orçamentos & Vendas
   manageEstimates: true,
   manageSales: true,
+
+  // 3. Finanças
   manageCashRegister: true,
   openCloseCashRegister: true,
   manageManualCashMovement: true,
+  manageAccountsPayable: true,
+  manageAccountsReceivable: true,
+  manageFinancialDRE: true,
+  manageFiscalInvoices: true,
+
+  // 4. Cadastros
   manageClients: true,
   manageParts: true,
+  manageQuickStock: true,
+  managePurchaseOrders: true,
+  manageSuppliers: true,
   manageServices: true,
   manageEquipments: true,
   manageTechnicians: true,
   manageOrderStatus: true,
+
+  // 5. Configurações
   manageOSGeneralConfig: true,
   manageOrderSequence: true,
   manageWarrantyTerms: true,
   managePrinterConfig: true,
+  manageShortcuts: true,
+
+  // 6. Relatórios & Etiquetas
   viewGeneralReports: true,
   viewTechnicianReports: true,
+  manageLabelsGenerator: true,
+
+  // 7. Sistema
   manageCompanyData: true,
   manageMobileLink: true,
+  manageLocalNetwork: true,
   manageWallpaper: true,
+  manageSerialLicense: true,
   manageUsers: true,
   accessBackup: true,
   accessFactoryReset: true,
 };
 
-const DEFAULT_TECNICO_PERMISSIONS: UserPermissions = {
+export const DEFAULT_TECNICO_PERMISSIONS: UserPermissions = {
   createOS: true,
   editOS: true,
   cancelOS: false,
@@ -114,32 +152,49 @@ const DEFAULT_TECNICO_PERMISSIONS: UserPermissions = {
   viewFinishedOrders: true,
   viewAuditHistory: true,
   printOS: true,
+
   manageEstimates: true,
   manageSales: true,
+
   manageCashRegister: false,
   openCloseCashRegister: false,
   manageManualCashMovement: false,
+  manageAccountsPayable: false,
+  manageAccountsReceivable: false,
+  manageFinancialDRE: false,
+  manageFiscalInvoices: false,
+
   manageClients: true,
   manageParts: true,
+  manageQuickStock: true,
+  managePurchaseOrders: false,
+  manageSuppliers: false,
   manageServices: true,
   manageEquipments: true,
   manageTechnicians: false,
   manageOrderStatus: false,
+
   manageOSGeneralConfig: false,
   manageOrderSequence: false,
   manageWarrantyTerms: false,
   managePrinterConfig: true,
+  manageShortcuts: true,
+
   viewGeneralReports: false,
   viewTechnicianReports: true,
+  manageLabelsGenerator: true,
+
   manageCompanyData: false,
   manageMobileLink: false,
+  manageLocalNetwork: false,
   manageWallpaper: true,
+  manageSerialLicense: false,
   manageUsers: false,
   accessBackup: false,
   accessFactoryReset: false,
 };
 
-const DEFAULT_ATENDIMENTO_PERMISSIONS: UserPermissions = {
+export const DEFAULT_ATENDIMENTO_PERMISSIONS: UserPermissions = {
   createOS: true,
   editOS: true,
   cancelOS: false,
@@ -150,34 +205,155 @@ const DEFAULT_ATENDIMENTO_PERMISSIONS: UserPermissions = {
   viewFinishedOrders: true,
   viewAuditHistory: true,
   printOS: true,
+
   manageEstimates: true,
   manageSales: true,
+
   manageCashRegister: false,
   openCloseCashRegister: false,
   manageManualCashMovement: false,
+  manageAccountsPayable: false,
+  manageAccountsReceivable: false,
+  manageFinancialDRE: false,
+  manageFiscalInvoices: false,
+
   manageClients: true,
   manageParts: false,
+  manageQuickStock: false,
+  managePurchaseOrders: false,
+  manageSuppliers: false,
   manageServices: false,
   manageEquipments: true,
   manageTechnicians: false,
   manageOrderStatus: false,
+
   manageOSGeneralConfig: false,
   manageOrderSequence: false,
   manageWarrantyTerms: false,
   managePrinterConfig: true,
+  manageShortcuts: true,
+
   viewGeneralReports: false,
   viewTechnicianReports: false,
+  manageLabelsGenerator: true,
+
   manageCompanyData: false,
   manageMobileLink: false,
+  manageLocalNetwork: false,
   manageWallpaper: true,
+  manageSerialLicense: false,
   manageUsers: false,
   accessBackup: false,
   accessFactoryReset: false,
 };
 
+export const normalizeUsername = (name: string): string => {
+  if (!name) return 'usuario';
+  const clean = name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  return clean || 'usuario';
+};
+
+export const reconcileUsersWithEmployees = (
+  rawUsers: any[],
+  rawTechnicians: any[] = [],
+  rawOrders: any[] = []
+): { users: UserItem[]; technicians: any[]; hasChanges: boolean } => {
+  let hasChanges = false;
+  const userList: UserItem[] = (Array.isArray(rawUsers) && rawUsers.length > 0)
+    ? rawUsers.map((u: any) => ({
+        ...u,
+        permissions: (u.role === 'Admin' || (u.username || '').toLowerCase() === 'admin')
+          ? DEFAULT_ADMIN_PERMISSIONS
+          : (u.permissions || DEFAULT_ATENDIMENTO_PERMISSIONS),
+      }))
+    : [
+        {
+          id: '1',
+          username: 'admin',
+          name: 'Administrador',
+          role: 'Admin',
+          isAdmin: true,
+          isTechnician: true,
+          isAttendant: true,
+          permissions: DEFAULT_ADMIN_PERMISSIONS,
+        },
+      ];
+
+  const techList = Array.isArray(rawTechnicians) ? [...rawTechnicians] : [];
+
+  const existingNames = new Set(userList.map((u) => (u.name || '').trim().toLowerCase()));
+  const existingUsernames = new Set(userList.map((u) => (u.username || '').trim().toLowerCase()));
+  const existingIds = new Set(userList.map((u) => String(u.id)));
+
+  // 1. Process technicians list
+  techList.forEach((tech: any) => {
+    if (!tech || !tech.name) return;
+    const name = String(tech.name).trim();
+    if (!name) return;
+    const id = tech.id ? String(tech.id) : '';
+    const username = tech.username ? String(tech.username).trim().toLowerCase() : normalizeUsername(name);
+
+    const alreadyExists =
+      (id && existingIds.has(id)) ||
+      existingNames.has(name.toLowerCase()) ||
+      existingUsernames.has(username);
+
+    if (!alreadyExists) {
+      let uniqueUsername = username;
+      let counter = 1;
+      while (existingUsernames.has(uniqueUsername)) {
+        uniqueUsername = `${username}${counter++}`;
+      }
+
+      const newUserId = id || `user_tech_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      const newUser: UserItem & { password?: string } = {
+        id: newUserId,
+        name: name,
+        username: uniqueUsername,
+        password: tech.password || '123456',
+        role: 'Admin',
+        isAdmin: true,
+        isTechnician: true,
+        isAttendant: true,
+        permissions: DEFAULT_ADMIN_PERMISSIONS,
+      };
+
+      userList.push(newUser);
+      existingNames.add(name.toLowerCase());
+      existingUsernames.add(uniqueUsername);
+      existingIds.add(newUserId);
+      hasChanges = true;
+    }
+  });
+
+  return { users: userList, technicians: techList, hasChanges };
+};
+
 export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
   const [users, setUsers] = useState<UserItem[]>(() => {
-    const defaultList: UserItem[] = [
+    try {
+      const savedUsersRaw = localStorage.getItem('vollen_users');
+      const savedTechsRaw = localStorage.getItem('vollen_technicians');
+      const savedOrdersRaw = localStorage.getItem('vollen_orders') || localStorage.getItem('local_orders');
+
+      const parsedUsers = savedUsersRaw ? JSON.parse(savedUsersRaw) : [];
+      const parsedTechs = savedTechsRaw ? JSON.parse(savedTechsRaw) : [];
+      const parsedOrders = savedOrdersRaw ? JSON.parse(savedOrdersRaw) : [];
+
+      const { users: reconciledUsers } = reconcileUsersWithEmployees(
+        parsedUsers,
+        parsedTechs,
+        parsedOrders
+      );
+      return reconciledUsers;
+    } catch (err) {}
+    return [
       {
         id: '1',
         username: 'admin',
@@ -189,37 +365,70 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
         permissions: DEFAULT_ADMIN_PERMISSIONS,
       },
     ];
-    try {
-      const saved = localStorage.getItem('vollen_users');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (err) {}
-    return defaultList;
   });
 
   useEffect(() => {
     if (isOpen) {
       try {
-        const saved = localStorage.getItem('vollen_users');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const normalized = parsed.map((u: any) => ({
-              ...u,
-              permissions: (u.role === 'Admin' || (u.username || '').toLowerCase() === 'admin')
-                ? DEFAULT_ADMIN_PERMISSIONS
-                : (u.permissions || DEFAULT_ATENDIMENTO_PERMISSIONS),
-            }));
-            setUsers(normalized);
-          }
+        const savedUsersRaw = localStorage.getItem('vollen_users');
+        const savedTechsRaw = localStorage.getItem('vollen_technicians');
+        const savedOrdersRaw = localStorage.getItem('vollen_orders') || localStorage.getItem('local_orders');
+
+        const parsedUsers = savedUsersRaw ? JSON.parse(savedUsersRaw) : [];
+        const parsedTechs = savedTechsRaw ? JSON.parse(savedTechsRaw) : [];
+        const parsedOrders = savedOrdersRaw ? JSON.parse(savedOrdersRaw) : [];
+
+        const { users: reconciledUsers, technicians: reconciledTechs, hasChanges } = reconcileUsersWithEmployees(
+          parsedUsers,
+          parsedTechs,
+          parsedOrders
+        );
+
+        setUsers(reconciledUsers);
+
+        if (hasChanges) {
+          localStorage.setItem('vollen_users', JSON.stringify(reconciledUsers));
+          localStorage.setItem('vollen_technicians', JSON.stringify(reconciledTechs));
+          window.dispatchEvent(new Event('storage'));
+
+          import('../services/firebase').then(({ db }) => {
+            if (db) {
+              import('firebase/firestore').then(({ doc, setDoc }) => {
+                reconciledUsers.forEach((u: any) => {
+                  setDoc(
+                    doc(db, 'users', u.id),
+                    {
+                      id: u.id,
+                      username: u.username,
+                      name: u.name,
+                      role: u.role,
+                      isAdmin: u.role === 'Admin',
+                      isTechnician: Boolean(u.isTechnician ?? (u.role === 'Técnico' || u.role === 'Admin')),
+                      isAttendant: Boolean(u.isAttendant ?? (u.role === 'Atendimento' || u.role === 'Admin')),
+                      permissions: u.permissions,
+                      password: u.password || '123456',
+                      updatedAt: new Date().toISOString(),
+                    },
+                    { merge: true }
+                  ).catch(() => {});
+                });
+              });
+            }
+          });
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error('Erro ao reconciliar usuários e funcionários:', err);
+      }
     }
   }, [isOpen]);
 
-  const saveUsersToStorage = (newUsers: UserItem[], deletedUserId?: string) => {
+  const saveUsersToStorage = async (newUsers: UserItem[], deletedUserId?: string) => {
+    try {
+      await assertTerminalCanSave(deletedUserId ? 'excluir usuário' : 'salvar usuário');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível alterar usuários no terminal.');
+      return;
+    }
     setUsers(newUsers);
     try {
       localStorage.setItem('vollen_users', JSON.stringify(newUsers));
@@ -268,6 +477,19 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
           }
         });
       });
+
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('users', newUsers);
+        if (deletedUserId) {
+          try {
+            const rawTechs = localStorage.getItem('vollen_technicians');
+            if (rawTechs) {
+              emitLocalDataChange('technicians', JSON.parse(rawTechs));
+            }
+          } catch {}
+        }
+      }).catch(() => {});
     } catch (err) {
       console.error('Erro ao gravar vollen_users:', err);
     }
@@ -275,6 +497,8 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
 
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [formData, setFormData] = useState({
     id: '',
@@ -296,23 +520,22 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
   }, [isOpen]);
 
   // Tecla ESC para fechar formulário ou fechar modal de Usuários
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
+    if (isOpen) {
+      modalStack.register('UsersModal', () => {
         if (isFormOpen) {
           setIsFormOpen(false);
           setSelectedUserId(null);
         } else {
-          onClose();
+          onCloseRef.current();
         }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, isFormOpen, onClose]);
+      });
+      return () => modalStack.unregister('UsersModal');
+    }
+  }, [isOpen, isFormOpen]);
 
   if (!isOpen) return null;
 
@@ -354,6 +577,8 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleOpenNewUser = () => {
+    setShowPassword(false);
+    setShowConfirmPassword(false);
     setFormData({
       id: '',
       name: '',
@@ -369,6 +594,8 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleOpenEditUser = (user: UserItem) => {
+    setShowPassword(false);
+    setShowConfirmPassword(false);
     const isAdmin = (user.role === 'Admin') || (user.username || '').toLowerCase() === 'admin';
     const isTech = user.isTechnician ?? (user.role === 'Técnico' || isAdmin);
     const isAtt = user.isAttendant ?? (user.role === 'Atendimento' || isAdmin);
@@ -418,14 +645,29 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
-    if (!formData.id && !formData.password.trim()) {
+    const cleanPassword = formData.password.trim();
+    const cleanConfirmPassword = formData.confirmPassword.trim();
+
+    if (!formData.id && !cleanPassword) {
       await alert({ title: 'Senha Obrigatória', message: 'Por favor, defina uma Senha para o novo usuário.', variant: 'warning' });
       return;
     }
 
-    if (formData.password && formData.password !== formData.confirmPassword) {
-      await alert({ title: 'Senhas Diferentes', message: 'As senhas digitadas não conferem! Por favor, verifique.', variant: 'danger' });
-      return;
+    if (cleanPassword) {
+      if (cleanPassword.length < 4 || cleanPassword.length > 16) {
+        await alert({ title: 'Tamanho de Senha Inválido', message: 'A senha deve conter no mínimo 4 e no máximo 16 caracteres.', variant: 'warning' });
+        return;
+      }
+
+      if (!/^[a-zA-Z0-9]+$/.test(cleanPassword)) {
+        await alert({ title: 'Caracteres Inválidos', message: 'A senha deve conter apenas letras e números, sem espaços ou símbolos.', variant: 'warning' });
+        return;
+      }
+
+      if (cleanPassword.toLowerCase() !== cleanConfirmPassword.toLowerCase()) {
+        await alert({ title: 'Senhas Diferentes', message: 'As senhas digitadas não conferem! Por favor, verifique.', variant: 'danger' });
+        return;
+      }
     }
 
     if (formData.id) {
@@ -506,7 +748,6 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     <tr>
                       <th className="p-3 border-b border-slate-300">Usuário (Login)</th>
                       <th className="p-3 border-b border-slate-300">Nome Completo</th>
-                      <th className="p-3 border-b border-slate-300">Funções Ativas</th>
                       <th className="p-3 border-b border-slate-300">Perfil Base</th>
                       <th className="p-3 border-b border-slate-300 text-right">Ações</th>
                     </tr>
@@ -525,30 +766,28 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                         </td>
                         <td className="p-3 font-bold text-slate-800">{u.name}</td>
                         <td className="p-3">
-                          <div className="flex items-center gap-1.5">
-                            {(u.isTechnician ?? (u.role === 'Técnico' || u.role === 'Admin')) && (
-                              <span className="bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-md font-bold text-[11px] ${u.role === 'Admin'
+                                ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                                : u.role === 'Técnico'
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                  : 'bg-slate-200 text-slate-700 border border-slate-300'
+                                }`}
+                            >
+                              {u.role === 'Admin' ? '👑 Admin' : u.role}
+                            </span>
+                            {u.isAttendant && u.role !== 'Admin' && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200">
+                                📞 Atendente
+                              </span>
+                            )}
+                            {u.isTechnician && u.role !== 'Admin' && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
                                 🛠️ Técnico
                               </span>
                             )}
-                            {(u.isAttendant ?? (u.role === 'Atendimento' || u.role === 'Admin')) && (
-                              <span className="bg-sky-100 text-sky-900 border border-sky-300 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
-                                🎧 Atendente
-                              </span>
-                            )}
                           </div>
-                        </td>
-                        <td className="p-3">
-                          <span
-                            className={`px-2.5 py-1 rounded-md font-bold text-[11px] ${u.role === 'Admin'
-                              ? 'bg-purple-100 text-purple-800 border border-purple-300'
-                              : u.role === 'Técnico'
-                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                                : 'bg-slate-200 text-slate-700'
-                              }`}
-                          >
-                            {u.role === 'Admin' ? '👑 Administrador' : u.role}
-                          </span>
                         </td>
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -614,52 +853,94 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     onChange={(e) => handleRoleChange(e.target.value as any)}
                     className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600 cursor-pointer"
                   >
-                    <option value="Admin">👑 Admin (Acesso Total e Irrestrito)</option>
+                    <option value="Admin">👑 Admin (Acesso Total)</option>
                     <option value="Técnico">🛠️ Técnico (OS + Clientes)</option>
-                    <option value="Atendimento">📞 Atendimento (Apenas Criar OS)</option>
-                    <option value="Personalizado">⚙️ Personalizado (Permissões Escolhidas)</option>
+                    <option value="Atendimento">📞 Atendimento (Apenas OS)</option>
+                    <option value="Personalizado">⚙️ Personalizado</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Funções Permitidas</label>
-                  <div className="flex items-center gap-4 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2">
-                    <label className="flex items-center gap-2 font-bold text-slate-800 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={formData.isTechnician}
-                        onChange={(e) => setFormData({ ...formData, isTechnician: e.target.checked })}
-                        className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                      />
-                      <span>🛠️ Técnico</span>
-                    </label>
-                    <label className="flex items-center gap-2 font-bold text-slate-800 cursor-pointer select-none">
+
+                {/* PAPÉIS: ATENDENTE E TÉCNICO (DISCRETO E ALINHADO) */}
+                <div className="flex flex-col justify-center">
+                  <span className="block font-bold text-slate-700 mb-2">Listar usuário como:</span>
+                  <div className="flex items-center gap-4">
+                    {/* Toggle Atendente */}
+                    <label
+                      onClick={() => setFormData({ ...formData, isAttendant: !formData.isAttendant })}
+                      className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none font-medium hover:text-slate-900"
+                    >
                       <input
                         type="checkbox"
                         checked={formData.isAttendant}
-                        onChange={(e) => setFormData({ ...formData, isAttendant: e.target.checked })}
-                        className="w-4 h-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                        onChange={() => {}}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-sky-600 focus:ring-0 cursor-pointer"
                       />
-                      <span>🎧 Atendente</span>
+                      <span>Atendente</span>
+                    </label>
+
+                    {/* Toggle Técnico */}
+                    <label
+                      onClick={() => setFormData({ ...formData, isTechnician: !formData.isTechnician })}
+                      className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none font-medium hover:text-slate-900"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.isTechnician}
+                        onChange={() => {}}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Técnico</span>
                     </label>
                   </div>
                 </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">{formData.id ? 'Nova Senha' : 'Senha de Acesso'}</label>
-                  <input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password}
+                      maxLength={16}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                        setFormData({ ...formData, password: val });
+                      }}
+                      placeholder={formData.id ? 'Deixe em branco para manter a atual' : 'Digite a senha...'}
+                      className="w-full bg-white border border-slate-300 rounded-lg pl-3 pr-10 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+                      title={showPassword ? 'Ocultar Senha' : 'Ver Senha'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Confirmar Senha</label>
-                  <input
-                    type="password"
-                    value={formData.confirmPassword}
-                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={formData.confirmPassword}
+                      maxLength={16}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^a-zA-Z0-9]/g, '');
+                        setFormData({ ...formData, confirmPassword: val });
+                      }}
+                      placeholder={formData.id ? 'Repita a nova senha' : 'Confirme a senha...'}
+                      className="w-full bg-white border border-slate-300 rounded-lg pl-3 pr-10 py-2 text-slate-800 font-bold focus:outline-none focus:border-sky-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+                      title={showConfirmPassword ? 'Ocultar Senha' : 'Ver Senha'}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -743,10 +1024,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
 
-                  {/* GRUPO 3: FLUXO DE CAIXA & FINANÇAS */}
+                  {/* GRUPO 3: FLUXO DE CAIXA, CONTAS & FINANÇAS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-emerald-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      3. Fluxo de Caixa & Finanças
+                      3. Finanças, Caixa & Contas
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageCashRegister')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageCashRegister ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -761,13 +1042,29 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                         <span>Lançamentos Manuais / Sangrias</span>
                         {formData.permissions?.manageManualCashMovement ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
+                      <div onClick={() => togglePermission('manageAccountsPayable')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageAccountsPayable ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Contas a Pagar</span>
+                        {formData.permissions?.manageAccountsPayable ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageAccountsReceivable')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageAccountsReceivable ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Contas a Receber</span>
+                        {formData.permissions?.manageAccountsReceivable ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageFinancialDRE')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageFinancialDRE ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>DRE & Lucro Real</span>
+                        {formData.permissions?.manageFinancialDRE ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageFiscalInvoices')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageFiscalInvoices ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Emissão Fiscal (NF-e / NFS-e)</span>
+                        {formData.permissions?.manageFiscalInvoices ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
                     </div>
                   </div>
 
-                  {/* GRUPO 4: CADASTROS E CENTRAIS */}
+                  {/* GRUPO 4: CADASTROS & ESTOQUE */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-indigo-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      4. Cadastros Principais
+                      4. Cadastros Principais & Estoque
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('manageClients')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageClients ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -777,6 +1074,18 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                       <div onClick={() => togglePermission('manageParts')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageParts ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Gerenciar Peças e Estoque</span>
                         {formData.permissions?.manageParts ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageQuickStock')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageQuickStock ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Atualização Rápida de Estoque</span>
+                        {formData.permissions?.manageQuickStock ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('managePurchaseOrders')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.managePurchaseOrders ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Ordens de Compra & Reposição</span>
+                        {formData.permissions?.managePurchaseOrders ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageSuppliers')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageSuppliers ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Gerenciar Fornecedores</span>
+                        {formData.permissions?.manageSuppliers ? <CheckSquare className="w-4 h-4 text-indigo-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
                       <div onClick={() => togglePermission('manageServices')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageServices ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Gerenciar Serviços</span>
@@ -819,13 +1128,17 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                         <span>Configurações de Impressora</span>
                         {formData.permissions?.managePrinterConfig ? <CheckSquare className="w-4 h-4 text-purple-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
+                      <div onClick={() => togglePermission('manageShortcuts')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageShortcuts ? 'bg-purple-50 border-purple-300 text-purple-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Configurar Teclas de Atalho</span>
+                        {formData.permissions?.manageShortcuts ? <CheckSquare className="w-4 h-4 text-purple-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
                     </div>
                   </div>
 
-                  {/* GRUPO 6: RELATÓRIOS */}
+                  {/* GRUPO 6: RELATÓRIOS & ETIQUETAS */}
                   <div className="space-y-1.5">
                     <span className="text-[11px] font-extrabold text-emerald-900 uppercase tracking-wide block border-b border-slate-200 pb-0.5">
-                      6. Relatórios & Estatísticas
+                      6. Relatórios & Etiquetas
                     </span>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                       <div onClick={() => togglePermission('viewGeneralReports')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.viewGeneralReports ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
@@ -835,6 +1148,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                       <div onClick={() => togglePermission('viewTechnicianReports')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.viewTechnicianReports ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Relatório por Técnico</span>
                         {formData.permissions?.viewTechnicianReports ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageLabelsGenerator')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageLabelsGenerator ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Central de Etiquetas</span>
+                        {formData.permissions?.manageLabelsGenerator ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
                     </div>
                   </div>
@@ -853,9 +1170,17 @@ export const UsersModal: React.FC<UsersModalProps> = ({ isOpen, onClose }) => {
                         <span>Vincular Celular (ApiKey)</span>
                         {formData.permissions?.manageMobileLink ? <CheckSquare className="w-4 h-4 text-slate-800" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
+                      <div onClick={() => togglePermission('manageLocalNetwork')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageLocalNetwork ? 'bg-slate-100 border-slate-300 text-slate-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Rede Local Offline</span>
+                        {formData.permissions?.manageLocalNetwork ? <CheckSquare className="w-4 h-4 text-slate-800" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
                       <div onClick={() => togglePermission('manageWallpaper')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageWallpaper ? 'bg-slate-100 border-slate-300 text-slate-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Alterar Plano de Fundo</span>
                         {formData.permissions?.manageWallpaper ? <CheckSquare className="w-4 h-4 text-slate-800" /> : <Square className="w-4 h-4 text-slate-400" />}
+                      </div>
+                      <div onClick={() => togglePermission('manageSerialLicense')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageSerialLicense ? 'bg-slate-100 border-slate-300 text-slate-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
+                        <span>Chave Serial & Licença</span>
+                        {formData.permissions?.manageSerialLicense ? <CheckSquare className="w-4 h-4 text-slate-800" /> : <Square className="w-4 h-4 text-slate-400" />}
                       </div>
                       <div onClick={() => togglePermission('manageUsers')} className={`p-2 rounded-lg border flex items-center justify-between cursor-pointer ${formData.permissions?.manageUsers ? 'bg-slate-100 border-slate-300 text-slate-950 font-bold' : 'bg-white border-slate-200 text-slate-600'}`}>
                         <span>Gestão de Usuários</span>

@@ -11,22 +11,22 @@ import {
   RefreshCw,
   ArrowUp,
   ArrowDown,
-  GripVertical,
 } from 'lucide-react';
 import { useDialog } from './DialogContext';
 import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
+import { assertTerminalCanSave } from '../services/localNetworkService';
 
-export interface OSStatusItem {
-  id: string;
-  code: string;
-  name: string;
-  color: string;
-  description?: string;
-  isSystemDefault?: boolean;
-  deductStock?: boolean;
-  returnStock?: boolean;
-  orderIndex?: number;
-}
+import {
+  OSStatusItem,
+  DEFAULT_STATUSES,
+  CANONICAL_DEFAULT_CODES,
+  STATUS_UNIFICATION_MAP,
+  sanitizeAndNormalizeStatuses,
+  getRegisteredOSStatuses,
+} from '../utils/orderStatusUtils';
+
+export type { OSStatusItem };
 
 interface ColumnConfig {
   id: string;
@@ -44,24 +44,13 @@ interface OrderStatusModalProps {
 
 export const ALLOWED_COLORS = [
   { name: 'Amarelo (Aberta)', value: '#eab308' },
-  { name: 'Roxo / Violeta (Orçamento Aprovado)', value: '#8b5cf6' },
+  { name: 'Índigo / Azul Escuro (Orçamento Concluído)', value: '#6366f1' },
   { name: 'Azul Cobalto (Em Atendimento / Visita Técnica)', value: '#0284c7' },
   { name: 'Verde Esmeralda (Aprovado)', value: '#059669' },
   { name: 'Laranja (Aguardando Peça)', value: '#f97316' },
   { name: 'Verde Claro / Menta (Aparelho Liberado e Pronto)', value: '#10b981' },
   { name: 'Verde Escuro / Floresta (Finalizada / Concluída)', value: '#047857' },
   { name: 'Vermelho (Cancelada)', value: '#dc2626' },
-];
-
-const DEFAULT_STATUSES: OSStatusItem[] = [
-  { id: '1', code: '0001', name: 'ABERTA', color: '#eab308', description: 'Ordem de serviço aberta aguardando avaliação', isSystemDefault: true, deductStock: false, returnStock: false },
-  { id: '7', code: '0002', name: 'ORCAMENTO_APROVADO', color: '#8b5cf6', description: 'Orçamento aprovado pelo cliente com reserva de peças', isSystemDefault: true, deductStock: true, returnStock: false },
-  { id: '2', code: '0003', name: 'EM_ATENDIMENTO', color: '#0284c7', description: 'Técnico trabalhando no equipamento / Visita Técnica', isSystemDefault: true, deductStock: false, returnStock: false },
-  { id: '8', code: '0004', name: 'APROVADO', color: '#059669', description: 'Serviço e orçamento aprovados pelo cliente', isSystemDefault: true, deductStock: true, returnStock: false },
-  { id: '3', code: '0005', name: 'AGUARDANDO_PECA', color: '#f97316', description: 'Aguardando chegada de peças para conclusão', isSystemDefault: true, deductStock: false, returnStock: false },
-  { id: '4', code: '0006', name: 'APARELHO_LIBERADO', color: '#10b981', description: 'Aparelho pronto e liberado para retirada pelo cliente', isSystemDefault: true, deductStock: false, returnStock: false },
-  { id: '5', code: '0007', name: 'FINALIZADA', color: '#047857', description: 'Serviço concluído e entregue ao cliente', isSystemDefault: true, deductStock: false, returnStock: false },
-  { id: '6', code: '0008', name: 'CANCELADA', color: '#dc2626', description: 'Ordem de serviço cancelada', isSystemDefault: true, deductStock: false, returnStock: true },
 ];
 
 export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
@@ -74,25 +63,15 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingStatus, setEditingStatus] = useState<OSStatusItem | null>(null);
 
-  const [draggedRowId, setDraggedRowId] = useState<string | null>(null);
-
   const [statuses, setStatuses] = useState<OSStatusItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('custom_os_statuses_v3');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.sort((a: any, b: any) => (a.orderIndex ?? 999) - (b.orderIndex ?? 999));
-        }
-      }
-    } catch (err) {}
-    return DEFAULT_STATUSES.map((s, idx) => ({ ...s, orderIndex: idx }));
+    return getRegisteredOSStatuses();
   });
 
   // Garante que os status estejam sempre sincronizados com o Firestore ao abrir o modal
   React.useEffect(() => {
+    if (!isOpen) return;
     import('../services/firebase').then(({ db }) => {
-      import('firebase/firestore').then(({ collection, getDocs, setDoc, doc }) => {
+      import('firebase/firestore').then(({ collection, getDocs, setDoc, deleteDoc, doc }) => {
         getDocs(collection(db, 'os_statuses')).then((snap) => {
           if (snap.empty) {
             // Se o Firestore estiver vazio, sobe todos os status cadastrados com seus índices de ordem
@@ -102,10 +81,35 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
             }
           } else {
             const list = snap.docs
-              .map((d) => ({ id: d.id, ...d.data() } as OSStatusItem & { orderIndex?: number }))
-              .sort((a: any, b: any) => (a.orderIndex ?? 999) - (b.orderIndex ?? 999));
-            setStatuses(list);
-            localStorage.setItem('custom_os_statuses_v3', JSON.stringify(list));
+              .map((d) => ({ id: d.id, ...d.data() } as OSStatusItem & { orderIndex?: number }));
+            
+            // Sanitiza, normaliza códigos canônicos e desduplica
+            const sanitized = sanitizeAndNormalizeStatuses(list);
+            const sortedList = sanitized.sort((a: any, b: any) => {
+              const numA = parseInt(String(a.code || '').replace(/\D/g, ''), 10) || 999;
+              const numB = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 999;
+              return (a.orderIndex ?? numA) - (b.orderIndex ?? numB);
+            });
+
+            // Identifica documentos no Firestore que são duplicados/unificados obsoletos e remove-os
+            const validIds = new Set(sortedList.map((s) => String(s.id)));
+            snap.docs.forEach((d) => {
+              const docData: any = d.data();
+              const upperName = String(docData?.name || '').trim().toUpperCase();
+              // Se o documento é de um status que foi unificado (ex: EM ORÇAMENTO) ou não está na lista válida consolidada
+              if (STATUS_UNIFICATION_MAP[upperName] || !validIds.has(d.id)) {
+                deleteDoc(doc(db, 'os_statuses', d.id)).catch(() => null);
+              }
+            });
+
+            // Atualiza no Firestore quaisquer itens com códigos/ordem atualizados
+            for (let i = 0; i < sortedList.length; i++) {
+              const st = { ...sortedList[i], orderIndex: i };
+              setDoc(doc(db, 'os_statuses', st.id), st, { merge: true }).catch(() => null);
+            }
+
+            setStatuses(sortedList);
+            localStorage.setItem('custom_os_statuses_v3', JSON.stringify(sortedList));
           }
         });
       });
@@ -114,75 +118,63 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
   const saveStatusesToStorage = async (newStatuses: OSStatusItem[]) => {
     try {
+      await assertTerminalCanSave('alterar status de ordens de serviço');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível alterar status no terminal.');
+      return;
+    }
+    try {
       const ordered = newStatuses.map((st, idx) => ({ ...st, orderIndex: idx }));
       localStorage.setItem('custom_os_statuses_v3', JSON.stringify(ordered));
+
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('statuses', ordered);
+      }).catch(() => {});
+
       // Sincroniza com o Firestore para o aplicativo mobile e outras telas
       const { setDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../services/firebase');
-      for (const st of ordered) {
-        await setDoc(doc(db, 'os_statuses', st.id), st, { merge: true }).catch(() => null);
+      if (db) {
+        for (const st of ordered) {
+          await setDoc(doc(db, 'os_statuses', st.id), st, { merge: true }).catch(() => null);
+        }
       }
     } catch (err) {}
   };
 
-  const handleMoveRow = (index: number, direction: 'UP' | 'DOWN') => {
-    const targetIndex = direction === 'UP' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= statuses.length) return;
-
-    const updated = [...statuses];
-    const [movedItem] = updated.splice(index, 1);
-    updated.splice(targetIndex, 0, movedItem);
-
-    setStatuses(updated);
-    saveStatusesToStorage(updated);
-  };
-
-  const handleRowDrop = (targetStatusId: string) => {
-    if (!draggedRowId || draggedRowId === targetStatusId) {
-      setDraggedRowId(null);
-      setDragOverTargetId(null);
-      return;
-    }
-
-    const sourceIdx = statuses.findIndex((s) => s.id === draggedRowId);
-    const targetIdx = statuses.findIndex((s) => s.id === targetStatusId);
-    if (sourceIdx < 0 || targetIdx < 0) {
-      setDraggedRowId(null);
-      setDragOverTargetId(null);
-      return;
-    }
-
-    const updated = [...statuses];
-    const [removed] = updated.splice(sourceIdx, 1);
-    updated.splice(targetIdx, 0, removed);
-
-    setStatuses(updated);
-    saveStatusesToStorage(updated);
-    setDraggedRowId(null);
-    setDragOverTargetId(null);
-  };
-
-  const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
-
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem('order_status_modal_columns');
-      if (saved) return JSON.parse(saved);
-    } catch (err) {}
-    return [
-      { id: 'dragHandle', label: '☰', width: 42, visible: true, fixed: true },
+    const hasStock = getCurrentFeatures().hasStatusStockActions;
+    let initialCols: ColumnConfig[] = [
       { id: 'code', label: 'Código', width: 85, visible: true },
       { id: 'color', label: 'Cor', width: 65, visible: true },
       { id: 'name', label: 'Nome do Status', width: 220, visible: true },
-      { id: 'deductStock', label: 'Baixa Estoque', width: 105, visible: true },
-      { id: 'returnStock', label: 'Retorna Peças', width: 105, visible: true },
+      ...(hasStock ? [
+        { id: 'deductStock', label: 'Baixa Estoque', width: 105, visible: true },
+        { id: 'returnStock', label: 'Retorna Peças', width: 105, visible: true },
+      ] : []),
       { id: 'description', label: 'Descrição / Finalidade', width: 330, visible: true },
     ];
+    try {
+      const saved = localStorage.getItem('order_status_modal_columns');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          initialCols = parsed.filter((c: any) => c.id !== 'dragHandle');
+        }
+      }
+    } catch (err) {}
+    if (!hasStock) {
+      initialCols = initialCols.filter((c) => c.id !== 'deductStock' && c.id !== 'returnStock');
+    }
+    return initialCols;
   });
 
   const saveColumnsToStorage = (newCols: ColumnConfig[]) => {
     try {
-      localStorage.setItem('order_status_modal_columns', JSON.stringify(newCols));
+      const hasStock = getCurrentFeatures().hasStatusStockActions;
+      const filtered = hasStock ? newCols : newCols.filter((c) => c.id !== 'deductStock' && c.id !== 'returnStock');
+      localStorage.setItem('order_status_modal_columns', JSON.stringify(filtered));
     } catch (err) {}
   };
 
@@ -190,6 +182,20 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   const [draggedColumnId, setDraggedColumnId] = useState<string | null>(null);
 
   React.useEffect(() => {
+    const hasStock = getCurrentFeatures().hasStatusStockActions;
+    if (!hasStock) {
+      setColumns((prev) => prev.filter((c) => c.id !== 'deductStock' && c.id !== 'returnStock'));
+      try {
+        const saved = localStorage.getItem('order_status_modal_columns');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const cleaned = parsed.filter((c: any) => c.id !== 'deductStock' && c.id !== 'returnStock');
+            localStorage.setItem('order_status_modal_columns', JSON.stringify(cleaned));
+          }
+        }
+      } catch (e) {}
+    }
     if (isOpen) {
       setSearchTerm('');
       setSelectedStatusId(null);
@@ -325,9 +331,6 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
   };
 
   const handleOpenEditForm = (st: OSStatusItem) => {
-    if (st.isSystemDefault && !isAdmin) {
-      return alert('Apenas Administradores podem editar status padrão do sistema.');
-    }
     setEditingStatus(st);
     setFormName(st.name);
     setFormColor(st.color);
@@ -344,9 +347,6 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
     const formattedName = formName.trim();
 
     if (editingStatus) {
-      if (editingStatus.isSystemDefault && !isAdmin) {
-        return alert('Apenas Administradores podem salvar alterações em status padrão do sistema.');
-      }
       const updated = statuses.map((s) =>
         s.id === editingStatus.id
           ? {
@@ -388,9 +388,6 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
   const handleDeleteStatus = async () => {
     if (!selectedStatus) return alert('Por favor, selecione um status na tabela.');
-    if (selectedStatus.isSystemDefault && !isAdmin) {
-      return alert('Apenas Administradores podem excluir status padrão do sistema.');
-    }
 
     const ok = await dlgConfirm({
       title: 'Excluir Status',
@@ -432,12 +429,6 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
   const renderCellContent = (st: OSStatusItem, columnId: string) => {
     switch (columnId) {
-      case 'dragHandle':
-        return (
-          <div className="flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors p-0.5 cursor-grab active:cursor-grabbing">
-            <GripVertical className="w-3.5 h-3.5" />
-          </div>
-        );
       case 'deductStock':
         return (
           <div className="flex items-center justify-center">
@@ -555,7 +546,7 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
         {/* Tabela de Status */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
+          className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50 select-none"
           onContextMenu={handleContextMenu}
         >
           <div style={{ width: `${totalPixels}px`, minWidth: '100%' }}>
@@ -596,65 +587,19 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
               <tbody className="divide-y divide-slate-200 bg-white">
                 {filteredStatuses.map((st) => {
                   const isSelected = st.id === selectedStatusId;
-                  const isBeingDragged = draggedRowId === st.id;
-                  const isDragOver = dragOverTargetId === st.id && !isBeingDragged;
 
                   return (
                     <tr
                       key={st.id}
-                      draggable="true"
-                      onDragStart={(e) => {
-                        setDraggedRowId(st.id);
-                        e.dataTransfer.setData('text/plain', st.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragEnter={(e) => {
-                        e.preventDefault();
-                        if (draggedRowId && draggedRowId !== st.id) {
-                          setDragOverTargetId(st.id);
-                        }
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = 'move';
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const fromId = e.dataTransfer.getData('text/plain') || draggedRowId;
-                        if (fromId && fromId !== st.id) {
-                          const sourceIdx = statuses.findIndex((s) => s.id === fromId);
-                          const targetIdx = statuses.findIndex((s) => s.id === st.id);
-                          if (sourceIdx >= 0 && targetIdx >= 0) {
-                            const updated = [...statuses];
-                            const [removed] = updated.splice(sourceIdx, 1);
-                            updated.splice(targetIdx, 0, removed);
-                            setStatuses(updated);
-                            saveStatusesToStorage(updated);
-                          }
-                        }
-                        setDraggedRowId(null);
-                        setDragOverTargetId(null);
-                      }}
-                      onDragEnd={() => {
-                        setDraggedRowId(null);
-                        setDragOverTargetId(null);
-                      }}
                       onClick={() => setSelectedStatusId(st.id)}
                       onDoubleClick={() => {
                         setSelectedStatusId(st.id);
                         handleOpenEditForm(st);
                       }}
-                      className={`cursor-grab active:cursor-grabbing transition-all select-none ${
-                        isBeingDragged ? 'opacity-30 bg-sky-100 border-2 border-dashed border-sky-500' : ''
-                      } ${
-                        isDragOver ? 'bg-amber-100/90 border-t-4 border-t-amber-600' : ''
-                      } ${
-                        isSelected && !isBeingDragged && !isDragOver
+                      className={`transition-colors cursor-pointer select-none ${
+                        isSelected
                           ? 'bg-amber-100 font-semibold text-amber-950 border-l-4 border-amber-600'
-                          : !isBeingDragged && !isDragOver
-                          ? 'hover:bg-slate-100 bg-white'
-                          : ''
+                          : 'hover:bg-slate-100 bg-white'
                       }`}
                     >
                       {columns
@@ -739,7 +684,7 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
 
             <button
               onClick={handleDeleteStatus}
-              disabled={!selectedStatusId || selectedStatus?.isSystemDefault}
+              disabled={!selectedStatusId}
               className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
@@ -825,51 +770,54 @@ export const OrderStatusModal: React.FC<OrderStatusModalProps> = ({
                 />
               </div>
 
-              {/* OPÇÃO DE BAIXA AUTOMÁTICA DE ESTOQUE */}
-              <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
-                <label className="flex items-start gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formDeductStock}
-                    onChange={(e) => {
-                      setFormDeductStock(e.target.checked);
-                      if (e.target.checked) setFormReturnStock(false);
-                    }}
-                    className="mt-0.5 w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <span className="font-bold text-slate-900 text-xs block">
-                      Dar baixa nas peças no estoque
-                    </span>
-                    <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
-                      Quando este status for selecionado na Ordem de Serviço, o sistema efetuará a baixa automática das peças do estoque vinculadas à OS (sem duplicidades).
-                    </span>
+              {/* OPÇÕES DE BAIXA / DEVOLUÇÃO DE ESTOQUE */}
+              {getCurrentFeatures().hasStatusStockActions && (
+                <>
+                  <div className="bg-sky-50 border border-sky-200 rounded-xl p-3">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formDeductStock}
+                        onChange={(e) => {
+                          setFormDeductStock(e.target.checked);
+                          if (e.target.checked) setFormReturnStock(false);
+                        }}
+                        className="mt-0.5 w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300 cursor-pointer"
+                      />
+                      <div className="flex-1">
+                        <span className="font-bold text-slate-900 text-xs block">
+                          Dar baixa nas peças no estoque
+                        </span>
+                        <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
+                          Quando este status for selecionado na Ordem de Serviço, o sistema efetuará a baixa automática das peças do estoque vinculadas à OS (sem duplicidades).
+                        </span>
+                      </div>
+                    </label>
                   </div>
-                </label>
-              </div>
 
-              {/* OPÇÃO DE DEVOLUÇÃO/ESTORNO DE PEÇAS AO ESTOQUE */}
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                <label className="flex items-start gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formReturnStock}
-                    onChange={(e) => {
-                      setFormReturnStock(e.target.checked);
-                      if (e.target.checked) setFormDeductStock(false);
-                    }}
-                    className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <span className="font-bold text-slate-900 text-xs block">
-                      Retornar / Devolver peças ao estoque (se estiverem separadas)
-                    </span>
-                    <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
-                      Quando este status for selecionado (ex: Cancelada / Desistência), o sistema devolverá automaticamente ao estoque apenas as peças que já haviam sido separadas/baixadas anteriormente. Se a peça não tiver sido separada, o estoque não sofrerá alteração.
-                    </span>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formReturnStock}
+                        onChange={(e) => {
+                          setFormReturnStock(e.target.checked);
+                          if (e.target.checked) setFormDeductStock(false);
+                        }}
+                        className="mt-0.5 w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer"
+                      />
+                      <div className="flex-1">
+                        <span className="font-bold text-slate-900 text-xs block">
+                          Retornar / Devolver peças ao estoque (se estiverem separadas)
+                        </span>
+                        <span className="text-[11px] text-slate-600 leading-tight block mt-0.5">
+                          Quando este status for selecionado (ex: Cancelada / Desistência), o sistema devolverá automaticamente ao estoque apenas as peças que já haviam sido separadas/baixadas anteriormente. Se a peça não tiver sido separada, o estoque não sofrerá alteração.
+                        </span>
+                      </div>
+                    </label>
                   </div>
-                </label>
-              </div>
+                </>
+              )}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button

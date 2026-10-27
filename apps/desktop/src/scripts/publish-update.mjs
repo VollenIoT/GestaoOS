@@ -60,6 +60,19 @@ function updateLocalConfigs(newVersion) {
   if (fs.existsSync(tauriConfPath)) {
     const conf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf-8'));
     conf.version = newVersion;
+    
+    const majorVersion = newVersion.split('.')[0];
+    const productName = majorVersion === '1'
+      ? 'Vollen - Gestão de Ordens de Serviço'
+      : majorVersion === '4'
+      ? 'Vollen - Gestão de OS e Vendas V4'
+      : `Vollen - Gestão de Ordens de Serviço V${majorVersion}`;
+
+    conf.productName = productName;
+    if (Array.isArray(conf.app?.windows) && conf.app.windows.length > 0) {
+      conf.app.windows[0].title = productName;
+    }
+
     fs.writeFileSync(tauriConfPath, JSON.stringify(conf, null, 2) + '\n', 'utf-8');
   }
 
@@ -128,35 +141,72 @@ async function main() {
   console.log('de nenhum upload ou link manual!\n');
 
   try {
-    let defaultVersion = '3.0.1';
+    // 0. Escolha da Edição do Gestão OS
+    console.log('📌 Selecione para qual edição deseja lançar a atualização:');
+    console.log('   [1] Versão 1 (Básica Offline)');
+    console.log('   [2] Versão 2 (Rede Local + WhatsApp)');
+    console.log('   [3] Versão 3 (Pro Cloud + App Android)');
+    console.log('   [4] Versão 4 (Enterprise Fiscal & Código de Barras)');
+    console.log('');
+    const editionChoice = (await ask('Escolha a edição [1, 2, 3 ou 4] (Padrão: 4): ')).trim() || '4';
+
+    let majorTarget = '4';
+    let defaultMinor = '0.1';
+    let editionName = 'Versão V4 Enterprise';
+
+    if (editionChoice === '1') {
+      majorTarget = '1';
+      defaultMinor = '0.1';
+      editionName = 'Versão 1.0 (Básica)';
+    } else if (editionChoice === '2') {
+      majorTarget = '2';
+      defaultMinor = '0.1';
+      editionName = 'Versão 2.0 (Rede & WhatsApp)';
+    } else if (editionChoice === '3') {
+      majorTarget = '3';
+      defaultMinor = '0.1';
+      editionName = 'Versão 3.0 (Pro Cloud)';
+    } else {
+      majorTarget = '4';
+      defaultMinor = '0.1';
+      editionName = 'Versão 4.0 (Enterprise)';
+    }
+
+    let defaultVersion = `${majorTarget}.${defaultMinor}`;
     try {
       const tauriConfPath = path.resolve(__dirname, '../../src-tauri/tauri.conf.json');
       if (fs.existsSync(tauriConfPath)) {
         const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf-8'));
-        if (tauriConf.version) {
+        if (tauriConf.version && tauriConf.version.startsWith(`${majorTarget}.`)) {
           const parts = tauriConf.version.split('.');
           if (parts.length === 3) {
             defaultVersion = `${parts[0]}.${parts[1]}.${parseInt(parts[2], 10) + 1}`;
-          } else {
-            defaultVersion = tauriConf.version;
           }
         }
       }
     } catch {}
 
+    console.log(`\n🎯 Edição selecionada: ${editionName}`);
+
     // 1. Versão
-    const versionPrompt = `📌 [1/3] Versão do lançamento [Padrão: ${defaultVersion}]: `;
+    const versionPrompt = `📌 [1/3] Versão do lançamento para ${editionName} [Padrão: ${defaultVersion}]: `;
     const versionInput = await ask(versionPrompt);
-    const version = versionInput.trim() || defaultVersion;
+    let version = versionInput.trim() || defaultVersion;
+    if (!version.startsWith(`${majorTarget}.`)) {
+      if (/^\d+\.\d+$/.test(version)) {
+        version = `${majorTarget}.${version}`;
+      }
+    }
+
     if (!version || !/^\d+\.\d+(\.\d+)?$/.test(version)) {
-      console.error('\n❌ Versão inválida. Use o formato: 3.0.1 ou 3.1.0');
+      console.error(`\n❌ Versão inválida. Para esta edição use o formato: ${majorTarget}.0.1 ou ${majorTarget}.1.0`);
       rl.close();
       return;
     }
 
     // 2. Título
-    const titleInput = await ask(`📝 [2/3] Título do lançamento [Padrão: Atualização v${version}]: `);
-    const title = titleInput.trim() || `Atualização v${version}`;
+    const titleInput = await ask(`📝 [2/3] Título do lançamento [Padrão: Atualização ${editionName} v${version}]: `);
+    const title = titleInput.trim() || `Atualização ${editionName} v${version}`;
 
     // 3. Notas
     console.log('\n📋 [3/3] Novidades desta versão (uma por linha — pressione Enter em branco para finalizar):');

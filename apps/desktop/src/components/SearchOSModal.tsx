@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { X, Search, AlertCircle, ArrowRight } from 'lucide-react';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { modalStack } from '../utils/modalStack';
 
 interface SearchOSModalProps {
   isOpen: boolean;
@@ -18,19 +19,19 @@ export const SearchOSModal: React.FC<SearchOSModalProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
+    if (isOpen) {
+      modalStack.register('SearchOSModal', () => {
         setInputVal('');
         setErrorMessage('');
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+        onCloseRef.current?.();
+      });
+      return () => modalStack.unregister('SearchOSModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

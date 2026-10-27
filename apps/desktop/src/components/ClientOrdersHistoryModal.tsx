@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { X, FileText, ChevronRight, Wrench } from 'lucide-react';
 import { StatusBadge } from './Dashboard';
+import { modalStack } from '../utils/modalStack';
 
 interface ClientOrdersHistoryModalProps {
   isOpen: boolean;
@@ -17,22 +18,22 @@ export const ClientOrdersHistoryModal: React.FC<ClientOrdersHistoryModalProps> =
   onClose,
   onSelectOrder,
 }) => {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('ClientOrdersHistoryModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('ClientOrdersHistoryModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[90] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden font-sans">
         {/* Header do Modal */}
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">

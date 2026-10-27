@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { modalStack } from '../utils/modalStack';
 import {
   X,
   Calendar,
@@ -24,7 +25,15 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-react';
-import { matchesSearchTerm } from '../utils/searchUtils';
+import { matchesSearchTerm, formatCanonicalCode } from '../utils/searchUtils';
+import { getCurrentFeatures } from '../config/appFeatures';
+import {
+  isOrderStatusFinished,
+  isOrderStatusCanceled,
+  isOrderStatusOpen,
+} from '../utils/orderStatusUtils';
+import { useCatalogStore } from '../stores/useCatalogStore';
+import { useOrdersStore } from '../stores/useOrdersStore';
 
 export interface SaleItemSummary {
   id: string;
@@ -62,9 +71,15 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
   // Aba Ativa do Relatório Geral: 'TODOS' | 'OS' | 'VENDAS' | 'CLIENTES' | 'EQUIPAMENTOS' | 'PECAS'
   const [activeReportTab, setActiveReportTab] = useState<'TODOS' | 'OS' | 'VENDAS' | 'CLIENTES' | 'EQUIPAMENTOS' | 'PECAS'>('TODOS');
 
-  // Listas de Clientes, Equipamentos e Peças
+  // Listas de Clientes, Equipamentos e Peças das stores
+  const storeParts = useCatalogStore((s) => s.parts);
+  const storeEquipments = useCatalogStore((s) => s.equipments);
+  const storeClients = useOrdersStore((s) => s.clients);
+
   const [clientsList, setClientsList] = useState<any[]>(() => {
     try {
+      const storeClis = useOrdersStore.getState().clients;
+      if (Array.isArray(storeClis) && storeClis.length > 0) return storeClis;
       const saved = localStorage.getItem('vollen_clients');
       if (saved) return JSON.parse(saved);
     } catch {}
@@ -73,6 +88,8 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
 
   const [equipmentsList, setEquipmentsList] = useState<any[]>(() => {
     try {
+      const storeEqs = useCatalogStore.getState().equipments;
+      if (Array.isArray(storeEqs) && storeEqs.length > 0) return storeEqs;
       const saved = localStorage.getItem('vollen_equipments');
       if (saved) return JSON.parse(saved);
     } catch {}
@@ -81,6 +98,10 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
 
   const [partsList, setPartsList] = useState<any[]>(() => {
     try {
+      const storePrts = useCatalogStore.getState().parts;
+      if (Array.isArray(storePrts) && storePrts.length > 0) return storePrts;
+      const savedStock = localStorage.getItem('vollen_parts_stock');
+      if (savedStock) return JSON.parse(savedStock);
       const saved = localStorage.getItem('vollen_parts');
       if (saved) return JSON.parse(saved);
     } catch {}
@@ -90,15 +111,37 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
   React.useEffect(() => {
     if (isOpen) {
       try {
-        const savedCli = localStorage.getItem('vollen_clients');
-        if (savedCli) setClientsList(JSON.parse(savedCli));
-        const savedEq = localStorage.getItem('vollen_equipments');
-        if (savedEq) setEquipmentsList(JSON.parse(savedEq));
-        const savedParts = localStorage.getItem('vollen_parts');
-        if (savedParts) setPartsList(JSON.parse(savedParts));
+        const storeClis = useOrdersStore.getState().clients;
+        if (Array.isArray(storeClis) && storeClis.length > 0) {
+          setClientsList(storeClis);
+        } else {
+          const savedCli = localStorage.getItem('vollen_clients');
+          if (savedCli) setClientsList(JSON.parse(savedCli));
+        }
+
+        const storeEqs = useCatalogStore.getState().equipments;
+        if (Array.isArray(storeEqs) && storeEqs.length > 0) {
+          setEquipmentsList(storeEqs);
+        } else {
+          const savedEq = localStorage.getItem('vollen_equipments');
+          if (savedEq) setEquipmentsList(JSON.parse(savedEq));
+        }
+
+        const storePrts = useCatalogStore.getState().parts;
+        if (Array.isArray(storePrts) && storePrts.length > 0) {
+          setPartsList(storePrts);
+        } else {
+          const savedStock = localStorage.getItem('vollen_parts_stock');
+          if (savedStock) {
+            setPartsList(JSON.parse(savedStock));
+          } else {
+            const savedParts = localStorage.getItem('vollen_parts');
+            if (savedParts) setPartsList(JSON.parse(savedParts));
+          }
+        }
       } catch {}
     }
-  }, [isOpen]);
+  }, [isOpen, storeParts, storeEquipments, storeClients]);
 
   // Padrão: início do mês atual até hoje
   const [startDate, setStartDate] = useState(() => {
@@ -181,17 +224,15 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
       if (endDate && orderDateStr && orderDateStr > endDate) return false;
 
       // Filtro de Status
-      const st = (os.status || 'ABERTA').toUpperCase();
+      const isCanceled = isOrderStatusCanceled(os);
+      const isFinal = isOrderStatusFinished(os);
+      const isOpen = isOrderStatusOpen(os);
+
       if (statusFilter !== 'TODOS') {
-        if (statusFilter === 'ABERTA') {
-          if (['FINALIZADA', 'CONCLUIDA', 'CANCELADA', 'EXCLUIDA'].includes(st)) return false;
-        } else if (statusFilter === 'FINALIZADA') {
-          if (st !== 'FINALIZADA' && st !== 'CONCLUIDA') return false;
-        } else if (statusFilter === 'CANCELADA') {
-          if (st !== 'CANCELADA') return false;
-        } else if (statusFilter === 'EXCLUIDA') {
-          if (st !== 'EXCLUIDA') return false;
-        }
+        if (statusFilter === 'ABERTA' && !isOpen) return false;
+        if (statusFilter === 'FINALIZADA' && !isFinal) return false;
+        if (statusFilter === 'CANCELADA' && !isCanceled) return false;
+        if (statusFilter === 'EXCLUIDA' && (os.status || '').toUpperCase() !== 'EXCLUIDA') return false;
       }
 
       // Busca textual insensível a acentos
@@ -236,51 +277,75 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
     });
   }, [salesList, startDate, endDate, paymentFilter, searchTerm]);
 
-  // Filtragem de Clientes
+  // Filtragem de Clientes com Ordenação Alfanumérica por Código
   const filteredClients = useMemo(() => {
-    return clientsList.filter((cli) => {
-      if (!cli) return false;
-      if (!searchTerm.trim()) return true;
-      return (
-        matchesSearchTerm(cli.name, searchTerm) ||
-        matchesSearchTerm(cli.cpfCnpj, searchTerm) ||
-        matchesSearchTerm(cli.phone, searchTerm) ||
-        matchesSearchTerm(cli.whatsapp, searchTerm) ||
-        matchesSearchTerm(cli.city, searchTerm) ||
-        matchesSearchTerm(cli.address, searchTerm)
-      );
-    });
+    return clientsList
+      .filter((cli) => {
+        if (!cli) return false;
+        if (!searchTerm.trim()) return true;
+        return (
+          matchesSearchTerm(cli.name, searchTerm) ||
+          matchesSearchTerm(cli.cpfCnpj, searchTerm) ||
+          matchesSearchTerm(cli.phone, searchTerm) ||
+          matchesSearchTerm(cli.whatsapp, searchTerm) ||
+          matchesSearchTerm(cli.city, searchTerm) ||
+          matchesSearchTerm(cli.address, searchTerm)
+        );
+      })
+      .sort((a, b) => {
+        const codeA = formatCanonicalCode(a.code || a.id || '');
+        const codeB = formatCanonicalCode(b.code || b.id || '');
+        const comp = codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+        if (comp !== 0) return comp;
+        return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
+      });
   }, [clientsList, searchTerm]);
 
-  // Filtragem de Equipamentos
+  // Filtragem de Equipamentos com Ordenação por Código/Tipo
   const filteredEquipments = useMemo(() => {
-    return equipmentsList.filter((eq) => {
-      if (!eq) return false;
-      if (!searchTerm.trim()) return true;
-      return (
-        matchesSearchTerm(eq.type, searchTerm) ||
-        matchesSearchTerm(eq.brand, searchTerm) ||
-        matchesSearchTerm(eq.model, searchTerm) ||
-        matchesSearchTerm(eq.category, searchTerm) ||
-        matchesSearchTerm(eq.name, searchTerm)
-      );
-    });
+    return equipmentsList
+      .filter((eq) => {
+        if (!eq) return false;
+        if (!searchTerm.trim()) return true;
+        return (
+          matchesSearchTerm(eq.type, searchTerm) ||
+          matchesSearchTerm(eq.brand, searchTerm) ||
+          matchesSearchTerm(eq.model, searchTerm) ||
+          matchesSearchTerm(eq.category, searchTerm) ||
+          matchesSearchTerm(eq.name, searchTerm)
+        );
+      })
+      .sort((a, b) => {
+        const codeA = formatCanonicalCode(a.code || a.id || '');
+        const codeB = formatCanonicalCode(b.code || b.id || '');
+        const comp = codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+        if (comp !== 0) return comp;
+        return (a.type || a.category || '').localeCompare(b.type || b.category || '', 'pt-BR', { sensitivity: 'base' });
+      });
   }, [equipmentsList, searchTerm]);
 
-  // Filtragem de Peças
+  // Filtragem de Peças com Ordenação Alfanumérica por Código
   const filteredParts = useMemo(() => {
-    return partsList.filter((prt) => {
-      if (!prt) return false;
-      if (!searchTerm.trim()) return true;
-      return (
-        matchesSearchTerm(prt.name, searchTerm) ||
-        matchesSearchTerm(String(prt.code || ''), searchTerm) ||
-        matchesSearchTerm(prt.manufacturerCode, searchTerm) ||
-        matchesSearchTerm(prt.application, searchTerm) ||
-        matchesSearchTerm(prt.group, searchTerm) ||
-        matchesSearchTerm(prt.location, searchTerm)
-      );
-    });
+    return partsList
+      .filter((prt) => {
+        if (!prt) return false;
+        if (!searchTerm.trim()) return true;
+        return (
+          matchesSearchTerm(prt.name, searchTerm) ||
+          matchesSearchTerm(String(prt.code || ''), searchTerm) ||
+          matchesSearchTerm(prt.manufacturerCode, searchTerm) ||
+          matchesSearchTerm(prt.application, searchTerm) ||
+          matchesSearchTerm(prt.group, searchTerm) ||
+          matchesSearchTerm(prt.location, searchTerm)
+        );
+      })
+      .sort((a, b) => {
+        const codeA = formatCanonicalCode(a.code || a.id || '');
+        const codeB = formatCanonicalCode(b.code || b.id || '');
+        const comp = codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: 'base' });
+        if (comp !== 0) return comp;
+        return (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' });
+      });
   }, [partsList, searchTerm]);
 
   // Estatísticas Consolidadas do Período
@@ -294,13 +359,16 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
 
     filteredOrders.forEach((os) => {
       if (!os) return;
-      const st = (os.status || 'ABERTA').toUpperCase();
       const val = typeof os.totalAmount === 'number' ? os.totalAmount : parseFloat(String(os.totalAmount || '0').replace('.', '').replace(',', '.')) || 0;
+      const st = (os.status || 'ABERTA').toUpperCase();
+      const isCanceled = isOrderStatusCanceled(os);
+      const isFinal = isOrderStatusFinished(os);
+
       if (st === 'EXCLUIDA') {
         excluidasOS++;
-      } else if (st === 'CANCELADA') {
+      } else if (isCanceled) {
         canceladasOS++;
-      } else if (st === 'FINALIZADA' || st === 'CONCLUIDA') {
+      } else if (isFinal) {
         finalizadasOS++;
         faturamentoOS += val;
       } else {
@@ -340,17 +408,17 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
     };
   }, [filteredOrders, filteredSales, clientsList, equipmentsList, partsList]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   React.useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('PeriodOrdersReportModal', () => {
+        onCloseRef.current?.();
+      });
+      return () => modalStack.unregister('PeriodOrdersReportModal');
+    }
+  }, [isOpen]);
 
   // Paginação por Folha A4 (Padrão: 25 registros por folha A4)
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -382,36 +450,45 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
 
   const totalPages = Math.max(1, Math.ceil(activeListLength / itemsPerPage));
 
-  // Aplica fatia (slice) para exibição compacta por folha A4
+  // Ajusta automaticamente a página atual quando itens são excluídos e a página ultrapassa o total
+  React.useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+
+  // Aplica fatia (slice) para exibição compacta por folha A4 com página segura
   const paginatedOrders = useMemo(() => {
     if (itemsPerPage >= 9999) return filteredOrders;
-    const start = (currentPage - 1) * itemsPerPage;
+    const start = (safePage - 1) * itemsPerPage;
     return filteredOrders.slice(start, start + itemsPerPage);
-  }, [filteredOrders, currentPage, itemsPerPage]);
+  }, [filteredOrders, safePage, itemsPerPage]);
 
   const paginatedSales = useMemo(() => {
     if (itemsPerPage >= 9999) return filteredSales;
-    const start = (currentPage - 1) * itemsPerPage;
+    const start = (safePage - 1) * itemsPerPage;
     return filteredSales.slice(start, start + itemsPerPage);
-  }, [filteredSales, currentPage, itemsPerPage]);
+  }, [filteredSales, safePage, itemsPerPage]);
 
   const paginatedClients = useMemo(() => {
     if (itemsPerPage >= 9999) return filteredClients;
-    const start = (currentPage - 1) * itemsPerPage;
+    const start = (safePage - 1) * itemsPerPage;
     return filteredClients.slice(start, start + itemsPerPage);
-  }, [filteredClients, currentPage, itemsPerPage]);
+  }, [filteredClients, safePage, itemsPerPage]);
 
   const paginatedEquipments = useMemo(() => {
     if (itemsPerPage >= 9999) return filteredEquipments;
-    const start = (currentPage - 1) * itemsPerPage;
+    const start = (safePage - 1) * itemsPerPage;
     return filteredEquipments.slice(start, start + itemsPerPage);
-  }, [filteredEquipments, currentPage, itemsPerPage]);
+  }, [filteredEquipments, safePage, itemsPerPage]);
 
   const paginatedParts = useMemo(() => {
     if (itemsPerPage >= 9999) return filteredParts;
-    const start = (currentPage - 1) * itemsPerPage;
+    const start = (safePage - 1) * itemsPerPage;
     return filteredParts.slice(start, start + itemsPerPage);
-  }, [filteredParts, currentPage, itemsPerPage]);
+  }, [filteredParts, safePage, itemsPerPage]);
 
   if (!isOpen) return null;
 
@@ -671,8 +748,12 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const st = (status || 'ABERTA').toUpperCase();
+  const getStatusBadge = (osOrStatus: any) => {
+    const isCanceled = isOrderStatusCanceled(osOrStatus);
+    const isFinal = isOrderStatusFinished(osOrStatus);
+    const statusText = typeof osOrStatus === 'object' ? osOrStatus.status : String(osOrStatus || '');
+    const st = (statusText || 'ABERTA').toUpperCase();
+
     if (st === 'EXCLUIDA') {
       return (
         <span className="px-1.5 py-0.2 rounded text-[8.5px] font-black bg-red-600 text-white leading-none inline-block">
@@ -680,30 +761,23 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
         </span>
       );
     }
-    if (st === 'CANCELADA') {
+    if (isCanceled) {
       return (
-        <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-slate-200 text-slate-700 leading-none inline-block">
-          CANCELADA
+        <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-rose-100 text-rose-800 border border-rose-200 leading-none inline-block">
+          {st || 'CANCELADA'}
         </span>
       );
     }
-    if (st === 'FINALIZADA' || st === 'CONCLUIDA') {
+    if (isFinal) {
       return (
-        <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 leading-none inline-block">
-          FINALIZADA
-        </span>
-      );
-    }
-    if (st === 'EM_ATENDIMENTO' || st === 'VISITA_TECNICA') {
-      return (
-        <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 leading-none inline-block">
-          EM ATENDIMENTO
+        <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 leading-none inline-block">
+          {st || 'FINALIZADA'}
         </span>
       );
     }
     return (
-      <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-amber-100 text-amber-800 border border-amber-300 leading-none inline-block">
-        ABERTA
+      <span className="px-1.5 py-0.2 rounded text-[8.5px] font-bold bg-amber-100 text-amber-800 border border-amber-200 leading-none inline-block">
+        {st || 'ABERTA'}
       </span>
     );
   };
@@ -811,18 +885,20 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
             Clientes ({filteredClients.length})
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveReportTab('EQUIPAMENTOS')}
-            className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeReportTab === 'EQUIPAMENTOS'
-                ? 'bg-purple-600 text-white shadow-xs'
-                : 'text-slate-300 hover:text-white hover:bg-slate-700'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            Equipamentos ({filteredEquipments.length})
-          </button>
+          {getCurrentFeatures().hasEquipmentsReportInConsolidated && (
+            <button
+              type="button"
+              onClick={() => setActiveReportTab('EQUIPAMENTOS')}
+              className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                activeReportTab === 'EQUIPAMENTOS'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5" />
+              Equipamentos ({filteredEquipments.length})
+            </button>
+          )}
 
           <button
             type="button"
@@ -1015,7 +1091,7 @@ export const PeriodOrdersReportModal: React.FC<PeriodOrdersReportModalProps> = (
                           {eqText}
                         </td>
                         <td className="px-1.5 py-0.5 border-r border-slate-100 text-center whitespace-nowrap">
-                          {getStatusBadge(os.status)}
+                          {getStatusBadge(os)}
                         </td>
                         <td className="px-1.5 py-0.5 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                           {isDeleted ? '-' : `R$ ${totalNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}

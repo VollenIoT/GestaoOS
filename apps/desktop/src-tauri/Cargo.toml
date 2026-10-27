@@ -1,6 +1,6 @@
 [package]
 name = "vollen-os-desktop"
-version = "3.0.0"
+version = "4.0.1"
 description = "Vollen - Gestao de Ordens de Servico"
 authors = ["Sistema OS"]
 license = ""
@@ -11,7 +11,7 @@ edition = "2021"
 tauri-build = { version = "2.0.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0", features = [] }
+tauri = { version = "2.0.0", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"

@@ -1,11 +1,11 @@
 /**
- * Utilitários de hashing de senha — usa Web Crypto API (browser-native, sem dependências).
- * Compatível com Vite/Electron. Para o servidor Node, use o módulo `crypto` nativo.
+ * Utilitários de hashing e verificação de senha — compatível com browser / desktop (Web Crypto API).
+ * Suporta migração progressiva: bcrypt (do servidor), SHA-256 local e texto puro legado.
  */
 
 /**
  * Gera o hash SHA-256 de uma string e retorna como hex.
- * É assíncrona pois usa a Web Crypto API.
+ * É assíncrona pois usa a Web Crypto API nativa do navegador/desktop.
  */
 export async function hashPassword(plain: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -16,39 +16,59 @@ export async function hashPassword(plain: string): Promise<string> {
 }
 
 /**
- * Compara uma senha em texto puro com um hash já armazenado.
+ * Verifica se uma string possui o formato de um hash bcrypt ($2a$, $2b$, $2y$).
  */
-export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
-  const computedHash = await hashPassword(plain);
-  return computedHash === hash;
+export function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(value);
 }
 
 /**
  * Verifica se uma string parece ser um hash SHA-256 (64 caracteres hex).
- * Usado para migração progressiva: distingue senhas antigas (texto puro) de novas (hashed).
+ */
+export function isSha256Hash(value: string): boolean {
+  return /^[0-9a-f]{64}$/i.test(value);
+}
+
+/**
+ * Alias compatível com versões legadas.
  */
 export function isHashed(value: string): boolean {
-  return /^[0-9a-f]{64}$/.test(value);
+  return isSha256Hash(value) || isBcryptHash(value);
+}
+
+/**
+ * Compara uma senha em texto puro com um hash SHA-256 já armazenado.
+ */
+export async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  if (isSha256Hash(hash)) {
+    const computedHash = await hashPassword(plain);
+    return computedHash.toLowerCase() === hash.toLowerCase();
+  }
+  return plain === hash;
 }
 
 /**
  * Verifica a senha com suporte à migração progressiva:
- * - Se a senha armazenada já é um hash SHA-256, compara via hash.
- * - Se ainda está em texto puro (legado), compara diretamente.
- * Retorna { valid, needsUpgrade } — se needsUpgrade = true, o caller deve
- * persistir o hash da senha para concluir a migração.
+ * - Se a senha armazenada for SHA-256, valida o hash.
+ * - Se for bcrypt ($2a$), o servidor realiza a validação primária (ou validação remota).
+ * - Se ainda estiver em texto puro legado, compara diretamente e sinaliza upgrade (needsUpgrade: true).
+ * Retorna { valid, needsUpgrade } — se needsUpgrade = true, o caller persiste o novo hash SHA-256.
  */
 export async function verifyPasswordWithMigration(
   plain: string,
   stored: string
 ): Promise<{ valid: boolean; needsUpgrade: boolean }> {
-  if (isHashed(stored)) {
-    // Senha já está hasheada — comparação segura
+  if (isSha256Hash(stored)) {
     const valid = await verifyPassword(plain, stored);
     return { valid, needsUpgrade: false };
-  } else {
-    // Senha ainda em texto puro (legado) — compara diretamente e sinaliza upgrade
-    const valid = plain === stored;
-    return { valid, needsUpgrade: valid }; // só faz upgrade se a senha estiver correta
   }
+
+  // Se já for um hash bcrypt (do servidor ou sincronizado)
+  if (isBcryptHash(stored)) {
+    return { valid: false, needsUpgrade: false };
+  }
+
+  // Senha ainda em texto puro (legado) — compara diretamente e sinaliza upgrade se correta
+  const valid = plain === stored;
+  return { valid, needsUpgrade: valid };
 }

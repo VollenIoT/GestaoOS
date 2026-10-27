@@ -32,19 +32,19 @@ ${StrLoc}
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 !define MANUFACTURER "vollen"
-!define PRODUCTNAME "Vollen - Gestão de Ordens de Serviço"
-!define VERSION "3.0.0"
-!define VERSIONWITHBUILD "3.0.0.0"
+!define PRODUCTNAME "Vollen - Gestão de OS e Vendas V4"
+!define VERSION "4.0.0"
+!define VERSIONWITHBUILD "4.0.0.0"
 !define HOMEPAGE ""
 !define INSTALLMODE "perMachine"
-!define LICENSE "D:\SistemaOS\apps\desktop\src-tauri\target\release\nsis\x64\license_file"
-!define INSTALLERICON "D:\SistemaOS\apps\desktop\src-tauri\icons\icon.ico"
+!define LICENSE "D:\GestaoOS-producao\apps\desktop\src-tauri\target\release\nsis\x64\license_file"
+!define INSTALLERICON "D:\GestaoOS-producao\apps\desktop\src-tauri\icons\icon.ico"
 !define SIDEBARIMAGE ""
 !define HEADERIMAGE ""
 !define UNINSTALLERICON ""
 !define UNINSTALLERHEADERIMAGE ""
 !define MAINBINARYNAME "vollen-os-desktop"
-!define MAINBINARYSRCPATH "D:\SistemaOS\apps\desktop\src-tauri\target\release\vollen-os-desktop.exe"
+!define MAINBINARYSRCPATH "D:\GestaoOS-producao\apps\desktop\src-tauri\target\release\vollen-os-desktop.exe"
 !define BUNDLEID "com.vollen.sistemaos"
 !define COPYRIGHT ""
 !define OUTFILE "nsis-output.exe"
@@ -61,7 +61,7 @@ ${StrLoc}
 !define MANUKEY "Software\${MANUFACTURER}"
 !define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
 !define UNINSTALLERSIGNCOMMAND ""
-!define ESTIMATEDSIZE "13920"
+!define ESTIMATEDSIZE "14208"
 !define STARTMENUFOLDER ""
 
 Var PassiveMode
@@ -462,7 +462,7 @@ FunctionEnd
 ;Languages
 !insertmacro MUI_LANGUAGE "Portuguese"
 !insertmacro MUI_RESERVEFILE_LANGDLL
-  !include "D:\SistemaOS\apps\desktop\src-tauri\target\release\nsis\x64\Portuguese.nsh"
+  !include "D:\GestaoOS-producao\apps\desktop\src-tauri\target\release\nsis\x64\Portuguese.nsh"
 
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode

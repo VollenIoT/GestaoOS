@@ -32,29 +32,27 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
   onDeleteEquipment,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [isExactSearch, setIsExactSearch] = useState(false);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<string | null>(null);
   const canManage = Boolean(currentUser?.role === 'Admin' || currentUser?.permissions?.manageEquipments);
   const { alert: dlgAlert, confirm: dlgConfirm } = useDialog();
 
   const [columns, setColumns] = useState<ColumnConfig[]>(() => {
     try {
-      const saved = localStorage.getItem('equipments_modal_columns');
+      const saved = localStorage.getItem('equipments_modal_columns_v2');
       if (saved) {
         return JSON.parse(saved);
       }
     } catch (err) { }
     return [
       { id: 'code', label: 'Código', width: 90, visible: true, fixed: true },
-      { id: 'type', label: 'Tipo / Aparelho', width: 200, visible: true, fixed: true },
-      { id: 'brand', label: 'Marca / Fabricante', width: 160, visible: true },
-      { id: 'model', label: 'Modelo Padrão', width: 160, visible: true },
-      { id: 'serialNumber', label: 'Nº de Série Padrão', width: 160, visible: true },
+      { id: 'type', label: 'Tipo / Aparelho', width: 400, visible: true, fixed: true },
     ];
   });
 
   const saveColumnsToStorage = (newCols: ColumnConfig[]) => {
     try {
-      localStorage.setItem('equipments_modal_columns', JSON.stringify(newCols));
+      localStorage.setItem('equipments_modal_columns_v2', JSON.stringify(newCols));
     } catch (err) { }
   };
 
@@ -64,6 +62,7 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setSearchTerm('');
+      setIsExactSearch(false);
       setSelectedEquipmentId(null);
     }
   }, [isOpen]);
@@ -88,8 +87,6 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onOpenCreateEquipment, onClose]);
-
-  if (!isOpen) return null;
 
   const handleMouseDownResize = (e: React.MouseEvent, columnId: string) => {
     e.stopPropagation();
@@ -156,16 +153,41 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
     });
   };
 
-  const filteredEquipments = equipments.filter((eq) => {
-    if (!searchTerm.trim()) return true;
-    return (
-      matchesSearchTerm(eq.type, searchTerm) ||
-      matchesSearchTerm(eq.brand, searchTerm) ||
-      matchesSearchTerm(eq.model, searchTerm) ||
-      matchesSearchTerm(eq.code, searchTerm) ||
-      matchesSearchTerm(eq.serialNumber, searchTerm)
-    );
-  });
+  const deduplicatedEquipments = React.useMemo(() => {
+    const seen = new Set<string>();
+    const list: any[] = [];
+    (equipments || []).forEach((eq) => {
+      if (!eq) return;
+      const key = String(eq.type || eq.name || '').trim().toUpperCase();
+      if (!key) return;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push(eq);
+      }
+    });
+    return list;
+  }, [equipments]);
+
+  const filteredEquipments = deduplicatedEquipments
+    .filter((eq) => {
+      if (!searchTerm.trim()) return true;
+      if (isExactSearch) {
+        return (
+          matchesSearchTerm(eq.code, searchTerm, true) ||
+          matchesSearchTerm(String(eq.id || ''), searchTerm, true) ||
+          matchesSearchTerm(eq.type || eq.name, searchTerm, true)
+        );
+      }
+      return (
+        matchesSearchTerm(eq.type || eq.name, searchTerm) ||
+        matchesSearchTerm(eq.code, searchTerm)
+      );
+    })
+    .sort((a, b) => {
+      const nameA = String(a.type || a.name || '').trim();
+      const nameB = String(b.type || b.name || '').trim();
+      return nameA.localeCompare(nameB, 'pt-BR', { sensitivity: 'base' });
+    });
 
   const selectedEquipment = filteredEquipments.find((e) => e.id === selectedEquipmentId);
 
@@ -174,13 +196,7 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
       case 'code':
         return <span className="font-mono font-bold text-sky-700">{eq.code || 'EQP-0001'}</span>;
       case 'type':
-        return <span className="font-bold text-slate-900">{eq.type || 'Equipamento Geral'}</span>;
-      case 'brand':
-        return <span className="font-semibold text-slate-800">{eq.brand || '-'}</span>;
-      case 'model':
-        return <span>{eq.model || '-'}</span>;
-      case 'serialNumber':
-        return <span className="font-mono text-slate-700">{eq.serialNumber || '-'}</span>;
+        return <span className="font-bold text-slate-900">{eq.type || eq.name || 'Equipamento Geral'}</span>;
       default:
         return null;
     }
@@ -190,6 +206,8 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
     .filter((c) => c.visible)
     .reduce((acc, col) => acc + col.width, 0);
 
+  if (!isOpen) return null;
+
   return (
     <div
       className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
@@ -198,10 +216,15 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col shadow-2xl overflow-hidden font-sans relative">
         {/* Header do Modal */}
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-sky-700" />
-            Central de Equipamentos Cadastrados
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <Cpu className="w-5 h-5 text-sky-700" />
+              Central de Equipamentos Cadastrados
+            </h2>
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-300/80 border border-slate-300 px-2.5 py-0.5 rounded-full">
+              {searchTerm.trim() ? `${filteredEquipments.length} de ${deduplicatedEquipments.length}` : `${deduplicatedEquipments.length}`} {deduplicatedEquipments.length === 1 ? 'equipamento' : 'equipamentos'}
+            </span>
+          </div>
           <button onClick={onClose} className="text-slate-600 hover:text-slate-900 p-1 rounded-lg">
             <X className="w-5 h-5" />
           </button>
@@ -214,8 +237,17 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
             <input
               type="text"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar equipamento por tipo, marca, modelo ou número de série..."
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setIsExactSearch(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  setIsExactSearch(true);
+                }
+              }}
+              placeholder="Buscar equipamento por tipo ou código... (Enter para busca exata de código)"
               className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-800 focus:outline-none focus:border-sky-600"
             />
           </div>
@@ -223,7 +255,7 @@ export const EquipmentsModal: React.FC<EquipmentsModalProps> = ({
 
         {/* Tabela em Modo Unset com Largura Explícita em Pixels (Estilo idêntico ao de Clientes) */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
+          className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50 select-none"
           onContextMenu={handleContextMenu}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('tr[data-row]') === null) {

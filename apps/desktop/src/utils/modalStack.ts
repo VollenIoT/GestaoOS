@@ -36,12 +36,9 @@ class ModalStackManager {
   };
 
   public register(id: string, onClose: CloseHandler) {
-    const existingIndex = this.stack.findIndex((item) => item.id === id);
-    if (existingIndex >= 0) {
-      this.stack[existingIndex].onClose = onClose;
-    } else {
-      this.stack.push({ id, onClose });
-    }
+    // Remove qualquer registro prévio com o mesmo id para reinserir no TOPO da pilha
+    this.stack = this.stack.filter((item) => item.id !== id);
+    this.stack.push({ id, onClose });
 
     if (!this.isListening && typeof window !== 'undefined') {
       // Captura no modo capture (primeiro evento disparado no window)
@@ -56,6 +53,10 @@ class ModalStackManager {
       window.removeEventListener('keydown', this.handleKeyDown, true);
       this.isListening = false;
     }
+  }
+
+  public hasOpenModals(): boolean {
+    return this.stack.length > 0;
   }
 }
 

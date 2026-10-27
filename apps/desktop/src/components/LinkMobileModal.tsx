@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Smartphone, Copy, CheckCircle2, ShieldCheck, RefreshCw, Key, Lock, AlertCircle, User, CloudOff } from 'lucide-react';
 import { CompanyData } from './CompanyModal';
 import { isCloudModeActive, getSavedSerial, getSavedTenantFirebaseConfig, getMasterFirestore, MASTER_CATALOG_FIREBASE_CONFIG } from '../services/licenseService';
+import { modalStack } from '../utils/modalStack';
 
 interface LinkMobileModalProps {
   isOpen: boolean;
@@ -129,10 +130,10 @@ const LinkMobileModalContent: React.FC<{
           }
         }
 
-        // 6. Registra no Catálogo Central (Master) para o Mobile resolver o banco correto
-        const tenantConfig = getSavedTenantFirebaseConfig() || MASTER_CATALOG_FIREBASE_CONFIG;
+        // 6. Registra no Catálogo Central (Master) para o Mobile resolver o banco correto se houver tenantConfig
+        const tenantConfig = getSavedTenantFirebaseConfig();
         const serial = getSavedSerial() || '';
-        if (tenantConfig && keyToUse && serial) {
+        if (tenantConfig && tenantConfig.projectId && tenantConfig.apiKey && keyToUse && serial) {
           const cleanApiKey = keyToUse.replace(/[\s-]/g, '').toUpperCase();
           const masterDb = getMasterFirestore();
           await setDoc(
@@ -188,20 +189,19 @@ const LinkMobileModalContent: React.FC<{
     } catch {}
   }, [isAuthModalOpen]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        if (isAuthModalOpen) {
-          setIsAuthModalOpen(false);
-        } else {
-          onClose();
-        }
+    modalStack.register('LinkMobileModal', () => {
+      if (isAuthModalOpen) {
+        setIsAuthModalOpen(false);
+      } else {
+        onCloseRef.current();
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isAuthModalOpen, onClose]);
+    });
+    return () => modalStack.unregister('LinkMobileModal');
+  }, [isAuthModalOpen]);
 
   const handleCopyKey = () => {
     try {
@@ -256,18 +256,18 @@ const LinkMobileModalContent: React.FC<{
       : '';
 
     if (savedPwd !== '') {
-      if (savedPwd === inputPwd || inputPwd === '1234' || inputPwd === 'admin') {
+      if (savedPwd.toLowerCase() === inputPwd.toLowerCase()) {
         proceedRegenerate();
         return;
       }
       setAuthError('Senha incorreta! Digite a senha cadastrada para este usuário.');
       return;
     } else {
-      if (inputPwd === '1234' || inputPwd === 'admin') {
+      if (inputPwd.toLowerCase() === '1234' || inputPwd.toLowerCase() === 'admin') {
         proceedRegenerate();
         return;
       }
-      setAuthError('Senha incorreta!');
+      setAuthError('Senha incorreta! Digite a senha cadastrada.');
       return;
     }
   };
@@ -287,9 +287,9 @@ const LinkMobileModalContent: React.FC<{
         }
 
         // Atualiza no Catálogo Central (Master) e remove a chave antiga
-        import('../services/licenseService').then(({ getMasterFirestore, getSavedTenantFirebaseConfig, getSavedSerial, MASTER_CATALOG_FIREBASE_CONFIG }) => {
-          const tenantConfig = getSavedTenantFirebaseConfig() || MASTER_CATALOG_FIREBASE_CONFIG;
-          const serial = getSavedSerial() || 'DEMO-LOCAL';
+        import('../services/licenseService').then(({ getMasterFirestore, getSavedTenantFirebaseConfig, getSavedSerial }) => {
+          const tenantConfig = getSavedTenantFirebaseConfig();
+          const serial = getSavedSerial() || '';
           const masterDb = getMasterFirestore();
 
           // 1. Remove a chave anterior do banco de dados de licenças/catálogo
@@ -300,8 +300,8 @@ const LinkMobileModalContent: React.FC<{
             });
           }
 
-          // 2. Grava a nova chave
-          if (tenantConfig && newKey) {
+          // 2. Grava a nova chave apenas se houver configuração de nuvem de tenant
+          if (tenantConfig && tenantConfig.projectId && tenantConfig.apiKey && newKey) {
             const cleanApiKey = newKey.replace(/[\s-]/g, '').toUpperCase();
             setDoc(doc(masterDb, 'mobile_apikeys', cleanApiKey), {
               apiKeyFormatted: newKey,

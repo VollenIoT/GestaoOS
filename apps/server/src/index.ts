@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { prisma } from './db';
 import { clientRoutes } from './routes/clients';
 import { authRoutes } from './routes/auth';
 import { backupRoutes } from './routes/backup';
@@ -11,29 +12,70 @@ import { internalAuthMiddleware } from './middleware/authMiddleware';
 const app = Fastify({ logger: true });
 
 async function main() {
-  // ✅ Segurança: CORS restrito — aceita apenas requisições do localhost e do Electron.
-  // Antes estava origin: '*', permitindo que qualquer site acessasse a API local.
-  await app.register(cors, {
-    origin: [
-      'http://localhost',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:4173',
-      'app://',          // Protocolo do Electron em produção
-      'file://',         // Electron em desenvolvimento
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  // Rate limiting simples por IP em memória (100 requisições por minuto por IP)
+  const ipRateMap = new Map<string, { count: number; resetTime: number }>();
+  app.addHook('onRequest', async (request, reply) => {
+    const ip = request.ip || '127.0.0.1';
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const maxRequests = 120;
+
+    const rate = ipRateMap.get(ip) || { count: 0, resetTime: now + windowMs };
+    if (now > rate.resetTime) {
+      rate.count = 1;
+      rate.resetTime = now + windowMs;
+    } else {
+      rate.count += 1;
+    }
+    ipRateMap.set(ip, rate);
+
+    if (rate.count > maxRequests) {
+      return reply.status(429).send({
+        error: 'Too Many Requests',
+        message: 'Limite de requisições excedido. Tente novamente em alguns segundos.',
+      });
+    }
   });
 
-  // Rotas públicas (sem autenticação) — apenas status e saúde do servidor
+  // CORS configurável via variável de ambiente (permite rede local ou domínios específicos)
+  const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : true;
+  await app.register(cors, {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
+  });
+
+  // Rotas públicas (sem autenticação) — status e saúde detalhada do servidor
   app.get('/', async () => ({
     app: 'Sistema OS Server API',
     status: 'online',
     version: '1.0.0',
+    environment: process.env.NODE_ENV || 'development',
     endpoints: ['/api/auth/login', '/api/clients', '/api/orders', '/api/visits', '/api/backup', '/health'],
   }));
 
-  app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+  // Health check completo com tempo de atividade (uptime), memória e status do banco de dados
+  app.get('/health', async (request, reply) => {
+    let dbStatus = 'disconnected';
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      dbStatus = 'connected';
+    } catch {
+      dbStatus = 'error';
+    }
+
+    const memoryUsage = process.memoryUsage();
+    return reply.send({
+      status: dbStatus === 'connected' ? 'healthy' : 'degraded',
+      timestamp: new Date().toISOString(),
+      uptimeSeconds: Math.floor(process.uptime()),
+      database: dbStatus,
+      memory: {
+        rssMB: Math.round(memoryUsage.rss / 1024 / 1024),
+        heapUsedMB: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+      },
+    });
+  });
 
   // ✅ Segurança: registra o middleware de token interno para TODAS as rotas /api/*.
   // O desktop envia o header 'x-internal-token' em cada requisição.
@@ -53,7 +95,8 @@ async function main() {
 
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3333;
 
-  app.listen({ port: PORT, host: '127.0.0.1' }, (err, address) => {
+  // Escuta em 0.0.0.0 para aceitar conexões de todos os computadores da rede local
+  app.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
     if (err) {
       app.log.error(err);
       process.exit(1);

@@ -12,6 +12,9 @@ import {
 import { StatusBadge } from "./Dashboard";
 import { ConfirmModal } from "./ConfirmModal";
 import { matchesSearchTerm } from "../utils/searchUtils";
+import { modalStack } from "../utils/modalStack";
+import { cancelCashMovementsByOrderCode } from "./CashRegisterModal";
+import { getCurrentFeatures } from "../config/appFeatures";
 
 interface ColumnConfig {
   id: string;
@@ -24,8 +27,9 @@ interface ColumnConfig {
 interface FinishedOrdersModalProps {
   isOpen: boolean;
   orders: any[];
+  currentUser?: any;
   onClose: () => void;
-  onUpdateOrderStatus: (orderId: string, status: string) => void;
+  onUpdateOrderStatus: (orderId: string, status: string, additionalPayload?: any) => void;
   onOpenEditOS: (order: any) => void;
   onCreateWarrantyReturn?: (order: any) => void;
 }
@@ -33,6 +37,7 @@ interface FinishedOrdersModalProps {
 export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
   isOpen,
   orders,
+  currentUser,
   onClose,
   onUpdateOrderStatus,
   onOpenEditOS,
@@ -40,22 +45,48 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
 }) => {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
-  const [reopenStatus, setReopenStatus] = useState<string>('ABERTA');
+  const [reopenStatus, setReopenStatus] = useState<string>('RETORNO_GARANTIA');
+  const [confirmDialogData, setConfirmDialogData] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText?: string;
+    variant?: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
-  // Fechar com a tecla ESC
+  const isAdmin = Boolean(
+    !currentUser ||
+    currentUser?.role === 'Admin' ||
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.role === 'admin' ||
+    currentUser?.accessLevel === 'ADMIN' ||
+    currentUser?.isAdmin === true ||
+    currentUser?.username?.toLowerCase() === 'admin' ||
+    (currentUser?.name || '').toLowerCase().includes('admin')
+  );
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Fechar com a tecla ESC via modalStack
   useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('FinishedOrdersModal', () => {
+        if (isReopenModalOpen) {
+          setIsReopenModalOpen(false);
+        } else {
+          onCloseRef.current?.();
+        }
+      });
+      return () => modalStack.unregister('FinishedOrdersModal');
+    }
+  }, [isOpen, isReopenModalOpen]);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -100,12 +131,8 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [phoneSearch, setPhoneSearch] = useState("");
   const [addressSearch, setAddressSearch] = useState("");
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split("T")[0];
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
   const [showCanceled, setShowCanceled] = useState<boolean>(false);
 
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -118,10 +145,8 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
       setStatusFilter("ALL");
       setShowCanceled(false);
       setSelectedOrderId(null);
-      const d = new Date();
-      d.setDate(d.getDate() - 30);
-      setStartDate(d.toISOString().split("T")[0]);
-      setEndDate(new Date().toISOString().split("T")[0]);
+      setStartDate('');
+      setEndDate('');
     } else {
       setSearchTerm("");
       setSelectedOrderId(null);
@@ -141,8 +166,6 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
       setDragOverColId(null);
     };
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
     if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
@@ -245,6 +268,59 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
     });
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const isStatusFinished = (status: string): boolean => {
+    if (!status) return false;
+    const upper = status.trim().toUpperCase();
+    return /liberad|conclui|finaliz|execut|entregue|sem condi|garantia_fabrica|garantia fábrica|garantia fabrica|garantia_empresa|garantia empresa|irreparavel|irreparável/i.test(upper);
+  };
+
+  const isStatusCanceled = (status: string): boolean => {
+    if (!status) return false;
+    const upper = status.trim().toUpperCase();
+    return /cancel/i.test(upper);
+  };
+
+  // Carrega status cadastrados e extrai opções para o filtro
+  const availableStatuses = React.useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+
+    try {
+      const saved = localStorage.getItem('custom_os_statuses_v3');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((s) => {
+            const name = (s.name || '').trim();
+            if (name && (isStatusFinished(name) || isStatusCanceled(name)) && !seen.has(name.toUpperCase())) {
+              if (showCanceled || !isStatusCanceled(name)) {
+                seen.add(name.toUpperCase());
+                list.push(name);
+              }
+            }
+          });
+        }
+      }
+    } catch {}
+
+    orders.forEach((os) => {
+      const name = (os.status || '').trim();
+      if (name && (isStatusFinished(name) || isStatusCanceled(name)) && !seen.has(name.toUpperCase())) {
+        if (showCanceled || !isStatusCanceled(name)) {
+          seen.add(name.toUpperCase());
+          list.push(name);
+        }
+      }
+    });
+
+    return list;
+  }, [orders, showCanceled]);
+
   const seenIds = new Set<string>();
   const seenCodes = new Set<string>();
   const finishedOrders = orders.filter((os) => {
@@ -254,15 +330,13 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
     seenIds.add(os.id);
     if (os.code) seenCodes.add(os.code);
 
-    const isFinished = os.status === "FINALIZADA" || os.status === "CONCLUIDA" || os.status === "GARANTIA_FINALIZADA" || os.status === "GARANTIA/FINALIZADA";
-    const isCanceled = os.status === "CANCELADA";
+    const isFinished = isStatusFinished(os.status);
+    const isCanceled = isStatusCanceled(os.status);
     if (!isFinished && (!showCanceled || !isCanceled)) return false;
 
     // Filtro por Status
     if (statusFilter !== "ALL") {
-      if (statusFilter === "FINALIZADA" && !isFinished) return false;
-      if (statusFilter === "CANCELADA" && !isCanceled) return false;
-      if (statusFilter !== "FINALIZADA" && statusFilter !== "CANCELADA" && os.status !== statusFilter) return false;
+      if (String(os.status || '').trim().toUpperCase() !== statusFilter.trim().toUpperCase()) return false;
     }
 
     const matchesName = matchesSearchTerm(os.client?.name, searchTerm);
@@ -300,11 +374,30 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
         const formatted = day && m && y ? `${day}/${m}/${y}` : d;
         return <span className="font-mono text-slate-700 font-semibold">{formatted}</span>;
       }
-      case "type": return (
-        <span className={`font-bold px-2 py-0.5 rounded text-[10px] border ${os.type === "AGENDAMENTO" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-sky-50 text-sky-700 border-sky-200"}`}>
-          {os.type === "AGENDAMENTO" ? "AGENDAMENTO" : "ORCAMENTO"}
-        </span>
-      );
+      case "type": {
+        const rawType = String(os.type || '').toUpperCase();
+        const isVisita = rawType === 'VISITA_TECNICA' || rawType === 'VISITA TECNICA' || rawType === 'VISITA';
+        const isAgendamento = rawType === 'AGENDAMENTO';
+
+        let badgeLabel = 'ORÇAMENTO';
+        let badgeClass = 'bg-sky-50 text-sky-700 border-sky-200';
+
+        if (isVisita) {
+          badgeLabel = 'VISITA TÉCNICA';
+          badgeClass = 'bg-blue-50 text-blue-700 border-blue-200 font-bold';
+        } else if (isAgendamento) {
+          badgeLabel = 'AGENDAMENTO';
+          badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold';
+        } else if (rawType && rawType !== 'ORCAMENTO' && rawType !== 'ORÇAMENTO') {
+          badgeLabel = rawType;
+        }
+
+        return (
+          <span className={`font-bold px-2 py-0.5 rounded text-[10px] border ${badgeClass}`}>
+            {badgeLabel}
+          </span>
+        );
+      }
       case "client": return <span className="font-bold text-slate-900">{os.client?.name}</span>;
       case "contact": {
         const phone = (os.client?.phone || "").trim();
@@ -374,19 +467,35 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
     }
   };
 
-  const totalPixels = columns.filter((c) => c.visible).reduce((acc, col) => acc + col.width, 0);
+  const isColumnAllowed = (colId: string) => {
+    if (colId === "type" && !getCurrentFeatures().hasOSTableTypeColumn) return false;
+    if (colId === "problem" && !getCurrentFeatures().hasOSTableProblemColumn) return false;
+    if (colId === "warranty" && !getCurrentFeatures().hasOSTableWarrantyColumn) return false;
+    return true;
+  };
+
+  const effectiveColumns = columns.filter((col) => isColumnAllowed(col.id));
+
+  const totalPixels = effectiveColumns.filter((c) => c.visible).reduce((acc, col) => acc + col.width, 0);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setContextMenu(null)}>
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden font-sans relative">
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span>OS Finalizadas</span>
-            <span className="text-[11px] bg-slate-100 text-slate-500 border border-slate-300 font-mono font-semibold px-1.5 py-0.5 rounded ml-1 shadow-2xs">
-              F6
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              <span>OS Finalizadas</span>
+              <span className="text-[11px] bg-slate-100 text-slate-500 border border-slate-300 font-mono font-semibold px-1.5 py-0.5 rounded ml-1 shadow-2xs">
+                F6
+              </span>
+            </h2>
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-300/80 border border-slate-300 px-2.5 py-0.5 rounded-full">
+              {finishedOrders.length} {finishedOrders.length === 1 ? 'ordem' : 'ordens'}
             </span>
-          </h2>
+          </div>
           <button onClick={onClose} className="text-slate-600 hover:text-slate-900 p-1 rounded-lg"><X className="w-5 h-5" /></button>
         </div>
 
@@ -420,8 +529,11 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
               className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-emerald-600 cursor-pointer shadow-xs"
             >
               <option value="ALL">Todas Finalizadas</option>
-              <option value="FINALIZADA">Finalizadas / Concluídas</option>
-              <option value="CANCELADA">Canceladas</option>
+              {availableStatuses.map((st) => (
+                <option key={st} value={st}>
+                  {st}
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -434,21 +546,17 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
           </div>
         </div>
 
-        <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50 select-none"
-          onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest('tr[data-row]') === null) {
-              setSelectedOrderId(null);
-            }
-          }}
-        >
-          <div style={{ width: `${totalPixels}px`, minWidth: "100%" }}>
-            <table style={{ tableLayout: "fixed", width: `${totalPixels}px` }} className="text-left text-[11px] text-slate-800 border-collapse">
-              <colgroup>{columns.filter((c) => c.visible).map((col) => <col key={col.id} style={{ width: `${col.width}px` }} />)}</colgroup>
+        <div className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50" onContextMenu={handleContextMenu} onClick={(e) => { if ((e.target as HTMLElement).closest("tr[data-row]") === null) { setSelectedOrderId(null); } }}>
+          <div style={{ width: `${totalPixels}px`, minWidth: '100%' }}>
+            <table style={{ tableLayout: "fixed", width: `${totalPixels}px` }} className="text-left text-[11px] text-slate-800 border-collapse select-none">
+              <colgroup>
+                {effectiveColumns.filter((col) => col.visible).map((col) => (
+                  <col key={col.id} style={{ width: `${col.width}px` }} />
+                ))}
+              </colgroup>
               <thead className="bg-slate-200 text-slate-800 font-bold uppercase sticky top-0 z-20 text-[10px]">
                 <tr>
-                  {columns
+                  {effectiveColumns
                     .filter((col) => col.visible)
                     .map((col) => {
                       const isDraggingThis = draggingColId === col.id;
@@ -503,7 +611,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
                           : statusRowBg
                         }`}
                     >
-                      {columns.filter((col) => col.visible).map((col) => (
+                      {effectiveColumns.filter((col) => col.visible).map((col) => (
                         <td key={col.id} style={{ width: `${col.width}px`, minWidth: `${col.width}px`, maxWidth: `${col.width}px` }} className="p-1.5 border-r border-slate-200 truncate">
                           {renderCellContent(os, col.id)}
                         </td>
@@ -512,7 +620,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
                   );
                 })}
                 {finishedOrders.length === 0 && (
-                  <tr><td colSpan={columns.filter((c) => c.visible).length} className="text-center py-12 text-slate-400">Nenhuma OS finalizada encontrada para os filtros aplicados.</td></tr>
+                  <tr><td colSpan={effectiveColumns.filter((c) => c.visible).length} className="text-center py-12 text-slate-400">Nenhuma OS finalizada encontrada para os filtros aplicados.</td></tr>
                 )}
               </tbody>
             </table>
@@ -526,7 +634,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
               <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
             <div className="max-h-64 overflow-y-auto space-y-1">
-              {columns.map((col, cIdx) => (
+              {effectiveColumns.map((col, cIdx) => (
                 <div
                   key={col.id}
                   className="flex items-center justify-between px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-700 transition-colors"
@@ -552,7 +660,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
                     </button>
                     <button
                       title="Mover para direita"
-                      disabled={cIdx === columns.length - 1}
+                      disabled={cIdx === effectiveColumns.length - 1}
                       onClick={() => handleMoveColumn(col.id, 'right')}
                       className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     >
@@ -565,17 +673,20 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
           </div>
         )}
 
-        <div className="p-3 bg-slate-200 border-t border-slate-300 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-slate-700">
+        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 shrink-0 flex-nowrap overflow-hidden">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+            <span className="text-xs font-semibold text-slate-700 truncate min-w-0">
               {selectedOrder ? (
-                <span>OS Selecionada: <strong className="text-emerald-700">{selectedOrder.code}</strong> - {selectedOrder.client?.name} (Dê 2 cliques para abrir)</span>
+                <span className="truncate inline-block max-w-full" title={`OS Selecionada: ${selectedOrder.code} - ${selectedOrder.client?.name || ''}`}>
+                  OS Selecionada: <strong className="text-emerald-700">{selectedOrder.code}</strong> -{' '}
+                  <span className="font-semibold text-slate-800">{selectedOrder.client?.name}</span> (Dê 2 cliques para abrir)
+                </span>
               ) : (
                 `${finishedOrders.length} OS(s) listada(s) no período`
               )}
             </span>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none bg-white border border-slate-300 rounded-lg px-2.5 py-1 hover:bg-slate-50 transition-colors">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none bg-white border border-slate-300 rounded-lg px-2.5 py-1 hover:bg-slate-50 transition-colors shrink-0">
               <input
                 type="checkbox"
                 checked={showCanceled}
@@ -585,7 +696,7 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
               <span>Exibir OS Canceladas</span>
             </label>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => handleOpenOS(selectedOrder)} disabled={!selectedOrderId}
               className="h-8 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer">
               <FolderOpen className="w-4 h-4" />Abrir OS
@@ -593,6 +704,47 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
             <button
               onClick={() => {
                 if (!selectedOrder) return;
+                if (!getCurrentFeatures().hasWarrantyReturnInReopen) {
+                  // Versão 2: sem opções de garantia, confirma e reabre direto como ABERTA
+                  setConfirmDialogData({
+                    isOpen: true,
+                    title: 'Confirmar Reabertura da Ordem de Serviço',
+                    message: `Deseja realmente reabrir a OS #${selectedOrder.code} como ABERTA?\n\n• A data de saída será limpa.\n• O status voltará para ABERTA sem perda das informações cadastradas.`,
+                    confirmText: 'Sim, Reabrir OS',
+                    variant: 'warning',
+                    onConfirm: async () => {
+                      setConfirmDialogData((prev) => ({ ...prev, isOpen: false }));
+                      try {
+                        const now = new Date();
+                        const dateTimeStr = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                        const userName = currentUser?.name || currentUser?.username || 'Administrador';
+
+                        const newAuditEntry = {
+                          date: dateTimeStr,
+                          user: userName,
+                          action: `OS Reaberta de FINALIZADA para ABERTA`,
+                          details: [
+                            `Reabertura efetuada por ${userName}`,
+                            `Data de saída limpa`,
+                          ],
+                        };
+                        const existingAudit = Array.isArray(selectedOrder.auditHistory) ? selectedOrder.auditHistory : [];
+                        const updatedAudit = [newAuditEntry, ...existingAudit];
+
+                        onUpdateOrderStatus(selectedOrder.id, 'ABERTA', {
+                          exitDate: '',
+                          auditHistory: updatedAudit,
+                        });
+
+                        setSelectedOrderId(null);
+                      } catch (err) {
+                        console.error('Erro ao reabrir OS:', err);
+                        alert('Erro ao reabrir OS. Por favor, tente novamente.');
+                      }
+                    },
+                  });
+                  return;
+                }
                 setReopenStatus('RETORNO_GARANTIA');
                 setIsReopenModalOpen(true);
               }}
@@ -624,21 +776,36 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
 
             <div className="p-4 space-y-3 bg-slate-50 text-slate-800">
               <p className="text-xs text-slate-700 font-medium leading-relaxed">
-                Selecione para qual status a Ordem de Serviço <strong>#{selectedOrder.code}</strong> será reaberta:
+                Selecione a ação de reabertura para a Ordem de Serviço <strong>#{selectedOrder.code}</strong>:
               </p>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-800 mb-1">Novo Status da OS *</label>
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Ação / Status de Reabertura *</label>
                 <select
                   value={reopenStatus}
                   onChange={(e) => setReopenStatus(e.target.value)}
                   className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-xs text-slate-900 focus:outline-none focus:border-amber-600 cursor-pointer shadow-2xs"
                 >
-                  <option value="RETORNO_GARANTIA">Retorno em Garantia</option>
-                  <option value="EM_ATENDIMENTO">Em Atendimento</option>
-                  <option value="AGUARDANDO_PECA">Aguardando Peça</option>
+                  <option value="RETORNO_GARANTIA">Retorno em Garantia (Gera nova OS de retorno vinculada)</option>
+                  {isAdmin && (
+                    <option value="ABERTA">Reabrir OS (Status Aberta, limpa data de saída e cancela lançamento no caixa)</option>
+                  )}
                 </select>
               </div>
+
+              {reopenStatus === 'ABERTA' && (
+                <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-[11px] text-amber-950 font-medium space-y-1.5 shadow-2xs">
+                  <span className="font-bold block text-amber-900 flex items-center gap-1">
+                    ⚠️ Atenção - Reabertura de OS Finalizada (Apenas Administrador):
+                  </span>
+                  <ul className="list-disc pl-4 space-y-0.5 text-amber-900">
+                    <li>O status voltará para <strong>ABERTA</strong> e a OS poderá ser editada.</li>
+                    <li>A <strong>Data de Saída será limpa</strong>.</li>
+                    <li>Qualquer <strong>lançamento de recebimento no Caixa será cancelado/excluído</strong>.</li>
+                    <li>A reabertura ficará gravada no <strong>Histórico de Auditoria</strong>.</li>
+                  </ul>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
                 <button
@@ -650,15 +817,61 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (reopenStatus === 'RETORNO_GARANTIA' && onCreateWarrantyReturn && selectedOrder) {
-                      onCreateWarrantyReturn(selectedOrder);
+                  onClick={async () => {
+                    if (!selectedOrder) return;
+
+                    if (reopenStatus === 'RETORNO_GARANTIA') {
+                      if (onCreateWarrantyReturn) onCreateWarrantyReturn(selectedOrder);
                       setIsReopenModalOpen(false);
                       setSelectedOrderId(null);
-                    } else {
-                      onUpdateOrderStatus(selectedOrder.id, reopenStatus);
+                      return;
+                    }
+
+                    if (reopenStatus === 'ABERTA') {
                       setIsReopenModalOpen(false);
-                      setSelectedOrderId(null);
+                      setConfirmDialogData({
+                        isOpen: true,
+                        title: 'Confirmar Reabertura da Ordem de Serviço',
+                        message: `ATENÇÃO: Deseja realmente reabrir a OS #${selectedOrder.code}?\n\n• O lançamento do valor recebido no Caixa será CANCELADO/EXCLUÍDO.\n• A Data de Saída será LIMPA.\n• O status voltará para ABERTA sem perda das informações cadastradas.\n• A reabertura ficará gravada no Histórico da OS.\n\nDeseja prosseguir?`,
+                        confirmText: 'Sim, Reabrir e Cancelar Caixa',
+                        variant: 'warning',
+                        onConfirm: async () => {
+                          setConfirmDialogData((prev) => ({ ...prev, isOpen: false }));
+                          try {
+                            const now = new Date();
+                            const dateTimeStr = `${now.toLocaleDateString('pt-BR')} às ${now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                            const userName = currentUser?.name || currentUser?.username || 'Administrador';
+
+                            // 1. Cancela lançamentos no caixa
+                            await cancelCashMovementsByOrderCode(selectedOrder.code);
+
+                            // 2. Histórico de auditoria
+                            const newAuditEntry = {
+                              date: dateTimeStr,
+                              user: userName,
+                              action: `OS Reaberta de FINALIZADA para ABERTA por Administrador`,
+                              details: [
+                                `Reabertura administrativa efetuada por ${userName}`,
+                                `Data de saída limpa`,
+                                `Lançamento do valor no caixa cancelado/revertido`,
+                              ],
+                            };
+                            const existingAudit = Array.isArray(selectedOrder.auditHistory) ? selectedOrder.auditHistory : [];
+                            const updatedAudit = [newAuditEntry, ...existingAudit];
+
+                            // 3. Atualiza status com payload adicional
+                            onUpdateOrderStatus(selectedOrder.id, 'ABERTA', {
+                              exitDate: '',
+                              auditHistory: updatedAudit,
+                            });
+
+                            setSelectedOrderId(null);
+                          } catch (err) {
+                            console.error('Erro ao reabrir OS:', err);
+                            alert('Erro ao reabrir OS. Por favor, tente novamente.');
+                          }
+                        },
+                      });
                     }
                   }}
                   className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-xl font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer text-xs"
@@ -671,6 +884,16 @@ export const FinishedOrdersModal: React.FC<FinishedOrdersModalProps> = ({
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmDialogData.isOpen}
+        title={confirmDialogData.title}
+        message={confirmDialogData.message}
+        confirmText={confirmDialogData.confirmText}
+        variant={confirmDialogData.variant}
+        onConfirm={confirmDialogData.onConfirm}
+        onCancel={() => setConfirmDialogData((prev) => ({ ...prev, isOpen: false }))}
+      />
 
       <ConfirmModal
         isOpen={confirmDialog.isOpen}

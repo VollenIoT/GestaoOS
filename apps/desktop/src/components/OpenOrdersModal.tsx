@@ -15,6 +15,8 @@ import {
 import { StatusBadge } from './Dashboard';
 import { ConfirmModal } from './ConfirmModal';
 import { matchesSearchTerm } from '../utils/searchUtils';
+import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
 
 interface ColumnConfig {
   id: string;
@@ -43,20 +45,18 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
 }) => {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
-  // Fechar com a tecla ESC
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Fechar com a tecla ESC via modalStack
   useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('OpenOrdersModal', () => {
+        onCloseRef.current?.();
+      });
+      return () => modalStack.unregister('OpenOrdersModal');
+    }
+  }, [isOpen]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -107,12 +107,8 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [showCanceled, setShowCanceled] = useState<boolean>(false);
 
-  const [startDate, setStartDate] = useState(() => {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    return thirtyDaysAgo.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
 
   React.useEffect(() => {
     if (isOpen) {
@@ -122,10 +118,8 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
       setStatusFilter('ALL');
       setShowCanceled(false);
       setSelectedOrderId(null);
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
-      setEndDate(new Date().toISOString().split('T')[0]);
+      setStartDate('');
+      setEndDate('');
     } else {
       setSearchTerm('');
       setPhoneSearch('');
@@ -147,8 +141,6 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
       setDragOverColId(null);
     };
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const handleMouseDownHeader = (e: React.MouseEvent, colId: string) => {
     if ((e.target as HTMLElement).getAttribute('data-resize') === 'true') {
@@ -267,6 +259,54 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     });
   };
 
+  const isStatusFinished = (status: string): boolean => {
+    if (!status) return false;
+    const upper = status.trim().toUpperCase();
+    return /liberad|conclui|finaliz|execut|entregue|sem condi|garantia_fabrica|garantia fábrica|garantia fabrica|garantia_empresa|garantia empresa|irreparavel|irreparável/i.test(upper);
+  };
+
+  const isStatusCanceled = (status: string): boolean => {
+    if (!status) return false;
+    const upper = status.trim().toUpperCase();
+    return /cancel/i.test(upper);
+  };
+
+  // Carrega status cadastrados e extrai opções para o filtro
+  const availableStatuses = React.useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+
+    try {
+      const saved = localStorage.getItem('custom_os_statuses_v3');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((s) => {
+            const name = (s.name || '').trim();
+            if (name && !isStatusFinished(name) && !seen.has(name.toUpperCase())) {
+              if (showCanceled || !isStatusCanceled(name)) {
+                seen.add(name.toUpperCase());
+                list.push(name);
+              }
+            }
+          });
+        }
+      }
+    } catch {}
+
+    orders.forEach((os) => {
+      const name = (os.status || '').trim();
+      if (name && !isStatusFinished(name) && !seen.has(name.toUpperCase())) {
+        if (showCanceled || !isStatusCanceled(name)) {
+          seen.add(name.toUpperCase());
+          list.push(name);
+        }
+      }
+    });
+
+    return list;
+  }, [orders, showCanceled]);
+
   const seenIds = new Set<string>();
   const seenCodes = new Set<string>();
   const openOrders = orders.filter((os) => {
@@ -276,13 +316,14 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     seenIds.add(os.id);
     if (os.code) seenCodes.add(os.code);
 
-    const isFinished = os.status === 'FINALIZADA' || os.status === 'CONCLUIDA' || os.status === 'GARANTIA_FINALIZADA' || os.status === 'GARANTIA/FINALIZADA';
+    const isFinished = isStatusFinished(os.status);
+    const isCanceled = isStatusCanceled(os.status);
     if (isFinished) return false;
-    if (!showCanceled && os.status === 'CANCELADA') return false;
+    if (!showCanceled && isCanceled) return false;
 
     // Filtro por Status
     if (statusFilter !== 'ALL') {
-      if (os.status !== statusFilter) return false;
+      if (String(os.status || '').trim().toUpperCase() !== statusFilter.trim().toUpperCase()) return false;
     }
 
     const clientName = os.client?.name || '';
@@ -329,17 +370,30 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
         const formatted = day && m && y ? `${day}/${m}/${y}` : d;
         return <span className="font-mono text-slate-700 font-semibold">{formatted}</span>;
       }
-      case 'type':
+      case 'type': {
+        const rawType = String(os.type || '').toUpperCase();
+        const isVisita = rawType === 'VISITA_TECNICA' || rawType === 'VISITA TECNICA' || rawType === 'VISITA';
+        const isAgendamento = rawType === 'AGENDAMENTO';
+
+        let badgeLabel = 'ORÇAMENTO';
+        let badgeClass = 'bg-sky-50 text-sky-700 border-sky-200';
+
+        if (isVisita) {
+          badgeLabel = 'VISITA TÉCNICA';
+          badgeClass = 'bg-blue-50 text-blue-700 border-blue-200 font-bold';
+        } else if (isAgendamento) {
+          badgeLabel = 'AGENDAMENTO';
+          badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold';
+        } else if (rawType && rawType !== 'ORCAMENTO' && rawType !== 'ORÇAMENTO') {
+          badgeLabel = rawType;
+        }
+
         return (
-          <span
-            className={`font-bold px-2 py-0.5 rounded text-[10px] border ${os.type === 'AGENDAMENTO'
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              : 'bg-sky-50 text-sky-700 border-sky-200'
-              }`}
-          >
-            {os.type === 'AGENDAMENTO' ? 'AGENDAMENTO' : 'ORÇAMENTO'}
+          <span className={`font-bold px-2 py-0.5 rounded text-[10px] border ${badgeClass}`}>
+            {badgeLabel}
           </span>
         );
+      }
       case 'client':
         return <span className="font-bold text-slate-900">{os.client?.name}</span>;
       case 'contact': {
@@ -455,9 +509,20 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     }
   };
 
-  const totalPixels = columns
+  const isColumnAllowed = (colId: string) => {
+    if (colId === 'type' && !getCurrentFeatures().hasOSTableTypeColumn) return false;
+    if (colId === 'problem' && !getCurrentFeatures().hasOSTableProblemColumn) return false;
+    if (colId === 'warranty' && !getCurrentFeatures().hasOSTableWarrantyColumn) return false;
+    return true;
+  };
+
+  const effectiveColumns = columns.filter((col) => isColumnAllowed(col.id));
+
+  const totalPixels = effectiveColumns
     .filter((c) => c.visible)
     .reduce((acc, col) => acc + col.width, 0);
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -466,13 +531,18 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
     >
       <div className="bg-white border border-slate-300 rounded-2xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden font-sans relative">
         <div className="p-4 bg-slate-200 border-b border-slate-300 flex items-center justify-between">
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <Clock className="w-5 h-5 text-amber-600" />
-            <span>OS em Aberto</span>
-            <span className="text-[11px] bg-slate-100 text-slate-500 border border-slate-300 font-mono font-semibold px-1.5 py-0.5 rounded ml-1 shadow-2xs">
-              F5
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-600" />
+              <span>OS em Aberto</span>
+              <span className="text-[11px] bg-slate-100 text-slate-500 border border-slate-300 font-mono font-semibold px-1.5 py-0.5 rounded ml-1 shadow-2xs">
+                F5
+              </span>
+            </h2>
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-300/80 border border-slate-300 px-2.5 py-0.5 rounded-full">
+              {openOrders.length} {openOrders.length === 1 ? 'ordem' : 'ordens'}
             </span>
-          </h2>
+          </div>
           <button onClick={onClose} className="text-slate-600 hover:text-slate-900 p-1 rounded-lg cursor-pointer">
             <X className="w-5 h-5" />
           </button>
@@ -529,15 +599,11 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
               className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:outline-none focus:border-sky-600 cursor-pointer shadow-xs"
             >
               <option value="ALL">Todos os Status</option>
-              <option value="ABERTA">Aberta</option>
-              <option value="ORCAMENTO_APROVADO">Orçamento Aprovado</option>
-              <option value="VISITA_TECNICA">Visita Técnica</option>
-              <option value="EM_ATENDIMENTO">Em Atendimento</option>
-              <option value="APROVADO">Aprovado</option>
-              <option value="AGUARDANDO_PECA">Aguardando Peça</option>
-              <option value="APARELHO_LIBERADO">Aparelho Liberado / Pronto</option>
-              <option value="RETORNO_GARANTIA">Retorno em Garantia</option>
-              <option value="CANCELADA">Cancelada</option>
+              {availableStatuses.map((st) => (
+                <option key={st} value={st}>
+                  {st}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -564,7 +630,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
 
         {/* Tabela em Modo Unset com Largura Explícita em Pixels (Nenhum campo à esquerda é afetado mesmo sem scroll) */}
         <div
-          className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-50"
+          className="flex-1 overflow-x-auto overflow-y-auto bg-slate-50"
           onContextMenu={handleContextMenu}
           onClick={(e) => {
             if ((e.target as HTMLElement).closest('tr[data-row]') === null) {
@@ -578,7 +644,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
               className="text-left text-[11px] text-slate-800 border-collapse select-none"
             >
               <colgroup>
-                {columns
+                {effectiveColumns
                   .filter((col) => col.visible)
                   .map((col) => (
                     <col key={col.id} style={{ width: `${col.width}px` }} />
@@ -586,7 +652,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
               </colgroup>
               <thead className="bg-slate-200 text-slate-800 font-bold uppercase sticky top-0 z-20 text-[10px]">
                 <tr>
-                  {columns
+                  {effectiveColumns
                     .filter((col) => col.visible)
                     .map((col) => {
                       const isDraggingThis = draggingColId === col.id;
@@ -642,7 +708,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                         : statusRowBg
                         }`}
                     >
-                      {columns
+                      {effectiveColumns
                         .filter((col) => col.visible)
                         .map((col) => (
                           <td
@@ -660,7 +726,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                 {openOrders.length === 0 && (
                   <tr>
                     <td
-                      colSpan={columns.filter((c) => c.visible).length}
+                      colSpan={effectiveColumns.filter((c) => c.visible).length}
                       className="text-center py-12 text-slate-400"
                     >
                       Nenhuma Ordem de Serviço encontrada para os filtros aplicados.
@@ -683,7 +749,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
               <button onClick={() => setContextMenu(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
             <div className="max-h-64 overflow-y-auto space-y-1">
-              {columns.map((col, cIdx) => (
+              {effectiveColumns.map((col, cIdx) => (
                 <div
                   key={col.id}
                   className="flex items-center justify-between px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-700 transition-colors"
@@ -709,7 +775,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
                     </button>
                     <button
                       title="Mover para direita"
-                      disabled={cIdx === columns.length - 1}
+                      disabled={cIdx === effectiveColumns.length - 1}
                       onClick={() => handleMoveColumn(col.id, 'right')}
                       className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                     >
@@ -722,20 +788,20 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
           </div>
         )}
 
-        <div className="p-3 bg-slate-200 border-t border-slate-300 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-slate-700">
+        <div className="p-3 bg-slate-200 border-t border-slate-300 flex items-center justify-between gap-3 shrink-0 flex-nowrap overflow-hidden">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+            <span className="text-xs font-semibold text-slate-700 truncate min-w-0">
               {selectedOrder ? (
-                <span>
+                <span className="truncate inline-block max-w-full" title={`OS Selecionada: ${selectedOrder.code} - ${selectedOrder.client?.name || ''}`}>
                   OS Selecionada: <strong className="text-sky-700">{selectedOrder.code}</strong> -{' '}
-                  {selectedOrder.client?.name} (Dê 2 cliques para abrir)
+                  <span className="font-semibold text-slate-800">{selectedOrder.client?.name}</span> (Dê 2 cliques para abrir)
                 </span>
               ) : (
                 'Selecione uma OS ou dê 2 cliques para abrir'
               )}
             </span>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none bg-white border border-slate-300 rounded-lg px-2.5 py-1 hover:bg-slate-50 transition-colors">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none bg-white border border-slate-300 rounded-lg px-2.5 py-1 hover:bg-slate-50 transition-colors shrink-0">
               <input
                 type="checkbox"
                 checked={showCanceled}
@@ -746,7 +812,7 @@ export const OpenOrdersModal: React.FC<OpenOrdersModalProps> = ({
             </label>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => {
                 onOpenCreateOS();

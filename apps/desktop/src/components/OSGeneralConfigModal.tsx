@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Settings, Sliders, CheckSquare, Save, MessageSquare, RotateCcw } from 'lucide-react';
+import { modalStack } from '../utils/modalStack';
+import { getCurrentFeatures } from '../config/appFeatures';
+import { assertTerminalCanSave } from '../services/localNetworkService';
 
 export interface OSGeneralConfigData {
   autoAssignTechnicianOnStatus?: boolean;
@@ -68,22 +71,30 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
     } catch { }
   }, [isOpen]);
 
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('OSGeneralConfigModal', () => {
+        onCloseRef.current();
+      });
+      return () => modalStack.unregister('OSGeneralConfigModal');
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    try {
+      await assertTerminalCanSave('alterar configurações gerais de OS');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível alterar configurações no terminal.');
+      return;
+    }
+
     try {
       localStorage.setItem('vollen_os_general_config', JSON.stringify(config));
       // Sincroniza também com as preferências gerais do sistema para compatibilidade global
@@ -100,12 +111,20 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
         updatedAt: new Date().toISOString(),
       };
       localStorage.setItem('vollen_os_preferences', JSON.stringify(prefsPayload));
-      window.dispatchEvent(new Event('storage'));
+      localStorage.setItem('vollen_os_general_config', JSON.stringify(prefsPayload));
+      localStorage.setItem('vollen_os_config', JSON.stringify(prefsPayload));
+
+      // Sincroniza com a Rede Local
+      import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+        emitLocalDataChange('osGeneralConfig', prefsPayload);
+      }).catch(() => {});
 
       // Salva no Firestore para que todos os computadores e o APK mobile utilizem o mesmo modelo e mensagens
       const { setDoc, doc } = await import('firebase/firestore');
       const { db } = await import('../services/firebase');
-      await setDoc(doc(db, 'system_config', 'os_preferences'), prefsPayload, { merge: true }).catch(() => null);
+      if (db) {
+        await setDoc(doc(db, 'system_config', 'os_preferences'), prefsPayload, { merge: true }).catch(() => null);
+      }
     } catch (err) {
       console.warn('Erro ao salvar preferências gerais de OS:', err);
     }
@@ -170,17 +189,19 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
             Regras & Bloqueios
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('whatsapp')}
-            className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${activeTab === 'whatsapp'
-                ? 'bg-white text-emerald-700 border-t-2 border-emerald-600 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-            Mensagens WhatsApp
-          </button>
+          {getCurrentFeatures().hasOSGeneralConfigWhatsApp && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('whatsapp')}
+              className={`px-3.5 py-2 font-bold rounded-t-xl transition-colors flex items-center gap-1.5 cursor-pointer text-xs ${activeTab === 'whatsapp'
+                  ? 'bg-white text-emerald-700 border-t-2 border-emerald-600 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+              Mensagens WhatsApp
+            </button>
+          )}
         </div>
 
         {/* Formulário */}
@@ -200,18 +221,20 @@ export const OSGeneralConfigModal: React.FC<OSGeneralConfigModalProps> = ({
                 </div>
               </label>
 
-              <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
-                <input
-                  type="checkbox"
-                  checked={config.notifyClientOnStatusChange ?? true}
-                  onChange={(e) => setConfig((prev) => ({ ...prev, notifyClientOnStatusChange: e.target.checked }))}
-                  className="w-4 h-4 text-sky-600 rounded"
-                />
-                <div>
-                  <span className="font-bold block text-slate-900">Habilitar botão de notificação via WhatsApp nos status</span>
-                  <span className="text-[11px] text-slate-500">Oferece atalho rápido para enviar mensagem padronizada no WhatsApp do cliente quando a OS mudar de status.</span>
-                </div>
-              </label>
+              {getCurrentFeatures().hasOSGeneralConfigWhatsApp && (
+                <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100">
+                  <input
+                    type="checkbox"
+                    checked={config.notifyClientOnStatusChange ?? true}
+                    onChange={(e) => setConfig((prev) => ({ ...prev, notifyClientOnStatusChange: e.target.checked }))}
+                    className="w-4 h-4 text-sky-600 rounded"
+                  />
+                  <div>
+                    <span className="font-bold block text-slate-900">Habilitar botão de notificação via WhatsApp nos status</span>
+                    <span className="text-[11px] text-slate-500">Oferece atalho rápido para enviar mensagem padronizada no WhatsApp do cliente quando a OS mudar de status.</span>
+                  </div>
+                </label>
+              )}
             </div>
           )}
 

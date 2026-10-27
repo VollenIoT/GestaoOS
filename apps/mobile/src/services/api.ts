@@ -496,13 +496,17 @@ export async function loginUserMobile(username: string, password?: string): Prom
     throw new Error('Usuário/Técnico não encontrado no sistema.');
   }
 
+  // Validação case-insensitive (sem distinção entre maiúsculas e minúsculas)
+  const inputPass = String(password || '').trim().toLowerCase();
+  const registeredPass = String(matched.password || '').trim().toLowerCase();
+
   // No modo de teste, aceita tanto 1234 quanto 123 ou a senha do próprio matched
   if (isTest) {
-    const validTestPasswords = ['1234', '123', matched.password];
-    if (password && !validTestPasswords.includes(password)) {
+    const validTestPasswords = ['1234', '123', registeredPass];
+    if (inputPass && !validTestPasswords.includes(inputPass)) {
       throw new Error('Senha incorreta. No modo teste use 1234.');
     }
-  } else if (matched.password && matched.password !== password) {
+  } else if (registeredPass && registeredPass !== inputPass) {
     throw new Error('Senha incorreta. Tente novamente.');
   }
 
@@ -1166,7 +1170,7 @@ export async function fetchTechniciansMobile(): Promise<any[]> {
 
 export const DEFAULT_STATUSES_MOBILE = [
   { id: '1', code: '0001', name: 'ABERTA', color: '#eab308', description: 'Ordem de serviço aberta aguardando avaliação', isSystemDefault: true },
-  { id: '7', code: '0002', name: 'ORCAMENTO_APROVADO', color: '#8b5cf6', description: 'Orçamento aprovado pelo cliente com reserva de peças', isSystemDefault: true },
+  { id: '9', code: '0002', name: 'ORCAMENTO_CONCLUIDO', color: '#6366f1', description: 'Orçamento concluído e aguardando resposta do cliente', isSystemDefault: true },
   { id: '2', code: '0003', name: 'EM_ATENDIMENTO', color: '#0284c7', description: 'Técnico trabalhando no equipamento / Visita Técnica', isSystemDefault: true },
   { id: '8', code: '0004', name: 'APROVADO', color: '#059669', description: 'Serviço e orçamento aprovados pelo cliente', isSystemDefault: true },
   { id: '3', code: '0005', name: 'AGUARDANDO_PECA', color: '#f97316', description: 'Aguardando chegada de peças para conclusão', isSystemDefault: true },
@@ -1199,7 +1203,7 @@ export async function fetchStatusesMobile(): Promise<any[]> {
 
 // 5. BAIXA/DEVOLUÇÃO DE ESTOQUE BASEADA NO STATUS DA OS
 
-/** Dá baixa nas peças — permite estoque negativo. Retorna lista de peças com estoque insuficiente. */
+/** Dá baixa nas peças usando Transação Atômica do Firestore — previne race conditions e inconsistências concorrentes. Retorna lista de peças com estoque insuficiente. */
 export async function deductStockForApprovedOrder(parts: any[]): Promise<string[]> {
   const insufficient: string[] = [];
   if (!parts || parts.length === 0) return insufficient;
@@ -1207,6 +1211,32 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
     const { getActiveMobileFirestore } = await import('./firebase');
     const activeDb = await getActiveMobileFirestore();
     const currentParts = await fetchPartsMobile();
+
+    // 1. Executa transação atômica no Firestore para garantir consistência de concorrência
+    if (activeDb) {
+      try {
+        await runTransaction(activeDb, async (transaction) => {
+          for (const item of parts) {
+            const partId = String(item.id || item.partId || '');
+            if (!partId) continue;
+            const partRef = doc(activeDb, 'parts', partId);
+            const partSnap = await transaction.get(partRef);
+
+            if (partSnap.exists()) {
+              const data = partSnap.data();
+              const currentStock = Number(data.stockQuantity) || 0;
+              const qtyToDeduct = Number(item.quantity || item.qty || 1);
+              const newStock = currentStock - qtyToDeduct;
+              transaction.update(partRef, { stockQuantity: newStock, updatedAt: new Date().toISOString() });
+            }
+          }
+        });
+      } catch (txErr) {
+        console.warn('[Stock Transaction] Falha na transação remota de baixa no Firestore, aplicando fallback:', txErr);
+      }
+    }
+
+    // 2. Atualiza e sincroniza cache local
     for (const item of parts) {
       const matched = currentParts.find(
         (p) =>
@@ -1222,7 +1252,6 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
           insufficient.push(`${item.name || item.code} (estoque: ${currentStock}, reservado: ${qtyToDeduct})`);
         }
         matched.stockQuantity = newStock;
-        setDoc(doc(activeDb, 'parts', String(matched.id)), { stockQuantity: newStock }, { merge: true }).catch(() => {});
       }
     }
     await setLocalData('mobile_parts', currentParts);
@@ -1232,13 +1261,38 @@ export async function deductStockForApprovedOrder(parts: any[]): Promise<string[
   return insufficient;
 }
 
-/** Devolve peças ao estoque (soma qty de volta). Usado ao cancelar OS ou remover peças. */
+/** Devolve peças ao estoque usando Transação Atômica do Firestore (soma qty de volta). Usado ao cancelar OS ou remover peças. */
 export async function restoreStockForOrder(parts: any[]): Promise<void> {
   if (!parts || parts.length === 0) return;
   try {
     const { getActiveMobileFirestore } = await import('./firebase');
     const activeDb = await getActiveMobileFirestore();
     const currentParts = await fetchPartsMobile();
+
+    // 1. Executa transação atômica no Firestore
+    if (activeDb) {
+      try {
+        await runTransaction(activeDb, async (transaction) => {
+          for (const item of parts) {
+            const partId = String(item.id || item.partId || '');
+            if (!partId) continue;
+            const partRef = doc(activeDb, 'parts', partId);
+            const partSnap = await transaction.get(partRef);
+
+            if (partSnap.exists()) {
+              const data = partSnap.data();
+              const currentStock = Number(data.stockQuantity) || 0;
+              const qtyToRestore = Number(item.quantity || item.qty || 1);
+              transaction.update(partRef, { stockQuantity: currentStock + qtyToRestore, updatedAt: new Date().toISOString() });
+            }
+          }
+        });
+      } catch (txErr) {
+        console.warn('[Stock Transaction] Falha na transação remota de restauração no Firestore, aplicando fallback:', txErr);
+      }
+    }
+
+    // 2. Atualiza e sincroniza cache local
     for (const item of parts) {
       const matched = currentParts.find(
         (p) =>
@@ -1249,7 +1303,6 @@ export async function restoreStockForOrder(parts: any[]): Promise<void> {
       if (matched) {
         const qtyToRestore = Number(item.quantity || item.qty || 1);
         matched.stockQuantity = (Number(matched.stockQuantity) || 0) + qtyToRestore;
-        setDoc(doc(activeDb, 'parts', String(matched.id)), { stockQuantity: matched.stockQuantity }, { merge: true }).catch(() => {});
       }
     }
     await setLocalData('mobile_parts', currentParts);

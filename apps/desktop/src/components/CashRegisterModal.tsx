@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   DollarSign,
@@ -24,15 +24,19 @@ import {
   Clock,
   User,
   Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { db } from '../services/firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { useDialog } from './DialogContext';
+import { modalStack } from '../utils/modalStack';
+import { assertTerminalCanSave } from '../services/localNetworkService';
 
 export interface CashMovement {
   id: string;
   type: 'ENTRADA' | 'SAIDA';
-  category: 'OS' | 'ORCAMENTO' | 'VENDA' | 'SANGRIA' | 'DESPESA' | 'SUPRIMENTO' | 'OUTROS';
+  category: 'OS' | 'ORCAMENTO' | 'VENDA' | 'SANGRIA' | 'DESPESA' | 'SUPRIMENTO' | 'GARANTIA' | 'OUTROS';
   description: string;
   amount: number;
   paymentMethod: 'DINHEIRO' | 'PIX' | 'CARTAO_DEBITO' | 'CARTAO_CREDITO' | 'BOLETO' | 'OUTROS';
@@ -186,9 +190,43 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
   const [closingRealInput, setClosingRealInput] = useState('');
   const [closingNotesInput, setClosingNotesInput] = useState('');
 
-  // Sincronização com Firestore
+  // Função auxiliar para recarregar movimentos locais
+  const loadLocalMovements = () => {
+    try {
+      const localSaved = localStorage.getItem('vollen_cash_movements');
+      if (localSaved) {
+        const parsed: CashMovement[] = JSON.parse(localSaved);
+        if (Array.isArray(parsed)) {
+          parsed.sort((a, b) => ((b.date || '') + (b.time || '')).localeCompare((a.date || '') + (a.time || '')));
+          setMovements(parsed);
+          return;
+        }
+      }
+      setMovements([]);
+    } catch {
+      setMovements([]);
+    }
+  };
+
+  // Sincronização com Firestore e LocalStorage
   useEffect(() => {
     if (!isOpen) return;
+
+    // Sempre recarrega do localStorage ao abrir o modal
+    loadLocalMovements();
+
+    // Escuta evento de novas vendas ou OS emitido na mesma janela
+    const handleCashUpdate = () => {
+      loadLocalMovements();
+    };
+    window.addEventListener('vollen_cash_updated', handleCashUpdate);
+
+    // Se db não estiver inicializado (modo offline/local puro), apenas ouve evento local
+    if (!db) {
+      return () => {
+        window.removeEventListener('vollen_cash_updated', handleCashUpdate);
+      };
+    }
 
     try {
       // 1. Ouvinte de Sessão Atual do Caixa
@@ -202,49 +240,67 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
           setCurrentSession(null);
           localStorage.removeItem('vollen_current_cash_session');
         }
-      });
+      }, (err) => console.warn('Erro snapshot session:', err));
 
       // 2. Carrega Movimentações
       const movCol = collection(db, 'cash_movements');
       const unsubMovements = onSnapshot(movCol, (snap) => {
+        if (snap.empty) {
+          setMovements([]);
+          try {
+            localStorage.removeItem('vollen_cash_movements');
+          } catch {}
+          return;
+        }
+
         const list: CashMovement[] = [];
         snap.forEach((d) => {
           list.push({ id: d.id, ...(d.data() as any) });
         });
         // Ordena por data e hora decrescente
-        list.sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+        list.sort((a, b) => ((b.date || '') + (b.time || '')).localeCompare((a.date || '') + (a.time || '')));
+
         setMovements(list);
         if (list.length > 0) {
           localStorage.setItem('vollen_cash_movements', JSON.stringify(list));
-        } else {
-          localStorage.removeItem('vollen_cash_movements');
         }
-      });
+      }, (err) => console.warn('Erro snapshot movements:', err));
 
       return () => {
+        window.removeEventListener('vollen_cash_updated', handleCashUpdate);
         unsubSession();
         unsubMovements();
       };
     } catch (e) {
       console.warn('Erro ao conectar ao Firestore de Caixa:', e);
+      return () => {
+        window.removeEventListener('vollen_cash_updated', handleCashUpdate);
+      };
     }
   }, [isOpen]);
 
-  // Tecla ESC para fechar
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Registro no modalStack para ESC fechar o submodal do topo ou o modal principal
   useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (isNewMovementModalOpen) setIsNewMovementModalOpen(false);
-        else if (isOpenRegisterModalOpen) setIsOpenRegisterModalOpen(false);
-        else if (isCloseRegisterModalOpen) setIsCloseRegisterModalOpen(false);
-        else if (isPrintSummaryOpen) setIsPrintSummaryOpen(false);
-        else onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isNewMovementModalOpen, isOpenRegisterModalOpen, isCloseRegisterModalOpen, isPrintSummaryOpen, onClose]);
+    if (isOpen) {
+      modalStack.register('CashRegisterModal', () => {
+        if (isNewMovementModalOpen) {
+          setIsNewMovementModalOpen(false);
+        } else if (isOpenRegisterModalOpen) {
+          setIsOpenRegisterModalOpen(false);
+        } else if (isCloseRegisterModalOpen) {
+          setIsCloseRegisterModalOpen(false);
+        } else if (isPrintSummaryOpen) {
+          setIsPrintSummaryOpen(false);
+        } else {
+          onCloseRef.current();
+        }
+      });
+      return () => modalStack.unregister('CashRegisterModal');
+    }
+  }, [isOpen, isNewMovementModalOpen, isOpenRegisterModalOpen, isCloseRegisterModalOpen, isPrintSummaryOpen]);
 
   // Formatação monetária
   const formatMoney = (val: number | string) => {
@@ -282,8 +338,15 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
       // Filtro de Tipo
       if (filterType !== 'TODOS' && m.type !== filterType) return false;
 
-      // Filtro de Forma de Pagamento
-      if (filterPaymentMethod !== 'TODOS' && m.paymentMethod !== filterPaymentMethod) return false;
+      // Filtro de Forma de Pagamento (tolerante a variações como 'CARTÃO DE CRÉDITO')
+      if (filterPaymentMethod !== 'TODOS') {
+        const mMethod = (m.paymentMethod || '').toUpperCase();
+        if (filterPaymentMethod === 'CARTAO_CREDITO' && !mMethod.includes('CREDITO') && !mMethod.includes('CRÉDITO')) return false;
+        else if (filterPaymentMethod === 'CARTAO_DEBITO' && !mMethod.includes('DEBITO') && !mMethod.includes('DÉBITO')) return false;
+        else if (filterPaymentMethod === 'DINHEIRO' && !mMethod.includes('DINHEIRO')) return false;
+        else if (filterPaymentMethod === 'PIX' && !mMethod.includes('PIX')) return false;
+        else if (filterPaymentMethod === 'BOLETO' && !mMethod.includes('BOLETO')) return false;
+      }
 
       // Filtro de Busca Textual
       if (searchTerm.trim()) {
@@ -297,6 +360,28 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
       return true;
     });
   }, [movements, selectedPeriod, startDate, endDate, filterType, filterPaymentMethod, searchTerm]);
+
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const ITEMS_PER_PAGE = 25; // Quantidade ideal para caber perfeitamente em 1 folha A4
+
+  // Reset de página ao alterar filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedPeriod, startDate, endDate, filterType, filterPaymentMethod, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredMovements.length / ITEMS_PER_PAGE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedMovements = useMemo(() => {
+    const startIdx = (safePage - 1) * ITEMS_PER_PAGE;
+    return filteredMovements.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+  }, [filteredMovements, safePage]);
 
   // Cálculos dos Totais
   const summary = useMemo(() => {
@@ -356,6 +441,13 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
       return;
     }
 
+    try {
+      await assertTerminalCanSave('lançar movimentação no caixa');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível lançar movimentações no caixa.');
+      return;
+    }
+
     const now = new Date();
     const newMov: CashMovement = {
       id: 'mov_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -376,9 +468,14 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
     setMovements(updated);
     localStorage.setItem('vollen_cash_movements', JSON.stringify(updated));
 
+    // Sincroniza com a Rede Local
+    import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+      emitLocalDataChange('cashMovements', updated);
+    }).catch(() => {});
+
     // Nuvem
     try {
-      await setDoc(doc(db, 'cash_movements', newMov.id), newMov);
+      if (db) await setDoc(doc(db, 'cash_movements', newMov.id), newMov);
     } catch (err) {
       console.warn('Erro ao salvar movimentação na nuvem:', err);
     }
@@ -398,6 +495,13 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
   // Abrir Caixa
   const handleOpenRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    try {
+      await assertTerminalCanSave('abrir o caixa');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível abrir o caixa.');
+      return;
+    }
+
     const initialBal = parseMoney(initialBalanceInput);
     const newSess: CashRegisterSession = {
       id: 'sess_' + Date.now(),
@@ -410,9 +514,14 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
     setCurrentSession(newSess);
     localStorage.setItem('vollen_current_cash_session', JSON.stringify(newSess));
 
+    // Sincroniza com a Rede Local
+    import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+      emitLocalDataChange('currentCashSession', newSess);
+    }).catch(() => {});
+
     // Nuvem
     try {
-      await setDoc(doc(db, 'cash_registers', 'current_session'), newSess);
+      if (db) await setDoc(doc(db, 'cash_registers', 'current_session'), newSess);
     } catch (err) {
       console.warn('Erro ao abrir caixa na nuvem:', err);
     }
@@ -424,6 +533,13 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
   const handleCloseRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentSession) return;
+
+    try {
+      await assertTerminalCanSave('fechar o caixa');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível fechar o caixa.');
+      return;
+    }
 
     const realBal = parseMoney(closingRealInput);
     const calculatedBal = (currentSession.initialBalance || 0) + summary.dinheiroTotal;
@@ -441,9 +557,16 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
     setCurrentSession(closedSess);
     localStorage.setItem('vollen_current_cash_session', JSON.stringify(closedSess));
 
+    // Sincroniza com a Rede Local
+    import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+      emitLocalDataChange('currentCashSession', closedSess);
+    }).catch(() => {});
+
     try {
-      await setDoc(doc(db, 'cash_registers', 'current_session'), closedSess);
-      await setDoc(doc(db, 'cash_registers_history', closedSess.id), closedSess);
+      if (db) {
+        await setDoc(doc(db, 'cash_registers', 'current_session'), closedSess);
+        await setDoc(doc(db, 'cash_registers_history', closedSess.id), closedSess);
+      }
     } catch (err) {
       console.warn('Erro ao fechar caixa na nuvem:', err);
     }
@@ -456,6 +579,13 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
 
   // Excluir movimentação
   const handleDeleteMovement = async (id: string) => {
+    try {
+      await assertTerminalCanSave('excluir movimentação do caixa');
+    } catch (err: any) {
+      alert(err.message || 'Servidor offline. Não é possível excluir movimentações do caixa.');
+      return;
+    }
+
     const ok = await confirmDialog({
       title: 'Excluir Lançamento',
       message: 'Deseja realmente excluir este lançamento do caixa?',
@@ -469,8 +599,13 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
     setMovements(updated);
     localStorage.setItem('vollen_cash_movements', JSON.stringify(updated));
 
+    // Sincroniza com a Rede Local
+    import('../services/localNetworkService').then(({ emitLocalDataChange }) => {
+      emitLocalDataChange('cashMovements', updated);
+    }).catch(() => {});
+
     try {
-      await deleteDoc(doc(db, 'cash_movements', id));
+      if (db) await deleteDoc(doc(db, 'cash_movements', id));
     } catch (err) {
       console.warn('Erro ao deletar movimentação na nuvem:', err);
     }
@@ -746,7 +881,7 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredMovements.length === 0 ? (
+                {paginatedMovements.length === 0 ? (
                   <tr>
                     <td colSpan={columns.length} className="py-12 text-center text-slate-400">
                       <Receipt className="w-8 h-8 mx-auto mb-2 text-slate-300" />
@@ -754,7 +889,7 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  filteredMovements.map((mov) => (
+                  paginatedMovements.map((mov) => (
                     <tr key={mov.id} className="hover:bg-slate-50/80 transition-colors">
                       {/* Data / Hora */}
                       <td style={{ width: `${columns[0]?.width || 110}px` }} className="py-2 px-2.5 font-mono text-slate-600 text-[11px] truncate">
@@ -778,6 +913,8 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
                       <td style={{ width: `${columns[2]?.width || 110}px` }} className="py-2 px-2.5 font-bold text-slate-700 text-[11px] truncate">
                         {mov.category === 'OS' ? (
                           <span className="text-sky-700">Ordem de Serviço</span>
+                        ) : mov.category === 'VENDA' ? (
+                          <span className="text-emerald-700 font-extrabold">Venda Balcão</span>
                         ) : mov.category === 'ORCAMENTO' ? (
                           <span className="text-indigo-700">Orçamento</span>
                         ) : mov.category === 'SANGRIA' ? (
@@ -786,6 +923,8 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
                           <span className="text-rose-700">Despesa</span>
                         ) : mov.category === 'SUPRIMENTO' ? (
                           <span className="text-teal-700">Suprimento</span>
+                        ) : mov.category === 'GARANTIA' ? (
+                          <span className="text-orange-700 font-extrabold">Saída Garantia</span>
                         ) : (
                           <span className="text-slate-600">Geral</span>
                         )}
@@ -858,6 +997,41 @@ export const CashRegisterModal: React.FC<CashRegisterModalProps> = ({
             </table>
           </div>
         </div>
+
+        {/* BARRA DE PAGINAÇÃO (ESTILO A4) */}
+        {totalPages > 1 && (
+          <div className="px-4 py-2 bg-white border-t border-slate-200 flex items-center justify-between text-xs text-slate-700 select-none">
+            <span className="text-[11px] font-bold text-slate-500">
+              Exibindo {(currentPage - 1) * ITEMS_PER_PAGE + 1} a {Math.min(currentPage * ITEMS_PER_PAGE, filteredMovements.length)} de {filteredMovements.length} lançamentos (A4: {ITEMS_PER_PAGE}/pág.)
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 font-bold bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer shadow-2xs text-[11px]"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Página Anterior
+              </button>
+
+              <span className="px-3 py-1 font-mono font-bold text-[11px] bg-slate-100 border border-slate-200 rounded-lg text-indigo-900">
+                Página {currentPage} de {totalPages}
+              </span>
+
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 font-bold bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition-all cursor-pointer shadow-2xs text-[11px]"
+              >
+                Ver Próxima Página
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* RODAPÉ RESUMO DOS MÉTODOS DE PAGAMENTO */}
         <div className="p-3 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-xs font-medium">
@@ -1252,10 +1426,55 @@ export async function registerCashEntryFromOS(order: {
     const list: CashMovement[] = saved ? JSON.parse(saved) : [];
     const updated = [newMov, ...list];
     localStorage.setItem('vollen_cash_movements', JSON.stringify(updated));
+    window.dispatchEvent(new Event('vollen_cash_updated'));
 
     // Nuvem
-    await setDoc(doc(db, 'cash_movements', newMov.id), newMov);
+    if (db) {
+      try {
+        await setDoc(doc(db, 'cash_movements', newMov.id), newMov, { merge: true });
+      } catch (dbErr) {
+        console.warn('Erro ao sincronizar OS no Firestore:', dbErr);
+      }
+    }
   } catch (err) {
     console.warn('Erro ao registrar entrada automática de caixa:', err);
+  }
+}
+
+/**
+ * Cancela e remove qualquer movimentação no Caixa (entrada ou saída) vinculada a uma OS
+ * quando ela é reaberta por um Administrador.
+ */
+export async function cancelCashMovementsByOrderCode(orderCode: string) {
+  if (!orderCode) return;
+  try {
+    const cleanCode = String(orderCode).trim().toUpperCase();
+    const saved = localStorage.getItem('vollen_cash_movements');
+    const list: CashMovement[] = saved ? JSON.parse(saved) : [];
+
+    const toDelete = list.filter((m) => {
+      const mCode = String(m.orderCode || '').trim().toUpperCase();
+      const mDesc = String(m.description || '').toUpperCase();
+      return mCode === cleanCode || (cleanCode && mDesc.includes(cleanCode));
+    });
+
+    if (toDelete.length > 0) {
+      const updated = list.filter((m) => !toDelete.some((d) => d.id === m.id));
+      localStorage.setItem('vollen_cash_movements', JSON.stringify(updated));
+      window.dispatchEvent(new Event('vollen_cash_updated'));
+
+      // Remove do Firestore também
+      if (db) {
+        for (const item of toDelete) {
+          try {
+            await deleteDoc(doc(db, 'cash_movements', item.id));
+          } catch (e) {
+            console.warn('Erro ao deletar movimentação de OS reaberta no Firestore:', e);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao cancelar movimentações da OS no caixa:', err);
   }
 }

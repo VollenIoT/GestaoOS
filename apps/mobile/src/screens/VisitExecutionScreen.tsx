@@ -35,6 +35,7 @@ interface VisitExecutionScreenProps {
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
   ABERTA: { label: 'Aberta', color: '#0284c7', bg: '#e0f2fe' },
   ORCAMENTO_APROVADO: { label: 'Orçamento Aprovado', color: '#0d9488', bg: '#ccfbf1' },
+  ORCAMENTO_CONCLUIDO: { label: 'Orçamento Concluído', color: '#6366f1', bg: '#e0e7ff' },
   VISITA_TECNICA: { label: 'Visita Técnica', color: '#7c3aed', bg: '#f3e8ff' },
   EM_ATENDIMENTO: { label: 'Em Atendimento', color: '#d97706', bg: '#fef3c7' },
   EM_ANDAMENTO: { label: 'Em Andamento', color: '#d97706', bg: '#fef3c7' },

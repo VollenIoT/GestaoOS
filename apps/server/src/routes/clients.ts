@@ -14,7 +14,7 @@ export async function clientRoutes(fastify: FastifyInstance) {
   // Create or Update client
   fastify.post('/clients', async (request, reply) => {
     try {
-      const body = request.body as any;
+      const body = ClientSchema.parse(request.body);
 
       if (body.id) {
         const existing = await prisma.client.findUnique({ where: { id: body.id } });
@@ -45,7 +45,7 @@ export async function clientRoutes(fastify: FastifyInstance) {
       let clientCode = body.code;
       if (!clientCode) {
         const allClients = await prisma.client.findMany({ select: { code: true } });
-        const maxNum = allClients.reduce((max, c) => {
+        const maxNum = allClients.reduce((max: number, c: { code: string | null }) => {
           const num = parseInt(String(c.code || '').replace(/\D/g, ''), 10);
           return isNaN(num) ? max : Math.max(max, num);
         }, 0);
@@ -80,23 +80,23 @@ export async function clientRoutes(fastify: FastifyInstance) {
   fastify.put('/clients/:id', async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
-      const body = request.body as any;
+      const body = ClientSchema.partial().parse(request.body);
 
       const updated = await prisma.client.update({
         where: { id },
         data: {
-          name: body.name,
-          phone: body.phone,
-          whatsapp: body.whatsapp ?? null,
-          email: body.email,
-          cep: body.cep,
-          address: body.address,
-          number: body.number,
-          complement: body.complement ?? null,
-          neighborhood: body.neighborhood,
-          city: body.city,
-          state: body.state,
-          reference: body.reference ?? null,
+          ...(body.name !== undefined ? { name: body.name || 'CLIENTE SEM NOME' } : {}),
+          ...(body.phone !== undefined ? { phone: body.phone || '' } : {}),
+          ...(body.whatsapp !== undefined ? { whatsapp: body.whatsapp ?? null } : {}),
+          ...(body.email !== undefined ? { email: body.email ?? null } : {}),
+          ...(body.cep !== undefined ? { cep: body.cep || '' } : {}),
+          ...(body.address !== undefined ? { address: body.address || '' } : {}),
+          ...(body.number !== undefined ? { number: body.number || '' } : {}),
+          ...(body.complement !== undefined ? { complement: body.complement ?? null } : {}),
+          ...(body.neighborhood !== undefined ? { neighborhood: body.neighborhood || '' } : {}),
+          ...(body.city !== undefined ? { city: body.city || '' } : {}),
+          ...(body.state !== undefined ? { state: body.state || '' } : {}),
+          ...(body.reference !== undefined ? { reference: body.reference ?? null } : {}),
         },
       });
       return reply.send(updated);

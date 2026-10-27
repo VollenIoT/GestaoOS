@@ -1,4 +1,11 @@
 import { verifyPasswordWithMigration, hashPassword } from '../utils/hashUtils';
+import { emitLocalDataChange, getLocalNetworkConfig, assertTerminalCanSave } from './localNetworkService';
+import { logAuditEvent } from './auditLogService';
+
+function shouldWriteToCloud(): boolean {
+  const cfg = getLocalNetworkConfig();
+  return cfg.syncStrategy !== 'local';
+}
 
 
 const API_URL = 'http://localhost:3333/api';
@@ -146,8 +153,8 @@ export async function fetchClients() {
       setLocalItem('vollen_clients', serverData);
       return serverData;
     } else {
-      setLocalItem('vollen_clients', []);
-      return [];
+      // Se a nuvem não retornou documentos, preserva o cache local existente
+      return localClients;
     }
   } catch (e) {
     console.warn('Erro ao buscar clientes no Firestore:', e);
@@ -171,6 +178,9 @@ export function subscribeClients(callback: (clients: any[]) => void) {
 }
 
 export async function createClient(data: any) {
+  // Impede gravação no Terminal se o Servidor Principal estiver offline
+  await assertTerminalCanSave('cadastrar ou editar cliente');
+
   const current = getLocalItem<any[]>('vollen_clients', []);
   const clientId = data.id || String(Date.now());
   const sanitizedData = applySystemCaps(data);
@@ -179,8 +189,9 @@ export async function createClient(data: any) {
   // Atualiza cache local instantâneo
   const updated = [newClient, ...current.filter((c) => c.id !== clientId)];
   setLocalItem('vollen_clients', updated);
+  await emitLocalDataChange('clients', updated);
 
-  if (db) {
+  if (db && shouldWriteToCloud()) {
     try {
       await setDoc(doc(db, 'clients', clientId), newClient, { merge: true });
       console.log(`[Firestore] Cliente ${clientId} salvo com sucesso na nuvem.`);
@@ -192,12 +203,18 @@ export async function createClient(data: any) {
   return newClient;
 }
 
-export async function deleteClient(clientId: string) {
+export async function deleteClient(clientId: string, deletedBy: string = 'admin') {
+  // Impede exclusão no Terminal se o Servidor Principal estiver offline
+  await assertTerminalCanSave('excluir cliente');
+
   const current = getLocalItem<any[]>('vollen_clients', []);
+  const targetClient = current.find((c) => c.id === clientId);
+
   const updated = current.filter((c) => c.id !== clientId);
   setLocalItem('vollen_clients', updated);
+  await emitLocalDataChange('clients', updated);
 
-  if (db) {
+  if (db && shouldWriteToCloud()) {
     try {
       await deleteDoc(doc(db, 'clients', clientId));
     } catch (e) {
@@ -222,32 +239,17 @@ export async function fetchOrders(includeDeleted: boolean = false) {
     if (!snap.empty) {
       const serverData = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      // Garante que campos de array e itens estejam presentes
-      const normalizedServerData = serverData.map((serverOrder: any) => {
-        const localOrder = localOrders.find((o: any) => o.id === serverOrder.id);
-        const mergedOrder = { ...serverOrder };
-        const arrayFields = ['partsUsed', 'parts', 'partsList', 'servicesExecuted', 'services', 'servicesList'];
-        if (localOrder) {
-          for (const field of arrayFields) {
-            const serverArr = serverOrder[field];
-            const localArr = localOrder[field];
-            if ((!Array.isArray(serverArr) || serverArr.length === 0) && Array.isArray(localArr) && localArr.length > 0) {
-              mergedOrder[field] = localArr;
-            }
-          }
-        }
-        return mergedOrder;
-      });
-
-      setLocalItem('vollen_orders', normalizedServerData);
+      setLocalItem('vollen_orders', serverData);
       if (!includeDeleted) {
-        return normalizedServerData.filter((o: any) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
+        return serverData.filter((o: any) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
       }
-      return normalizedServerData;
+      return serverData;
     } else {
-      // Se a nuvem está vazia (ex: após restaurar padrões de fábrica), limpa o cache local
-      setLocalItem('vollen_orders', []);
-      return [];
+      // Se a nuvem não retornou documentos, preserva o cache local existente
+      if (!includeDeleted) {
+        return localOrders.filter((o) => (o.status || '').toUpperCase() !== 'EXCLUIDA');
+      }
+      return localOrders;
     }
   } catch (e) {
     console.warn('Erro ao buscar ordens no Firestore:', e);
@@ -333,6 +335,9 @@ export async function reserveNextOrderNumber(): Promise<string> {
 }
 
 export async function createOrder(data: any) {
+  // Impede criação de OS no Terminal se o Servidor Principal estiver offline
+  await assertTerminalCanSave('abrir ou criar Ordem de Serviço');
+
   const current = getLocalItem<any[]>('vollen_orders', []);
   const orderId = data.id || String(Date.now());
   const sanitizedData = applySystemCaps(data);
@@ -351,8 +356,9 @@ export async function createOrder(data: any) {
 
   const updated = [newOrder, ...current.filter((o) => o.id !== orderId)];
   setLocalItem('vollen_orders', updated);
+  await emitLocalDataChange('orders', updated);
 
-  if (db) {
+  if (db && shouldWriteToCloud()) {
     try {
       await setDoc(doc(db, 'orders', orderId), newOrder, { merge: true });
       console.log(`[Firestore] Ordem de Serviço ${newOrder.code || orderId} salva com sucesso na nuvem.`);
@@ -378,6 +384,9 @@ export async function createOrder(data: any) {
 }
 
 export async function updateOrder(orderId: string, data: any) {
+  // Impede alteração de OS no Terminal se o Servidor Principal estiver offline
+  await assertTerminalCanSave('alterar ou finalizar Ordem de Serviço');
+
   const current = getLocalItem<any[]>('vollen_orders', []);
   const index = current.findIndex((o) => o.id === orderId);
   const sanitizedData = applySystemCaps(data);
@@ -415,8 +424,9 @@ export async function updateOrder(orderId: string, data: any) {
     current.unshift(updatedOrder);
   }
   setLocalItem('vollen_orders', current);
+  await emitLocalDataChange('orders', current);
 
-  if (db) {
+  if (db && shouldWriteToCloud()) {
     try {
       await setDoc(doc(db, 'orders', orderId), updatedOrder, { merge: true });
       console.log(`[Firestore] Ordem de Serviço ${updatedOrder.code || orderId} atualizada com sucesso na nuvem.`);
@@ -424,13 +434,33 @@ export async function updateOrder(orderId: string, data: any) {
       console.error('❌ Erro ao atualizar ordem no Firestore:', e);
     }
   }
+
+  // Se a OS foi marcada como FINALIZADA ou CANCELADA, remove automaticamente agendamentos pendentes da agenda
+  const upperStatus = (updatedOrder.status || '').toUpperCase();
+  if (upperStatus === 'FINALIZADA' || upperStatus === 'CANCELADA' || upperStatus === 'CONCLUIDA') {
+    const currentVisits = getLocalItem<any[]>('vollen_visits', []);
+    const visitsToDelete = currentVisits.filter((v) => v.orderId === orderId || v.order?.id === orderId);
+    if (visitsToDelete.length > 0) {
+      const remainingVisits = currentVisits.filter((v) => v.orderId !== orderId && v.order?.id !== orderId);
+      setLocalItem('vollen_visits', remainingVisits);
+      try {
+        for (const v of visitsToDelete) {
+          if (v.id && shouldWriteToCloud()) await deleteDoc(doc(db, 'visits', v.id));
+        }
+      } catch (err) {
+        console.warn('Erro ao remover agendamento de OS finalizada no Firestore:', err);
+      }
+    }
+  }
+
   return updatedOrder;
 }
 
-export async function deleteOrder(orderId: string) {
+export async function deleteOrder(orderId: string, deletedBy: string = 'admin') {
   const current = getLocalItem<any[]>('vollen_orders', []);
   const updated = current.filter((o) => o.id !== orderId);
   setLocalItem('vollen_orders', updated);
+  emitLocalDataChange('orders', updated);
 
   // Remove visitas locais vinculadas à OS
   const currentVisits = getLocalItem<any[]>('vollen_visits', []);
@@ -438,10 +468,12 @@ export async function deleteOrder(orderId: string) {
   const updatedVisits = currentVisits.filter((v) => v.orderId !== orderId && v.order?.id !== orderId);
   setLocalItem('vollen_visits', updatedVisits);
 
-  try {
-    await deleteDoc(doc(db, 'orders', orderId));
-  } catch (e) {
-    console.warn('Erro ao deletar ordem no Firestore:', e);
+  if (shouldWriteToCloud()) {
+    try {
+      await deleteDoc(doc(db, 'orders', orderId));
+    } catch (e) {
+      console.warn('Erro ao deletar ordem no Firestore:', e);
+    }
   }
 
   // Deleta visitas no Firestore
@@ -561,11 +593,18 @@ export async function fetchDashboardStats() {
   const openOrders = orders.filter((o) => (o.status || 'ABERTA').toUpperCase() !== 'FINALIZADA' && (o.status || '').toUpperCase() !== 'CONCLUIDA' && (o.status || '').toUpperCase() !== 'CANCELADA');
   const finishedOrders = orders.filter((o) => (o.status || '').toUpperCase() === 'FINALIZADA' || (o.status || '').toUpperCase() === 'CONCLUIDA');
 
+  const activeVisits = visits.filter((v) => {
+    const order = v.order || orders.find((o) => o.id === v.orderId || o.code === v.orderId || o.code === v.orderCode);
+    if (!order) return true;
+    const status = (order.status || '').toUpperCase();
+    return status !== 'FINALIZADA' && status !== 'CANCELADA' && status !== 'CONCLUIDA';
+  });
+
   return {
     openOrdersCount: openOrders.length,
     finishedOrdersCount: finishedOrders.length,
     totalClientsCount: clients.length,
-    scheduledVisitsCount: visits.length,
+    scheduledVisitsCount: activeVisits.length,
   };
 }
 
