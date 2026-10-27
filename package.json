@@ -10,6 +10,7 @@
     "dev:desktop": "npm --prefix apps/desktop run dev",
     "build:desktop": "npm --prefix apps/desktop run build:exe",
     "build": "turbo run build",
+    "test": "turbo run test",
     "dev": "turbo run dev",
     "android": "npm --prefix apps/mobile run android",
     "ios": "npm --prefix apps/mobile run ios"
@@ -19,7 +20,7 @@
     "turbo": "^1.13.0",
     "typescript": "^5.4.0"
   },
-  "version": "1.0.0",
+  "version": "4.0.0",
   "dependencies": {
     "@firebase/app": "^0.16.1",
     "@firebase/component": "^0.7.5",

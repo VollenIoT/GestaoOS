@@ -1,6 +1,6 @@
 [package]
 name = "vollen-os-desktop"
-version = "4.0.1"
+version = "4.0.0"
 description = "Vollen - Gestao de Ordens de Servico"
 authors = ["Sistema OS"]
 license = ""
